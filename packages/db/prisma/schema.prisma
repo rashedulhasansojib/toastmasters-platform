@@ -1,10 +1,8 @@
-// Phase 0: this is the database SEAM, not the domain schema.
-//
-// There are intentionally ZERO models here. The domain schema is cut in M1 and
-// is gated on the nine open decisions in CLAUDE.md — do not add domain tables
-// before those are settled. The generator, datasource, driver-adapter wiring
-// and the ltree-enabling migration all exist so the toolchain is proven end to
-// end and M1 can start by adding models, nothing else.
+// Phase 0 proved the database SEAM with zero models. M1 (walking skeleton)
+// begins cutting the domain schema here, starting with OrgUnit (Slice 1) — the
+// scope backbone every grant and access check is placed on. Additional domain
+// tables remain gated on the nine open decisions in CLAUDE.md until each is
+// settled.
 
 generator client {
   provider     = "prisma-client"
@@ -18,4 +16,40 @@ generator client {
 // prisma.config.ts. This block only declares the provider.
 datasource db {
   provider = "postgresql"
+}
+
+enum OrgUnitType {
+  international
+  region
+  district
+  division
+  area
+  club
+}
+
+enum OrgUnitStatus {
+  active
+  low
+  ineligible
+  suspended
+  dissolved
+}
+
+model OrgUnit {
+  id        String        @id @default(uuid()) @db.Uuid
+  type      OrgUnitType
+  parentId  String?       @map("parent_id") @db.Uuid
+  parent    OrgUnit?      @relation("OrgUnitChildren", fields: [parentId], references: [id])
+  children  OrgUnit[]     @relation("OrgUnitChildren")
+  // ltree; Prisma has no native ltree type, so it is Unsupported and handled via raw SQL.
+  path      Unsupported("ltree")
+  depth     Int
+  name      String
+  code      String
+  status    OrgUnitStatus @default(active)
+  timezone  String
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+
+  @@map("org_unit")
 }

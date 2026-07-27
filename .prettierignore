@@ -1,0 +1,15 @@
+node_modules
+dist
+.next
+coverage
+.turbo
+pnpm-lock.yaml
+packages/db/src/generated
+
+# Authoritative design docs — copied verbatim from the project, preserved as-is.
+CLAUDE.md
+prd.md
+system-design.md
+rbac-design.md
+roadmap.md
+docs/STARTER-PACK.md

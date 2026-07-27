@@ -1,0 +1,10 @@
+# Extends gitleaks' bundled ruleset. Run locally via the pre-commit hook
+# (gitleaks protect --staged) and in CI (separate job).
+title = "toastmasters-platform"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allow committed example env only"
+paths = ['''\.env\.example$''']

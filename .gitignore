@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+.next/
+out/
+*.tsbuildinfo
+
+# Turbo
+.turbo/
+
+# Prisma generated client (regenerate with `pnpm db:generate`)
+packages/db/src/generated/
+
+# Test / coverage
+coverage/
+playwright-report/
+test-results/
+
+# Env & secrets — only .env.example is committed
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json

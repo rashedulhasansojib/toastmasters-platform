@@ -1,0 +1,48 @@
+packages:
+  - apps/*
+  - packages/*
+
+# pnpm 11 build-script gate (formerly onlyBuiltDependencies). Every native dep
+# here ships prebuilt binaries — nothing is compiled from source. We ALLOW the
+# tools we rely on and explicitly DENY Prisma's engine download: client
+# generation is a separate, explicit step (`pnpm db:generate`), which keeps
+# `pnpm install` offline-friendly and fast.
+allowBuilds:
+  '@swc/core': true
+  argon2: true
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
+  '@prisma/engines': false
+  prisma: false
+  cpu-features: false
+  ssh2: false
+  msgpackr-extract: false
+  protobufjs: false
+
+# Peers we intentionally do not install (Nest's optional validation stack, Next
+# optional integrations, Vitest browser mode). Silences false "missing peer" noise.
+peerDependencyRules:
+  ignoreMissing:
+    - class-validator
+    - class-transformer
+    - '@swc/cli'
+    - '@vitest/browser'
+    - sass
+    - '@opentelemetry/api'
+    - babel-plugin-react-compiler
+
+# Recorded by pnpm's release-age gate for the freshly published Prisma 7 line;
+# keeps installs deterministic.
+minimumReleaseAgeExclude:
+  - '@prisma/adapter-pg@7.9.1'
+  - '@prisma/client-runtime-utils@7.9.1'
+  - '@prisma/client@7.9.1'
+  - '@prisma/config@7.9.1'
+  - '@prisma/debug@7.9.1'
+  - '@prisma/dev@0.24.17'
+  - '@prisma/driver-adapter-utils@7.9.1'
+  - '@prisma/engines@7.9.1'
+  - '@prisma/fetch-engine@7.9.1'
+  - '@prisma/get-platform@7.9.1'
+  - prisma@7.9.1

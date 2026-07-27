@@ -1,0 +1,2 @@
+node scripts/check-no-ai-attribution.mjs --msg "$1"
+pnpm exec commitlint --edit "$1"

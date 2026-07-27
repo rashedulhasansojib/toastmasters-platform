@@ -1,0 +1,31 @@
+{
+  "name": "@toastmasters/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "nest build",
+    "dev": "nest start --watch",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@nestjs/bullmq": "11.0.4",
+    "@nestjs/common": "11.1.28",
+    "@nestjs/core": "11.1.28",
+    "@toastmasters/config": "workspace:*",
+    "@toastmasters/logger": "workspace:*",
+    "bullmq": "5.81.2",
+    "nestjs-pino": "4.6.1",
+    "pino": "10.3.1",
+    "pino-http": "11.0.0",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1"
+  }
+}

@@ -1,0 +1,21 @@
+// Phase 0: this is the database SEAM, not the domain schema.
+//
+// There are intentionally ZERO models here. The domain schema is cut in M1 and
+// is gated on the nine open decisions in CLAUDE.md — do not add domain tables
+// before those are settled. The generator, datasource, driver-adapter wiring
+// and the ltree-enabling migration all exist so the toolchain is proven end to
+// end and M1 can start by adding models, nothing else.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+// Prisma 7 no longer accepts connection URLs in the schema. The app runtime
+// connects through the pg driver adapter with the pooled DATABASE_URL (see
+// src/client.ts); migrations use the direct/unpooled DIRECT_URL, configured in
+// prisma.config.ts. This block only declares the provider.
+datasource db {
+  provider = "postgresql"
+}

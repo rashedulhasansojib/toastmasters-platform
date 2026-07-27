@@ -51,9 +51,13 @@ describe('OrgUnitRepository (integration)', () => {
   });
 
   it('rejects a second region root at the database', async () => {
+    // Pin the actual invariant (the unique partial index / Postgres
+    // unique-violation code), not just "some error was thrown" — that
+    // weaker assertion would still pass if creation broke for an
+    // unrelated reason.
     await expect(
       repo.createRoot({ type: 'region', code: 'r2', name: 'Region 2', timezone: 'UTC' }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/org_unit_single_region_root|23505/);
   });
 
   // Regression test: reparent's UPDATE originally computed the new path via
@@ -97,5 +101,50 @@ describe('OrgUnitRepository (integration)', () => {
     // Old paths no longer resolve.
     expect(await repo.findByPath('r1.d41')).toBeNull();
     expect(await repo.findByPath('r1.d41.c1234')).toBeNull();
+  });
+
+  // Regression test: reparent(nodeId, newParentId) originally had no cycle
+  // guard. Reparenting a node under itself or under its own descendant sets
+  // parent_id to a value that is itself (transitively) parented by the node
+  // being moved — a parent_id cycle — and the path-rewrite UPDATE then nests
+  // the node's own path inside its new (already-descended-from-it) path,
+  // silently corrupting the tree instead of erroring.
+  it('reparent rejects moving a node under its own descendant', async () => {
+    const region = await repo.findByPath('r1');
+    const d70 = await repo.createChild({
+      parentId: region!.id,
+      type: 'district',
+      code: 'd70',
+      name: 'District 70',
+      timezone: 'UTC',
+    });
+    const c700 = await repo.createChild({
+      parentId: d70.id,
+      type: 'club',
+      code: 'c700',
+      name: 'Club 700',
+      timezone: 'UTC',
+    });
+
+    // Moving d70 under its own child c700 would create a parent_id cycle
+    // (d70 -> c700 -> d70) and a doubly-nested, corrupted path.
+    await expect(repo.reparent(d70.id, c700.id)).rejects.toThrow(
+      /Cannot reparent a node under itself or its own descendant/,
+    );
+
+    // Tree is unchanged: d70 and c700 keep their original path/parent_id.
+    const d70After = await repo.findByPath('r1.d70');
+    const c700After = await repo.findByPath('r1.d70.c700');
+    expect(d70After).not.toBeNull();
+    expect(d70After!.id).toBe(d70.id);
+    expect(d70After!.parentId).toBe(region!.id);
+    expect(c700After).not.toBeNull();
+    expect(c700After!.id).toBe(c700.id);
+    expect(c700After!.parentId).toBe(d70.id);
+
+    // Also reject moving a node under itself.
+    await expect(repo.reparent(d70.id, d70.id)).rejects.toThrow(
+      /Cannot reparent a node under itself or its own descendant/,
+    );
   });
 });

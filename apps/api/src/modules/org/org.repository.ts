@@ -102,6 +102,20 @@ export class OrgUnitRepository {
       )[0];
       if (!node || !parent) throw new Error('Node or new parent not found');
 
+      // Reject moving a node under itself or under one of its own
+      // descendants. `path <@ node.path` matches the node's own row too (a
+      // path is a descendant-or-self of itself), so this single check covers
+      // both cases: newParentId === nodeId, and newParentId anywhere in
+      // nodeId's subtree. Without this guard the UPDATE below still "runs"
+      // but produces a parent_id cycle and a doubly-nested, corrupted path.
+      const illegal = await tx.$queryRaw<Array<{ found: number }>>`
+        SELECT 1 AS found FROM org_unit
+        WHERE id = ${newParentId}::uuid AND path <@ ${node.path}::ltree
+      `;
+      if (illegal.length > 0) {
+        throw new Error('Cannot reparent a node under itself or its own descendant');
+      }
+
       const code = node.path.split('.').pop()!;
       const newPath = `${parent.path}.${code}`;
 

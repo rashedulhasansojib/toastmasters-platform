@@ -1,253 +1,262 @@
-# Design — Platform tier, super admin, and multi-district capability
+# Design — Super admin, region tier, and multi-district (canonical-aligned)
 
 **Date:** 2026-07-28
-**Status:** Approved (design); implementation not started
+**Status:** Approved (design); implementation planned as the M1 walking skeleton
 **Branch:** `feat/multi-district-super-admin`
 **Owner (decisions):** Rashedul Hasan
+
+> **Correction note (2026-07-28).** An earlier draft of this spec invented a
+> "platform root org node" and a `platform_super_admin` role template. That was
+> wrong. The canonical docs (`rbac-design.md`, `system-design.md` §7,
+> `prd.md` FR-AUTHZ) already specify the super admin as the **`system_admin`
+> platform role** on an orthogonal global axis — not a node in the org tree.
+> This version aligns to the canonical model and records the one intended
+> divergence (stricter break-glass, §6).
 
 ---
 
 ## 1. Summary
 
-Add a **platform tier** above the district to the existing org tree, introduce a
-**super admin** (a platform _operator_, not a Toastmasters office), and make the
-deployment **multi-district-capable** via **row-level tenancy** on the single
-org tree — without changing the core authorisation model.
+Three things, all of which the canonical design already anticipates:
 
-The whole design rests on one principle already central to the system: **one
-`ltree` org tree, one `authorize()` gate, scope inherits downward.** The super
-admin is expressed entirely _within_ that model as a grant at a new platform
-root — never as an `isAdmin` bypass.
+1. **Super admin** = the **`system_admin` platform role** (`rbac-design.md` §3
+   table 6; `system-design.md` §7.7; `prd.md` actor "System Administrator").
+   Global scope, full platform authority, MFA required, break-glass access to
+   member data — **already specified**. We implement it; we do not invent it.
+2. **Region tier** = materialise the optional `region` tier that already exists
+   in `OrgUnitType` (`system-design.md` §5.1; `FR-ORG-2`).
+3. **Multi-district** = **row-level tenancy**, which `system-design.md` §4.6
+   delivers by adding more district roots to the one org tree (open decision 10
+   → row-level).
 
-This design does not add any new database, control plane, or cross-database
-plumbing. It is deliberately the minimal shape that satisfies the three
-decisions below while keeping every existing RBAC invariant intact.
+The load-bearing principle is unchanged: **one `ltree` org tree, one
+`authorize()` gate, deny wins, default deny, scope is a prefix match.** Nothing
+here changes that.
 
 ---
 
 ## 2. Decisions recorded (Phase 0)
 
-Per `roadmap.md` §7, decisions are recorded with owner + date + choice so the
-"why" survives handover.
+Per `roadmap.md` §7 (owner + date + choice).
 
-| #   | Decision                                              | Choice                                                                                                                                                                              | Date       | Owner          |
-| --- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | -------------- |
-| 6   | Region tier above District?                           | **Yes** — include a `region` tier. It is an **in-tree node** under the platform root that groups districts (not a separate control-plane entity).                                   | 2026-07-28 | Rashedul Hasan |
-| 10  | Single district or many; row-level vs DB-per-district | **Multi-district-capable via row-level tenancy** on one shared database and one org tree. DB-per-district was considered and rejected in favour of the org tree's built-in scoping. | 2026-07-28 | Rashedul Hasan |
-| —   | Super admin                                           | **New.** A super admin (system administrator / platform operator) exists at the top with all-access, modelled as a role granted at the platform root.                               | 2026-07-28 | Rashedul Hasan |
+| #   | Decision                                              | Choice                                                                                                                                                                                                                                 | Date       | Owner          |
+| --- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | -------------- |
+| 6   | Region tier above District?                           | **Yes** — materialise the `region` tier (already in `OrgUnitType`). Tree roots at `region` (or `international`); districts hang beneath.                                                                                               | 2026-07-28 | Rashedul Hasan |
+| 10  | Single district or many; row-level vs DB-per-district | **Row-level tenancy** on one shared database and one org tree. Multi-district = multiple district roots under the region root. DB-per-district considered and rejected.                                                                | 2026-07-28 | Rashedul Hasan |
+| —   | Super admin                                           | Implement the existing **`system_admin`** platform role.                                                                                                                                                                               | 2026-07-28 | Rashedul Hasan |
+| —   | Break-glass model                                     | **Stricter than §7.7:** `system_admin` has **no standing grant** on restricted resources; it must mint a time-boxed, reason-required break-glass `person_grant` (MFA-gated) before any restricted read, which is then audited. See §6. | 2026-07-28 | Rashedul Hasan |
 
-**Reversal cost note.** Both #6 and #10 are cheap now and expensive later. The
-`region`/`platform` tiers are fixed at schema-cut time because `ltree` makes
-inserting a root level later a full-tree path rewrite. Row-level vs
-DB-per-district is structurally free via the org tree now, operationally
-expensive to retrofit (`system-design.md` §4.6, §25).
-
----
-
-## 3. Context and constraints
-
-- The platform is **volunteer-run and privacy-sensitive** (`prd.md` §1). The
-  binding invariants (CLAUDE.md §1 / `roadmap.md` §2) that this design must not
-  break:
-  - **Never scatter an authorisation check.** Every decision flows through the
-    one `authorize()` gate; deny beats allow; no `isAdmin` booleans
-    (`FR-AUTHZ-5/6/8`).
-  - **Restricted resources are never wildcarded.** `finance.ledger`,
-    `education.evaluation`, `membership.health_signal`, and `platform.audit` are
-    always logged on read and excluded from wildcard grants.
-  - **Oversight sees aggregates, not individuals** (`FR-OVS-3`, principle 9).
-  - **Grants are never hand-edited**; every change goes through the audited
-    surface (`FR-AUTHZ-11`).
-- The super admin is a **platform operator**, not an org-hierarchy office. It
-  runs the software; it does **not** routinely read member data. This is the
-  distinction that keeps principles 9/10 intact.
-- Scope for now is **architecture-ready, build minimal**: lock the
-  expensive-to-reverse structure, build only enough to stand up one district and
-  one super admin so M1 (the walking skeleton) can proceed.
+**Reversal-cost note.** The `region` root is fixed at schema-cut time (`ltree`
+makes inserting a root level later a full-tree path rewrite). Row-level vs
+DB-per-district is structurally free via the org tree now, expensive to retrofit
+(`system-design.md` §4.6, §25).
 
 ---
 
-## 4. Architecture — org tree with a platform root
+## 3. The authorisation model (canonical, unchanged)
 
-One database, one `ltree` tree, unchanged mechanics. Two new tiers sit above the
-tiers M1 already builds:
+From `rbac-design.md` and `system-design.md` §7. This spec adds nothing to the
+model; it lists it so the plan implements the whole thing.
+
+- **Grant** = `(role, scopeNode, resource, action, condition, effect)`.
+- **Resources** are seeded reference data in `resource_catalog` — not a code
+  union (`FR-AUTHZ-1`). `sensitivity ∈ normal | sensitive | restricted`. The
+  four **restricted** resources — `finance.ledger`, `education.evaluation`,
+  `membership.health_signal`, `platform.audit` — are never wildcarded, always
+  logged on read, excluded from `support_readonly` (`FR-AUTHZ-12`).
+- **Six actions** (`read create update delete approve export`), **five
+  conditions** (`any own assigned party published`) — both fixed.
+- **`effectiveGrants(person)`** = platform-role grants ∪ role-template grants
+  (active assignments) ∪ unit-policy overrides ∪ direct person grants
+  (`rbac-design.md` §4.2).
+- **`authorize()`**: filter by scope prefix, then resource+action, then
+  condition; **deny wins**, else allow, else **default deny** (§4.1).
+- **Scope** is a prefix test on the materialised `ltree` path (§5.1). List
+  endpoints **filter in the query** (`path <@ scope::ltree`), never post-filter
+  (`FR-AUTHZ-8`, §4.3).
+- **`scopeRule`**: `self_unit` (exact node only — the `exactOnly` flag) vs
+  `self_subtree` (node + descendants).
+- **`permission_version`**: permissions are never embedded in the JWT; the
+  session carries a version counter `v`; a grant change bumps
+  `person.permission_version`; a mismatch rebuilds the resolved set and reissues
+  the token — revocation without re-login (`rbac-design.md` §5;
+  `system-design.md` §6.5).
+- **`canDelegate`**: an actor may only grant what it already holds at the target
+  scope, and may never remove the last `unit_admin` — guards every grant path,
+  including invitations (`rbac-design.md` §7.4/§8; `FR-AUTHZ-9`).
+- **Access inspector**: every decision carries a human-readable `reason`; the
+  system answers "what can X do here / why can X see this / who can see this
+  resource" — and it ships **with** the engine (`FR-AUTHZ-7`; `rbac-design.md`
+  §7.3).
+
+---
+
+## 4. Org tree with the region tier
+
+One database, one `ltree` tree (`system-design.md` §5.1), rooted at `region`:
 
 ```
-platform                     ← new synthetic root (exactly one)
-└── region        (r1)       ← groups districts
-    └── district  (d41)      ← today's District root
-        └── division (divA)
-            └── area (a1)
-                └── club (c7)
+region        (r1)           ← root for this deployment
+└── district  (d41)
+    └── division (divA)
+        └── area (a1)
+            └── club (c1234)
 ```
 
-- **Multi-district** = additional sibling `region`/`district` subtrees under
-  `platform`. No structural change is needed to add the Nth district.
-- **Tenancy** is row-level and enforced by the existing scope model: `ltree`
-  prefix match (`WHERE path <@ 'platform.r1.d41'`) plus **query-level filtering**
-  by scope and condition. A district's members can never see a sibling
-  district's rows because the scope prefix does not match — the same mechanism
-  that already isolates sibling clubs (`FR-AUTHZ-8`).
-- `authorize()`, `ResourceGuard`, `@ResourceScope`, and the grant shape
-  `(role, scopeNode, resource, action, condition, effect)` are **unchanged**.
-  The platform and region tiers are just more nodes in the same tree.
-
-**Invariant preserved:** exactly one `platform` node exists. Enforced by a
-partial unique index (`UNIQUE (kind) WHERE kind = 'platform'`), consistent with
-the project's "enforce singletons at the DB, not in application code" rule.
+- `OrgUnit.type ∈ international | region | district | division | area | club`
+  (already defined). We root at `region`; `international` remains available above
+  it without a schema change if ever needed.
+- **Multi-district (row-level)** = additional `district` subtrees under the
+  `region` root (`system-design.md` §4.6). A `region_advisor` domain role
+  (already in the taxonomy, gated on decision 6) may be seeded later; not
+  required for M1.
+- Tenancy isolation is the existing scope model: prefix match + query-level
+  filtering + default deny. Sibling districts cannot see each other's rows.
+- Path maintenance is **transactional** on create/re-parent, emitting
+  `OrgUnitReparented` and invalidating permission caches under both paths (§5.1).
 
 ---
 
-## 5. Super admin — a role, not a bypass
+## 5. Super admin = `system_admin` platform role
 
-- A seeded role template **`platform_super_admin`**, granted at the **`platform`
-  root scope**. Because scope inherits downward, this reaches every region,
-  district, and below. "Top with all access" is therefore expressed entirely
-  through the one gate.
-- **No `isAdmin` boolean, no `if (role === …)`** anywhere. The super admin is
-  evaluated by `authorize()` exactly like every other grant. Removing the grant
-  removes the access; an ended grant grants nothing (`effectiveGrants` reads
-  `status = 'active'` only).
-- The super admin is a distinct **system-administrator identity type**. It is a
-  subject for grants like a Person, but flagged as platform-operational so the
-  UI and audit can distinguish operator actions from member actions.
-- **MFA is required** for the super admin (`roadmap.md` §6 — "MFA required for
-  system administrators"). Login without a satisfied MFA factor yields no usable
-  session.
-
----
-
-## 6. The invariant guard — restricted data and break-glass
-
-"All access" must not become a wildcard over restricted resources, or it breaks
-_"restricted resources are never wildcarded"_ and principles 9/10. Resolution:
-
-1. **Standing access excludes restricted resources.** The `platform_super_admin`
-   template grants broad access to non-restricted resources (org, identity,
-   access administration, config, operations, etc.) at the platform root, but
-   **does not** include `finance.ledger`, `education.evaluation`,
-   `membership.health_signal`, or `platform.audit`. These are never wildcarded.
-
-2. **Restricted resources are reachable only via break-glass.** A break-glass
-   action mints a **time-boxed, reason-required, MFA-gated** grant for a specific
-   restricted resource (and, where applicable, a specific scope). It is a normal
-   grant with an expiry — so it still flows through `authorize()` and still obeys
-   deny-beats-allow.
-
-3. **Every restricted read is logged.** Break-glass grants and every read under
-   them emit an immutable audit event to `platform.audit` (actor, target,
-   resource, reason, timestamp). This is the "operator does not routinely read
-   member data" guarantee made observable.
-
-4. **Default policy (approved):** the four restricted resources are
-   **audited-break-glass**, i.e. the operator _can_ reach them under an explicit,
-   logged, expiring grant. (A stricter "no operator access even via break-glass"
-   mode was offered and not chosen; it can be applied per-resource later without
-   reworking the model — such a resource simply has no break-glass grant path.)
+- Stored as a **`platform_role_assignment`** row (`rbac-design.md` §3 table 6):
+  `role = 'system_admin'`, `org_unit_id = NULL` (global). It is an **orthogonal
+  axis**, resolved in `effectiveGrants` step (a) with an empty scope path (`""`)
+  that prefixes every node (`rbac-design.md` §4.2).
+- Authority (`system-design.md` §7.7): write the org tree, role templates, unit
+  policy; appoint any role (bounded by `canDelegate`); run program-year rollover;
+  impersonate (time-boxed, reason-required, banded, logged every request).
+- **No `isAdmin` boolean, no role-name checks** in app/UI code — it is evaluated
+  by `authorize()` like any grant (`rbac-design.md` §11).
+- **MFA required** for `system_admin` (`prd.md` NFR-7). No usable session without
+  a satisfied factor.
+- It does **not** get write access to member/financial records (ledger,
+  evaluations); those remain append-only and role-driven.
 
 ---
 
-## 7. Scope — build now vs deferred
+## 6. Restricted data — stricter break-glass (intended divergence)
 
-**Build now (architecture-ready, minimal):**
+`system-design.md` §7.7 gives `system_admin` an **audited read-bypass** on
+restricted data (standing read, logged every time). This deployment chooses a
+**stricter** model, recorded here as a deliberate divergence:
 
-- Schema/migration adding the `platform` and `region` tiers to the org tree,
-  with the single-platform-root partial unique index.
-- Seed: one platform root, one region, one district, one super-admin identity and
-  its `platform_super_admin` grant at the platform root. Reference vocabularies
-  (resources/actions/conditions/role templates) seeded as data, editable without
-  a deploy (`FR-AUTHZ-1`).
-- `authorize()` / `ResourceGuard` extended only to recognise the platform-root
-  scope and the break-glass grant path (expiry + reason + MFA gate).
-- Break-glass grant flow + audit emission for the four restricted resources.
-- Authorisation-matrix rows for the super admin, including the negative cases.
+1. **No standing access.** The `system_admin` resolution grants everything
+   **except** the four restricted resources. A restricted read with no
+   break-glass grant is **denied**.
+2. **Break-glass = an explicit, minted grant.** To read a restricted resource the
+   operator mints a **`person_grant`** for that `(resource, action)` at a scope,
+   with a **required reason**, a **short expiry**, and an **MFA** check. This is
+   the existing direct-grant mechanism (`rbac-design.md` §3 table 5), reused —
+   not a new table.
+3. **Everything audited.** Minting the grant and every read under it write an
+   immutable `platform.audit` event (`NFR-6`).
+4. **Expiry is enforced at resolution.** `effectiveGrants` ignores expired direct
+   grants (`FR-AUTHZ-10`), so the access lapses automatically.
 
-**Deferred (not built now):**
-
-- Multi-district management UI, tenant self-service, district lifecycle tooling.
-- Cross-district dashboards / roll-ups.
-- Any billing or per-tenant configuration surface.
-
-These are deferred because the product is a single district today; the
-architecture supports adding them without a structural change.
-
----
-
-## 8. Data model changes (outline)
-
-Detailed schema is produced in the implementation plan; this fixes the shape.
-
-- **Org node kind** gains `platform` and `region` values (alongside
-  `district | division | area | club`). Single-`platform` partial unique index.
-- **Identity:** a system-administrator identity type/flag distinct from a
-  district Person, usable as a grant subject.
-- **Grant:** unchanged shape. Break-glass grants use the existing grant table
-  with an **expiry** and a **required reason**, marked as break-glass so they are
-  audited and excluded from ordinary role templates.
-- **Audit (`platform.audit`):** append-only (DB-enforced `REVOKE UPDATE,
-DELETE`), captures break-glass grant creation and every read under it.
-- All org/identity/grant tables carry the tenancy scope implicitly via the tree
-  path — no separate `districtId` tenancy column is introduced; the `ltree` path
-  is the tenancy key.
+This satisfies "operator does not routinely read member data" more tightly than
+§7.7 while reusing the canonical direct-grant + audit plumbing. Trade-off: an
+extra minting step versus the simpler audited-bypass. Accepted.
 
 ---
 
-## 9. Authorisation matrix and testing impact
+## 7. Scope of the M1 implementation
 
-The authorisation matrix is the single most valuable suite (`NFR-5`). This slice
-extends it with:
+This design is implemented as the **M1 walking skeleton** (`roadmap.md` §5),
+because implementing the super admin _is_ implementing the RBAC engine.
 
-- **Positive:** super admin at the platform root can `read` a non-restricted
-  resource in a sibling district (scope inherits down).
-- **Negative (the important ones):**
-  - Super admin **without** an active break-glass grant is **denied** a
-    restricted read (e.g. `education.evaluation`) — 403/404, not a filtered
-    result.
-  - An **expired** break-glass grant grants nothing.
-  - A break-glass read emits a `platform.audit` row (asserted).
-  - **Sibling-district isolation** still holds for ordinary roles: a district
-    officer cannot see another district's rows (query-level denial).
-  - Removing the super-admin grant removes all platform access (deny by default).
+**In scope (M1):**
 
-Per project policy: **write the 403 / wrong-scope test, not just the 200**, and
-the access inspector must answer "why can this super admin see X?" as a decision
-trace for the new platform tier.
+- Org tree (`ltree`) with the region tier + transactional path maintenance.
+- `Person` · `ClubMembership` · `RoleAssignment` (status lifecycle).
+- Login + session with `permission_version` (`v`) claim.
+- The full RBAC engine: `resource_catalog`, `role_template`,
+  `role_template_grant`, `role_assignment`, `unit_policy_grant`, `person_grant`,
+  `platform_role_assignment`; `effectiveGrants`; `authorize()` (deny-wins,
+  default-deny, scope prefix, conditions, `exactOnly`); `canDelegate`;
+  `permission_version` bump + cache; the access inspector.
+- Seeded vocabularies + role templates (as data), the `system_admin` platform
+  role, and the stricter break-glass path for restricted resources.
+- One meeting with one role, to exercise the gate at a real route
+  (`roadmap.md` M1 ship gate).
+
+**Deferred (post-M1):** multi-district management UI, tenant self-service,
+cross-district dashboards, the rest of the domain contexts (M2+).
 
 ---
 
-## 10. Design-document divergences to update
+## 8. Data model (canonical tables)
 
-This design moves off the current docs; the following are updated (or flagged
-for the human to update) so the docs and code do not silently disagree
-(CLAUDE.md preamble rule):
+Implemented per `rbac-design.md` §3 and `system-design.md` §5.1/§6.1 — not
+reinvented:
+
+- `org_unit` (ltree `path`, `type`, `parent_id`, `depth`, `status`, `timezone`),
+  single-region-root and singleton-role partial unique indexes.
+- `person` (`email` unique, `password_hash`, `mfa_enabled`,
+  `permission_version`), `club_membership`, `role_assignment`.
+- `resource_catalog`, `role_template`, `role_template_grant`, `role_assignment`,
+  `unit_policy_grant`, `person_grant`, `platform_role_assignment`.
+- `audit_event` (append-only; DB-enforced `REVOKE UPDATE, DELETE`), covering
+  grant changes, break-glass mints, and restricted reads.
+
+`ltree` representation and query-level `<@` filtering are settled in the M1 plan
+(the plan uses a real `ltree` column so `FR-AUTHZ-8` query-level filtering — M1's
+ship gate — is not deferred).
+
+---
+
+## 9. Testing (the authorisation matrix)
+
+Per `rbac-design.md` §9 / `system-design.md` §23.6 — the matrix is the single
+most valuable suite. This slice asserts:
+
+- The generated `(role × resource × action × scope)` matrix from the seeded
+  templates.
+- `system_admin` reaches a sibling district for a non-restricted resource (200)
+  **and** is **denied** a restricted read without a break-glass grant (403/404);
+  after minting, the read is allowed and a `platform.audit` row is written; an
+  **expired** break-glass grant is inert.
+- Sibling-district / sibling-club isolation for ordinary roles (query-level
+  denial, not post-filter).
+- Ended assignment grants nothing; `self_unit` role does not reach a child unit;
+  deny in a unit policy beats a template allow; `canDelegate` blocks escalation
+  via invitation; `permission_version` bump takes effect without re-login.
+
+Restricted resources return **404 across a scope boundary** where existence is
+sensitive (`rbac-design.md`; CLAUDE.md).
+
+---
+
+## 10. Design-document divergences to record
+
+Written down so docs and code do not silently disagree:
 
 - **CLAUDE.md §1** — "single district, single deployment" → single deployment,
   **multi-district-capable** via row-level tenancy.
-- **`system-design.md` §4.6 / §25** — record row-level tenancy as **chosen**
-  (open decision 10 closed); note the platform/region tiers.
-- **`rbac-design.md`** — add the **platform tier**, the **super-admin role**, and
-  the **break-glass** model for restricted resources.
-- **Phase 0 log** — decisions #6 and #10 recorded (see §2).
+- **`system-design.md` §4.6 / §25** — open decision 10 closed: **row-level**.
+- **`system-design.md` §7.7** — note the **stricter break-glass** divergence for
+  `system_admin` restricted access (this deployment).
+- **`prd.md` FR-ORG-2 / decision 6** — region tier **materialised**.
+- **Phase 0 log** — decisions #6, #10 recorded (see §2).
 
-These doc edits are part of the implementation work, committed alongside the
-schema change, not after.
+These edits land in the same commits as the code that makes them true.
 
 ---
 
 ## 11. Non-goals
 
-- No separate control-plane database or service.
-- No cross-database queries or federation.
+- No platform-tier org node; no `platform_super_admin` role template (both were
+  the earlier mistake).
+- No separate control-plane database; no DB-per-district.
 - No `isAdmin` flag or role-name checks in application/UI code.
-- No standing operator access to restricted member data (evaluations, ledger,
-  health) — only audited, expiring break-glass.
-- No multi-district operator tooling in this slice.
+- No standing operator access to restricted member data — only minted,
+  audited, expiring break-glass.
+- No multi-district operator tooling in M1.
 
 ---
 
 ## 12. Open questions
 
-None outstanding. All Phase 0 decisions that gate this design (#6, #10) and the
-super-admin model are resolved above. Decisions that gate later milestones (#2
-ballot anonymity, #3 club-creation authority, #5 audit retention, etc.) are out
-of scope here and unaffected by this design.
+None outstanding for this design. Milestone-gating decisions (#2 ballot
+anonymity, #3 club-creation authority, #5 audit retention, #7 dues model, etc.)
+are out of scope for M1 and unaffected.

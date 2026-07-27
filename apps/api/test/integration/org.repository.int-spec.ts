@@ -55,4 +55,47 @@ describe('OrgUnitRepository (integration)', () => {
       repo.createRoot({ type: 'region', code: 'r2', name: 'Region 2', timezone: 'UTC' }),
     ).rejects.toThrow();
   });
+
+  // Regression test: reparent's UPDATE originally computed the new path via
+  // `subpath(path, nlevel(node.path))` unconditionally. That expression
+  // raises Postgres error "invalid positions" for the moved node's OWN row,
+  // because `WHERE path <@ node.path` always matches the node itself, and for
+  // that row offset (nlevel(node.path)) equals nlevel(path) exactly — a
+  // boundary `subpath` rejects. Descendant rows never hit this boundary, so a
+  // test that only checked descendants would pass even with the bug present;
+  // this test asserts both the self-row and a descendant to actually pin it.
+  it('reparent rewrites the moved node and its descendants (self-row subpath boundary)', async () => {
+    const region = await repo.findByPath('r1');
+    const d41 = await repo.findByPath('r1.d41');
+    const c1234 = await repo.findByPath('r1.d41.c1234');
+    const d99 = await repo.createChild({
+      parentId: region!.id,
+      type: 'district',
+      code: 'd99',
+      name: 'District 99',
+      timezone: 'UTC',
+    });
+
+    await repo.reparent(d41!.id, d99.id);
+
+    const movedDistrict = await repo.findByPath('r1.d99.d41');
+    const movedClub = await repo.findByPath('r1.d99.d41.c1234');
+
+    // Self-row: path, depth and parent_id all rewritten.
+    expect(movedDistrict).not.toBeNull();
+    expect(movedDistrict!.id).toBe(d41!.id);
+    expect(movedDistrict!.depth).toBe(2);
+    expect(movedDistrict!.parentId).toBe(d99.id);
+
+    // Descendant: path and depth shift with the subtree; parent_id unchanged
+    // (still points at the moved district, not at the new grandparent).
+    expect(movedClub).not.toBeNull();
+    expect(movedClub!.id).toBe(c1234!.id);
+    expect(movedClub!.depth).toBe(3);
+    expect(movedClub!.parentId).toBe(d41!.id);
+
+    // Old paths no longer resolve.
+    expect(await repo.findByPath('r1.d41')).toBeNull();
+    expect(await repo.findByPath('r1.d41.c1234')).toBeNull();
+  });
 });

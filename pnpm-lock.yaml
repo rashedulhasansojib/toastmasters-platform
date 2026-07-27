@@ -101,6 +101,9 @@ importers:
       '@toastmasters/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@toastmasters/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@toastmasters/logger':
         specifier: workspace:*
         version: link:../../packages/logger
@@ -141,6 +144,9 @@ importers:
       '@types/node':
         specifier: 22.20.1
         version: 22.20.1
+      testcontainers:
+        specifier: 12.0.4
+        version: 12.0.4(supports-color@8.1.1)
 
   apps/dashboard:
     dependencies:

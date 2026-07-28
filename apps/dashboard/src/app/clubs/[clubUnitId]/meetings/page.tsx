@@ -1,9 +1,11 @@
-import { getAgendaTemplates, listMeetings } from '@/lib/meetings';
+import { getAgendaTemplates, getChecklistTemplates, listMeetings } from '@/lib/meetings';
 import { getSession } from '@/lib/session';
 import { MeetingsList } from '@/components/meetings/MeetingsList';
 import { CreateMeetingForm } from '@/components/meetings/CreateMeetingForm';
 import { AgendaTemplatesList } from '@/components/agenda/AgendaTemplatesList';
 import { CreateAgendaTemplateForm } from '@/components/agenda/CreateAgendaTemplateForm';
+import { ChecklistTemplatesList } from '@/components/checklists/ChecklistTemplatesList';
+import { CreateChecklistTemplateForm } from '@/components/checklists/CreateChecklistTemplateForm';
 
 export default async function ClubMeetingsPage({
   params,
@@ -11,10 +13,11 @@ export default async function ClubMeetingsPage({
   params: Promise<{ clubUnitId: string }>;
 }) {
   const { clubUnitId } = await params;
-  const [meetings, session, templates] = await Promise.all([
+  const [meetings, session, agendaTemplates, checklistTemplates] = await Promise.all([
     listMeetings(clubUnitId),
     getSession(),
     getAgendaTemplates(clubUnitId),
+    getChecklistTemplates(clubUnitId),
   ]);
 
   return (
@@ -26,7 +29,13 @@ export default async function ClubMeetingsPage({
       <section className="flex flex-col gap-3">
         <h2>Agenda templates</h2>
         <CreateAgendaTemplateForm clubUnitId={clubUnitId} />
-        <AgendaTemplatesList templates={templates} />
+        <AgendaTemplatesList templates={agendaTemplates} />
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2>Checklists</h2>
+        <CreateChecklistTemplateForm clubUnitId={clubUnitId} />
+        <ChecklistTemplatesList templates={checklistTemplates} />
       </section>
     </main>
   );

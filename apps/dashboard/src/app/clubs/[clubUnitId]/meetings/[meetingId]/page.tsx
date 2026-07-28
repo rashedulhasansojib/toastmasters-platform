@@ -3,6 +3,8 @@ import { notFound } from 'next/navigation';
 import {
   getAgendaItems,
   getAgendaTemplates,
+  getChecklistRuns,
+  getChecklistTemplates,
   getMeeting,
   getRoleAssignments,
   getSpeechSlots,
@@ -15,6 +17,8 @@ import { AssignRoleForm } from '@/components/roles/AssignRoleForm';
 import { RoleAssignmentsList } from '@/components/roles/RoleAssignmentsList';
 import { RequestSpeechSlotForm } from '@/components/speechslots/RequestSpeechSlotForm';
 import { SpeechSlotsList } from '@/components/speechslots/SpeechSlotsList';
+import { ChecklistRunsList } from '@/components/checklists/ChecklistRunsList';
+import { StartChecklistRunButton } from '@/components/checklists/StartChecklistRunButton';
 
 export default async function MeetingPage({
   params,
@@ -22,12 +26,22 @@ export default async function MeetingPage({
   params: Promise<{ clubUnitId: string; meetingId: string }>;
 }) {
   const { clubUnitId, meetingId } = await params;
-  const [meeting, items, templates, roleAssignments, speechSlots] = await Promise.all([
+  const [
+    meeting,
+    items,
+    templates,
+    roleAssignments,
+    speechSlots,
+    checklistTemplates,
+    checklistRuns,
+  ] = await Promise.all([
     getMeeting(clubUnitId, meetingId),
     getAgendaItems(clubUnitId, meetingId),
     getAgendaTemplates(clubUnitId),
     getRoleAssignments(clubUnitId, meetingId),
     getSpeechSlots(clubUnitId, meetingId),
+    getChecklistTemplates(clubUnitId),
+    getChecklistRuns(clubUnitId, meetingId),
   ]);
   if (!meeting) notFound();
 
@@ -83,6 +97,16 @@ export default async function MeetingPage({
         <h2>Speech slots</h2>
         <RequestSpeechSlotForm clubUnitId={clubUnitId} meetingId={meetingId} />
         <SpeechSlotsList clubUnitId={clubUnitId} meetingId={meetingId} slots={speechSlots} />
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2>Checklists</h2>
+        <StartChecklistRunButton
+          clubUnitId={clubUnitId}
+          meetingId={meetingId}
+          templates={checklistTemplates}
+        />
+        <ChecklistRunsList clubUnitId={clubUnitId} meetingId={meetingId} runs={checklistRuns} />
       </section>
     </main>
   );

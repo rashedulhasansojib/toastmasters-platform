@@ -169,6 +169,20 @@ const RESOURCES: ResourceSeed[] = [
     clubScoped: false,
     sensitivity: 'normal',
   },
+  {
+    // M4 Slice 1: system-design.md §11.1. PII but not `restricted` — the four
+    // named restricted resources (finance.ledger, education.evaluation,
+    // membership.health_signal, platform.audit) are a deliberately short
+    // list; a prospect is already club-scoped and time-boxed by
+    // `deleteAfter`, which is a materially different exposure than a
+    // ledger amount or an evaluation.
+    resource: 'membership.prospect',
+    context: 'membership',
+    label: 'Prospect',
+    allowedActions: ['read', 'create', 'update'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
 ];
 
 // Grants transcribed verbatim from system-design.md §7.5 for the resources
@@ -240,6 +254,23 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'finance.ledger', action: 'read' },
       { resource: 'finance.ledger', action: 'create' },
       { resource: 'finance.ledger', action: 'update' },
+      { resource: 'meeting.meeting', action: 'read' },
+      { resource: 'identity.role_assignment', action: 'read' },
+    ],
+  },
+  {
+    // M4 Slice 1: the prospect pipeline's owner — system-design.md §11.1
+    // ("Guests are club-local, non-authenticating, VPM-owned").
+    role: 'club_vpm',
+    tier: 'club',
+    unitTypes: ['club'],
+    scopeRule: 'self_unit',
+    isSingleton: true,
+    label: 'Vice President Membership',
+    grants: [
+      { resource: 'membership.prospect', action: 'read' },
+      { resource: 'membership.prospect', action: 'create' },
+      { resource: 'membership.prospect', action: 'update' },
       { resource: 'meeting.meeting', action: 'read' },
       { resource: 'identity.role_assignment', action: 'read' },
     ],

@@ -63,6 +63,7 @@ model OrgUnit {
   checklistTemplates     ChecklistTemplate[]
   checklistRuns          ChecklistRun[]
   agendaTemplates        AgendaTemplate[]
+  prospects              Prospect[]
 
   @@map("org_unit")
 }
@@ -107,6 +108,8 @@ model Person {
   meetingLiveRecords        MeetingLiveRecord[]
   ballotsCreated            Ballot[]
   votesReceived             Vote[]              @relation("VoteCandidate")
+  prospectsCreated          Prospect[]          @relation("ProspectCreatedBy")
+  convertedFromProspects    Prospect[]          @relation("ProspectConvertedToPerson")
 
   @@map("person")
 }
@@ -797,4 +800,39 @@ model AuditEvent {
   metadata      Json              @default("{}")
 
   @@map("audit_event")
+}
+
+/** M4 Slice 1: system-design.md §11.1. Club-local, non-authenticating, VPM-owned. `deleteAfter` is server-computed at create — CLAUDE.md §2 decision 4 (180 days) — and enforced by a later slice's nightly job, not aspirational. */
+model Prospect {
+  id                  String                 @id @default(uuid()) @db.Uuid
+  orgUnitId           String                 @map("org_unit_id") @db.Uuid
+  orgUnit             OrgUnit                @relation(fields: [orgUnitId], references: [id])
+  fullName            String                 @map("full_name")
+  email               String?
+  phone               String?
+  whatsapp            String?
+  photoUrl            String?                @map("photo_url")
+  bio                 String?
+  leadSource          String?                @map("lead_source")
+  preferredRole       String?                @map("preferred_role")
+  pipelineStatus      ProspectPipelineStatus @default(new) @map("pipeline_status")
+  convertedToPersonId String?                @map("converted_to_person_id") @db.Uuid
+  convertedToPerson   Person?                @relation("ProspectConvertedToPerson", fields: [convertedToPersonId], references: [id])
+  convertedAt         DateTime?              @map("converted_at")
+  deleteAfter         DateTime               @map("delete_after")
+  createdBy           String                 @map("created_by") @db.Uuid
+  createdByPerson     Person                 @relation("ProspectCreatedBy", fields: [createdBy], references: [id])
+  createdAt           DateTime               @default(now()) @map("created_at")
+
+  @@map("prospect")
+}
+
+enum ProspectPipelineStatus {
+  new
+  contacted
+  interested
+  not_interested
+  joined
+
+  @@map("prospect_pipeline_status")
 }

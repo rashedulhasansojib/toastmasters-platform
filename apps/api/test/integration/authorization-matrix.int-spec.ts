@@ -32,6 +32,7 @@ describe('Authorisation matrix (generated from role_template × resource_catalog
     'club_vpe',
     'club_treasurer',
     'club_member',
+    'club_vpm',
     'system_admin',
     'unit_admin',
     'support_readonly',
@@ -44,6 +45,7 @@ describe('Authorisation matrix (generated from role_template × resource_catalog
     'club_vpe',
     'club_treasurer',
     'club_member',
+    'club_vpm',
     'unit_admin',
   ];
 
@@ -65,6 +67,7 @@ describe('Authorisation matrix (generated from role_template × resource_catalog
     { resource: 'identity.invitation', actions: ['create'] },
     { resource: 'org.unit', actions: ['create', 'update'] },
     { resource: 'access.unit_policy', actions: ['create'] },
+    { resource: 'membership.prospect', actions: ['read', 'create', 'update'] },
   ];
 
   /**
@@ -132,7 +135,7 @@ describe('Authorisation matrix (generated from role_template × resource_catalog
       endsOn: new Date('2027-06-30'),
     });
 
-    const domainRoles = ['club_president', 'club_vpe', 'club_treasurer', 'club_member'];
+    const domainRoles = ['club_president', 'club_vpe', 'club_treasurer', 'club_member', 'club_vpm'];
     for (const role of domainRoles) {
       const person = await people.create({ email: `${role}@example.com`, fullName: role });
       actorId[role] = person.id;

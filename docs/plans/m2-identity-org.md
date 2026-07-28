@@ -962,39 +962,41 @@ git commit -m "test(access): inspector coverage for identity.invitation, org.uni
 
 **TDD steps:**
 
-- [ ] **Step 1: Schema + migration**
+- [x] **Step 1: Schema + migration**
 
-  Add the six `AuditEventType` values. `prisma migrate dev --create-only --name grant_mutation_audit_types` → hand-check for any spurious `ltree`-adjacent `DROP INDEX` (unlikely for an enum-only change, but confirm) → `prisma migrate deploy`.
+  Added the six `AuditEventType` values, migration `20260728124556_grant_mutation_audit_types`. The generator proposed the usual spurious `DROP INDEX` on `org_unit_path_gist`/`org_unit_path_unique`; stripped by hand and replaced with the standing NOTE, matching every prior slice. Applied via `prisma migrate deploy`.
 
-- [ ] **Step 2: `RoleAssignmentRepository.assign()` writes `role_assignment_created`**
+- [x] **Step 2: `RoleAssignmentRepository.assign()` writes `role_assignment_created`**
 
-  Failing test first in `identity.repository.int-spec.ts`: after `assign()`, query `db.auditEvent.findFirst({ where: { type: 'role_assignment_created', orgUnitId: clubId } })` and assert it exists, `actorPersonId` equals `appointedBy`, and `metadata` names the assigned person/role. Implement inside `assign()`'s existing `$transaction`.
+  Implemented as planned, inside `assign()`'s existing `$transaction`.
 
-- [ ] **Step 3: `RoleAssignmentRepository.end()` gains `actorId`, writes `role_assignment_ended`**
+  **A packaging gotcha, not a logic bug:** the first test run failed with `PrismaClientValidationError: Invalid value for argument type. Expected AuditEventType` even though the schema and migration were both correct — `apps/api` consumes `@toastmasters/db` as **built output** (`CLAUDE.md` §4's "Build model"), and `prisma generate` alone regenerates the client in `packages/db/src` without rebuilding `dist`. Fixed with `pnpm --filter @toastmasters/db build`. Worth remembering for every future schema-touching slice, not just this one.
 
-  Add the param; update its 3 test call sites. New failing assertion (extend one of the existing `end()` tests): after `end(id, reason, actorId)`, a `role_assignment_ended` row exists with that `actorId` and `reason`. Implement inside `end()`'s existing `$transaction`.
+- [x] **Step 3: `RoleAssignmentRepository.end()` gains `actorId`, writes `role_assignment_ended`**
 
-- [ ] **Step 4: `InvitationRepository.accept()` writes `role_assignment_created`**
+  Implemented as planned. All 3 pre-existing test call sites updated to pass the assignee's own id (self-resignation, matching the existing `reason: 'resigned'` fixtures).
 
-  Failing test in `invitation.repository.int-spec.ts`: after `accept()`, a `role_assignment_created` row exists attributed to `invitation.invitedBy` (not the accepting person — they didn't authorize their own role, the inviter did), with `metadata` naming the invitation's role. Implement inside `accept()`'s existing `$transaction`.
+- [x] **Step 4: `InvitationRepository.accept()` writes `role_assignment_created`**
 
-- [ ] **Step 5: `GrantAdminRepository.grantPersonGrant()` writes `person_grant_created`**
+  Implemented as planned, attributed to `invitation.invitedBy`.
 
-  Failing test in `access-delegation.int-spec.ts`: after a successful `grantPersonGrant`, a `person_grant_created` row exists with `actorPersonId: actorId`, `resource`, `action`, `reason` matching the call. Also assert the existing escalation-denial test (`rejects.toThrow()`) writes **no** audit row — the `canDelegate` check must still run before any write. Implement by wrapping the method body in `$transaction`.
+- [x] **Step 5: `GrantAdminRepository.grantPersonGrant()` writes `person_grant_created`**
 
-- [ ] **Step 6: `GrantAdminRepository.createUnitPolicyGrant()` writes `unit_policy_grant_created`**
+  Implemented as planned. Two fixture issues surfaced and were fixed, not the mechanism: (1) the new success-path test's `club_president` collided with `role_assignment_singleton` against an earlier test's assignment at the same `clubId` — fixed with a fresh club, the same fix Slice 4 needed; (2) the test's original resource/action pick (`meeting.meeting:update`) isn't among `club_president`'s seeded grants, so `canDelegate` correctly rejected it — switched to `identity.role_assignment:create`, which `club_president` does hold, matching the "actor holds the specific thing being delegated" pattern Slice 1's own escalation test established.
 
-  Failing test in `access-delegation.int-spec.ts`: after a call, a `unit_policy_grant_created` row exists with `actorPersonId: createdBy`, `resource`, `action`, `metadata.subjectRole`/`metadata.effect` matching. (The `canDelegate`/last-admin gating in `UnitPolicyService` is unchanged — this only adds an audit write to the repository method both allow- and deny-path calls already reach once the service has approved them.) Implement by wrapping the method body in `$transaction`.
+- [x] **Step 6: `GrantAdminRepository.createUnitPolicyGrant()` writes `unit_policy_grant_created`**
 
-- [ ] **Step 7: `GrantAdminRepository.grantPlatformRole()` writes `platform_role_granted`; `revokePlatformRole()` gains `actorId` and writes `platform_role_revoked`**
+  Implemented as planned; assertion added to the existing `createUnitPolicyGrant accepts an expiresAt` test rather than a new one, since that test already exercises the exact call this needed to check.
 
-  Add `actorId` to `revokePlatformRole`; update its 3 test call sites. Failing tests in `access-delegation.int-spec.ts`: a grant writes `platform_role_granted` (`actorPersonId: grantedBy`); a successful revoke writes `platform_role_revoked` (`actorPersonId: actorId`); the existing last-unit_admin-guard rejection (`rejects.toThrow()`) writes **no** audit row. Implement by wrapping both method bodies in `$transaction`.
+- [x] **Step 7: `GrantAdminRepository.grantPlatformRole()` writes `platform_role_granted`; `revokePlatformRole()` gains `actorId` and writes `platform_role_revoked`**
 
-- [ ] **Step 8: Full gate**
+  Implemented as planned. One pre-existing test needed updating, not fixing: `access-break-glass.int-spec.ts`'s "denies system_admin a restricted read..." test asserted the exact set of audit-event types for an actor who, as part of its own setup, calls `grantPlatformRole` — that call now legitimately produces a `platform_role_granted` row alongside `break_glass_mint`/`restricted_read`. Updated the expected array rather than narrowing the query, since the fuller list is the more honest assertion of what actually happens.
 
-  `pnpm lint && pnpm typecheck && pnpm test && pnpm build`, plus `pnpm test:int` — confirm nothing among the pre-existing ~315 integration tests regressed from the two signature changes, and every new assertion is green.
+- [x] **Step 8: Full gate**
 
-- [ ] **Step 9: Commit**
+  `pnpm lint && pnpm typecheck && pnpm test && pnpm build` — all green (lint clean except the pre-existing unrelated dashboard warning; 68 unit tests; build clean). `pnpm test:int` — 318/318 (up from 317; net +1 after the two `.end()`/`.revokePlatformRole()` test call sites gained an `actorId` arg with no new `it()` blocks there, and 8 new `it()`-level and inline assertions added across 4 files).
+
+- [x] **Step 9: Commit**
 
 ```bash
 git add packages/db apps/api/src/modules/identity apps/api/src/modules/access apps/api/test

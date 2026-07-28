@@ -413,6 +413,12 @@ enum AuditEventType {
   break_glass_mint
   restricted_read
   org_unit_reparented
+  role_assignment_created
+  role_assignment_ended
+  person_grant_created
+  unit_policy_grant_created
+  platform_role_granted
+  platform_role_revoked
 }
 
 model AuditEvent {

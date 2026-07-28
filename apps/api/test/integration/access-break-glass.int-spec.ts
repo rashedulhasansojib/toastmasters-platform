@@ -108,8 +108,15 @@ describe('system_admin break-glass and direct-grant expiry (integration)', () =>
     const after = await authz.authorize(request);
     expect(after.allowed).toBe(true);
 
+    // M2 Slice 5: grantPlatformRole() now also audits itself, so sysAdmin's
+    // own platform-role grant above appears alongside the break-glass mint
+    // and the restricted read it enabled.
     const events = await db.auditEvent.findMany({ where: { actorPersonId: sysAdmin.id } });
-    expect(events.map((e) => e.type).sort()).toEqual(['break_glass_mint', 'restricted_read']);
+    expect(events.map((e) => e.type).sort()).toEqual([
+      'break_glass_mint',
+      'platform_role_granted',
+      'restricted_read',
+    ]);
   });
 
   it('treats an expired direct grant as inert', async () => {

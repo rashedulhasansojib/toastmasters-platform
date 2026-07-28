@@ -156,7 +156,7 @@ describe('Identity repositories (integration)', () => {
         appointedBy: p.id,
       });
 
-      await roleAssignments.end(assignment.id, 'resigned');
+      await roleAssignments.end(assignment.id, 'resigned', p.id);
 
       const found = await roleAssignments.findById(assignment.id);
       expect(found?.status).toBe('ended');
@@ -164,6 +164,61 @@ describe('Identity repositories (integration)', () => {
 
       const active = await roleAssignments.findActiveForUnit(clubId, 'club_vpe');
       expect(active).toHaveLength(0);
+    });
+
+    it('assign() writes a role_assignment_created audit event, attributed to the appointer', async () => {
+      const president = await people.create({
+        email: 'audit-president@example.com',
+        fullName: 'Audit President',
+      });
+      const vpe = await people.create({ email: 'audit-vpe@example.com', fullName: 'Audit VPE' });
+
+      const assignment = await roleAssignments.assign({
+        personId: vpe.id,
+        orgUnitId: clubId,
+        role: 'club_vpe',
+        programYearId,
+        termStart: new Date('2026-07-01'),
+        termEnd: new Date('2027-06-30'),
+        appointedBy: president.id,
+      });
+
+      const event = await db.auditEvent.findFirst({
+        where: { type: 'role_assignment_created', orgUnitId: clubId, actorPersonId: president.id },
+        orderBy: { occurredAt: 'desc' },
+      });
+      expect(event).toBeTruthy();
+      expect(event?.metadata).toMatchObject({
+        personId: vpe.id,
+        role: 'club_vpe',
+        roleAssignmentId: assignment.id,
+      });
+    });
+
+    it('end() writes a role_assignment_ended audit event, attributed to the given actor', async () => {
+      const p = await people.create({
+        email: 'audit-ended@example.com',
+        fullName: 'Audit Ended Person',
+      });
+      const assignment = await roleAssignments.assign({
+        personId: p.id,
+        orgUnitId: clubId,
+        role: 'club_treasurer',
+        programYearId,
+        termStart: new Date('2026-07-01'),
+        termEnd: new Date('2027-06-30'),
+        appointedBy: p.id,
+      });
+
+      await roleAssignments.end(assignment.id, 'removed', p.id);
+
+      const event = await db.auditEvent.findFirst({
+        where: { type: 'role_assignment_ended', orgUnitId: clubId, actorPersonId: p.id },
+        orderBy: { occurredAt: 'desc' },
+      });
+      expect(event).toBeTruthy();
+      expect(event?.reason).toBe('removed');
+      expect(event?.metadata).toMatchObject({ personId: p.id, role: 'club_treasurer' });
     });
   });
 });

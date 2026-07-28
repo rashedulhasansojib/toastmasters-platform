@@ -114,6 +114,15 @@ describe('InvitationRepository (integration)', () => {
     expect(invitation?.status).toBe('accepted');
     expect(invitation?.acceptedPersonId).toBe(result.personId);
     expect(invitation?.acceptedAt).not.toBeNull();
+
+    // CLAUDE.md §1: attributed to the inviter, not the accepting person —
+    // they didn't authorize their own role, the inviter did.
+    const event = await db.auditEvent.findFirst({
+      where: { type: 'role_assignment_created', actorPersonId: inviterId, orgUnitId: clubId },
+      orderBy: { occurredAt: 'desc' },
+    });
+    expect(event).toBeTruthy();
+    expect(event?.metadata).toMatchObject({ personId: result.personId, role: 'club_treasurer' });
   });
 
   it('accept() attaches to an existing Person and never overwrites an existing password hash', async () => {

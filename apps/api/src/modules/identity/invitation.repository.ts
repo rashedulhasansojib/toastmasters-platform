@@ -89,7 +89,7 @@ export class InvitationRepository {
         });
       }
 
-      await tx.roleAssignment.create({
+      const roleAssignment = await tx.roleAssignment.create({
         data: {
           personId: person.id,
           orgUnitId: invitation.orgUnitId,
@@ -105,6 +105,21 @@ export class InvitationRepository {
       await tx.person.update({
         where: { id: person.id },
         data: { permissionVersion: { increment: 1 } },
+      });
+      // CLAUDE.md §1: attributed to the inviter — they authorized the role,
+      // not the person accepting it.
+      await tx.auditEvent.create({
+        data: {
+          actorPersonId: invitation.invitedBy,
+          type: 'role_assignment_created',
+          orgUnitId: invitation.orgUnitId,
+          metadata: {
+            personId: person.id,
+            role: invitation.role,
+            roleAssignmentId: roleAssignment.id,
+            viaInvitationId: invitation.id,
+          },
+        },
       });
 
       await tx.invitation.update({

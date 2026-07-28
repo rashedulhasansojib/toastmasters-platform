@@ -57,18 +57,32 @@ export class GrantAdminRepository {
         `${input.actorId} cannot delegate ${input.resource}:${input.action} — does not hold it at this scope`,
       );
     }
-    return this.db.personGrant.create({
-      data: {
-        personId: input.personId,
-        orgUnitId: input.orgUnitId,
-        resource: input.resource,
-        action: input.action,
-        condition: input.condition ?? 'any',
-        effect: 'allow',
-        grantedBy: input.actorId,
-        reason: input.reason,
-        expiresAt: input.expiresAt ?? null,
-      },
+    return this.db.$transaction(async (tx) => {
+      const grant = await tx.personGrant.create({
+        data: {
+          personId: input.personId,
+          orgUnitId: input.orgUnitId,
+          resource: input.resource,
+          action: input.action,
+          condition: input.condition ?? 'any',
+          effect: 'allow',
+          grantedBy: input.actorId,
+          reason: input.reason,
+          expiresAt: input.expiresAt ?? null,
+        },
+      });
+      await tx.auditEvent.create({
+        data: {
+          actorPersonId: input.actorId,
+          type: 'person_grant_created',
+          resource: input.resource,
+          action: input.action,
+          orgUnitId: input.orgUnitId,
+          reason: input.reason,
+          metadata: { personId: input.personId, personGrantId: grant.id },
+        },
+      });
+      return grant;
     });
   }
 
@@ -139,19 +153,37 @@ export class GrantAdminRepository {
     reason: string;
     expiresAt?: Date | null;
   }): Promise<UnitPolicyGrant> {
-    const row = await this.db.unitPolicyGrant.create({
-      data: {
-        orgUnitId: input.orgUnitId,
-        subjectKind: 'role',
-        subjectRole: input.subjectRole,
-        resource: input.resource,
-        action: input.action,
-        condition: 'any',
-        effect: input.effect,
-        createdBy: input.createdBy,
-        reason: input.reason,
-        expiresAt: input.expiresAt ?? null,
-      },
+    const row = await this.db.$transaction(async (tx) => {
+      const created = await tx.unitPolicyGrant.create({
+        data: {
+          orgUnitId: input.orgUnitId,
+          subjectKind: 'role',
+          subjectRole: input.subjectRole,
+          resource: input.resource,
+          action: input.action,
+          condition: 'any',
+          effect: input.effect,
+          createdBy: input.createdBy,
+          reason: input.reason,
+          expiresAt: input.expiresAt ?? null,
+        },
+      });
+      await tx.auditEvent.create({
+        data: {
+          actorPersonId: input.createdBy,
+          type: 'unit_policy_grant_created',
+          resource: input.resource,
+          action: input.action,
+          orgUnitId: input.orgUnitId,
+          reason: input.reason,
+          metadata: {
+            subjectRole: input.subjectRole,
+            effect: input.effect,
+            unitPolicyGrantId: created.id,
+          },
+        },
+      });
+      return created;
     });
     return toUnitPolicyGrant(row);
   }
@@ -163,14 +195,29 @@ export class GrantAdminRepository {
     grantedBy: string;
     expiresAt?: Date | null;
   }): Promise<PlatformRoleAssignmentRow> {
-    return this.db.platformRoleAssignment.create({
-      data: {
-        personId: input.personId,
-        role: input.role,
-        orgUnitId: input.orgUnitId,
-        grantedBy: input.grantedBy,
-        expiresAt: input.expiresAt ?? null,
-      },
+    return this.db.$transaction(async (tx) => {
+      const created = await tx.platformRoleAssignment.create({
+        data: {
+          personId: input.personId,
+          role: input.role,
+          orgUnitId: input.orgUnitId,
+          grantedBy: input.grantedBy,
+          expiresAt: input.expiresAt ?? null,
+        },
+      });
+      await tx.auditEvent.create({
+        data: {
+          actorPersonId: input.grantedBy,
+          type: 'platform_role_granted',
+          orgUnitId: input.orgUnitId,
+          metadata: {
+            personId: input.personId,
+            role: input.role,
+            platformRoleAssignmentId: created.id,
+          },
+        },
+      });
+      return created;
     });
   }
 
@@ -180,7 +227,7 @@ export class GrantAdminRepository {
    * role_assignment), so "revoke" is a hard delete here; that's acceptable
    * given how rare platform-role changes are meant to be (§6 table).
    */
-  async revokePlatformRole(id: string): Promise<void> {
+  async revokePlatformRole(id: string, actorId: string): Promise<void> {
     const target = await this.db.platformRoleAssignment.findUnique({ where: { id } });
     if (!target) return;
 
@@ -198,7 +245,17 @@ export class GrantAdminRepository {
       }
     }
 
-    await this.db.platformRoleAssignment.delete({ where: { id } });
+    await this.db.$transaction(async (tx) => {
+      await tx.platformRoleAssignment.delete({ where: { id } });
+      await tx.auditEvent.create({
+        data: {
+          actorPersonId: actorId,
+          type: 'platform_role_revoked',
+          orgUnitId: target.orgUnitId,
+          metadata: { personId: target.personId, role: target.role, platformRoleAssignmentId: id },
+        },
+      });
+    });
   }
 
   /** Same row-count invariant as revokePlatformRole's guard — reused by UnitPolicyService's last-admin check on self-deny. */

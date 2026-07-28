@@ -55,13 +55,22 @@ export class RoleAssignmentRepository {
         where: { id: input.personId },
         data: { permissionVersion: { increment: 1 } },
       });
+      // CLAUDE.md §1: "every grant change goes through the audited surface."
+      await tx.auditEvent.create({
+        data: {
+          actorPersonId: input.appointedBy,
+          type: 'role_assignment_created',
+          orgUnitId: input.orgUnitId,
+          metadata: { personId: input.personId, role: input.role, roleAssignmentId: created.id },
+        },
+      });
       return created;
     });
     return toRoleAssignment(row);
   }
 
   /** Ended assignments are retained as history, never deleted. */
-  async end(id: string, reason: RoleAssignmentEndedReason): Promise<void> {
+  async end(id: string, reason: RoleAssignmentEndedReason, actorId: string): Promise<void> {
     await this.db.$transaction(async (tx) => {
       const updated = await tx.roleAssignment.update({
         where: { id },
@@ -70,6 +79,15 @@ export class RoleAssignmentRepository {
       await tx.person.update({
         where: { id: updated.personId },
         data: { permissionVersion: { increment: 1 } },
+      });
+      await tx.auditEvent.create({
+        data: {
+          actorPersonId: actorId,
+          type: 'role_assignment_ended',
+          orgUnitId: updated.orgUnitId,
+          reason,
+          metadata: { personId: updated.personId, role: updated.role, roleAssignmentId: id },
+        },
       });
     });
   }

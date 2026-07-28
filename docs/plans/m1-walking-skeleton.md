@@ -9,7 +9,7 @@
 **Tech Stack:** NestJS 11 (api), Prisma 7 + `@prisma/adapter-pg` (packages/db), Postgres + `ltree`, Redis/BullMQ (permission cache), Zod 4 (packages/contracts), Vitest 4 + Testcontainers 12, Argon2id + `jose` (sessions).
 
 > **Scope note.** This is the M1 milestone plan. It is delivered as ordered
-> **slices** (§ "Slice roadmap"). Slices 0–1 below are fully detailed and
+> **slices** (§ "Slice roadmap"). Slices 0–2 below are fully detailed and
 > execution-ready. Each later slice is expanded to the same bite-sized TDD depth
 > just before it is executed, so its code is written against a proven foundation
 > rather than guessed. This matches roadmap.md §7 ("plans are living documents;
@@ -583,9 +583,737 @@ git commit -m "feat(org): org tree with ltree paths and subtree queries"
 
 ---
 
-## Slices 2–10
+## Slice 2 — Identity
 
-Each is expanded to Slice 0/1 depth (files, interfaces, bite-sized TDD steps with full code) immediately before it is executed, against the now-proven foundation. Their deliverables, dependencies, and ship criteria are fixed in the roadmap table above; the canonical schema and algorithms they implement are `rbac-design.md` §3–§9 and `system-design.md` §5–§7, and the design decisions specific to this deployment are in `docs/superpowers/specs/2026-07-28-platform-tier-super-admin-design.md`.
+**Why:** `role_assignment` — what Slice 3's RBAC seed attaches roles to, and what Slice 4's `effectiveGrants()` resolves — needs a `person` to reference and a `program_year` to scope by. `system-design.md` §6 keeps three concepts deliberately separate (`Person` = who; `ClubMembership` = which clubs, what standing; `RoleAssignment` = what office, which term) so dual membership, multi-office holders, and a clean 1 July handover all fall out of the shape rather than needing special-case code.
+
+**Files:**
+
+- Modify: `packages/db/prisma/schema.prisma` (add `Person`, `ClubMembership`, `RoleAssignment`, `ProgramYear` models + enums; add the two reverse relations on `OrgUnit`)
+- Create: `packages/db/prisma/migrations/<ts>_identity/migration.sql` (generated, two partial unique indexes added via `--create-only`)
+- Create: `apps/api/src/modules/identity/program-year.repository.ts`
+- Create: `apps/api/src/modules/identity/person.repository.ts`
+- Create: `apps/api/src/modules/identity/club-membership.repository.ts`
+- Create: `apps/api/src/modules/identity/role-assignment.repository.ts`
+- Create: `apps/api/test/integration/identity.repository.int-spec.ts`
+- Create: `packages/contracts/src/identity.ts` (`Person`, `ClubMembership`, `RoleAssignment`, `ProgramYear` DTOs)
+- Modify: `packages/contracts/src/index.ts` (export identity contracts)
+
+**Interfaces:**
+
+- Consumes: `startTestDb()` (Slice 0), `OrgUnitRepository` (Slice 1) — role assignments and club memberships are placed on `OrgUnit` nodes built in these tests via `createRoot`/`createChild`.
+- Produces:
+  - `ProgramYearRepository`: `create(input: { id: string; startsOn: Date; endsOn: Date }): Promise<ProgramYear>`, `findById(id: string): Promise<ProgramYear | null>`.
+  - `PersonRepository`: `create(input: { email: string; fullName: string; phone?: string | null; tiMemberNumber?: string | null }): Promise<Person>`, `findById`, `findByEmail` (both case-insensitive on the lowercased, stored email).
+  - `ClubMembershipRepository`: `create(input: { personId: string; clubUnitId: string; memberType: ClubMemberType; isPrimary?: boolean }): Promise<ClubMembership>`, `findByPerson(personId: string): Promise<ClubMembership[]>`.
+  - `RoleAssignmentRepository`: `assign(input: { personId, orgUnitId, role: string, programYearId, termStart: Date, termEnd: Date, appointedBy }): Promise<RoleAssignment>` (always creates `status: 'active'` — M1 has no approval workflow), `end(id: string, reason: RoleAssignmentEndedReason): Promise<void>` (flips to `status: 'ended'`, never deletes), `findById`, `findActiveForUnit(orgUnitId: string, role?: string): Promise<RoleAssignment[]>`.
+  - Contract shapes (`packages/contracts`): `Person` (no `passwordHash` — it never leaves the repository layer), `ClubMembership`, `RoleAssignment` (`role: string` for now — Slice 3 narrows it to a catalogued `RoleKey` once `role_template` exists), `ProgramYear` (minimal: `id`, `startsOn`, `endsOn`, `status` — the full `duesPeriods`/`trainingPeriods`/`areaVisitRounds` shape from `system-design.md` §5.2 lands with the finance/education/quality slices, not here).
+
+- [ ] **Step 1: Define the identity contracts**
+
+Create `packages/contracts/src/identity.ts`:
+
+```ts
+import { z } from 'zod';
+
+export const personStatus = z.enum(['invited', 'active', 'disabled']);
+export type PersonStatus = z.infer<typeof personStatus>;
+
+export const person = z.object({
+  id: z.uuid(),
+  email: z.email(),
+  fullName: z.string().min(1),
+  phone: z.string().nullable(),
+  photoUrl: z.string().nullable(),
+  bio: z.string().nullable(),
+  tiMemberNumber: z.string().nullable(),
+  status: personStatus,
+  mfaEnabled: z.boolean(),
+  permissionVersion: z.number().int().positive(),
+  createdAt: z.iso.datetime(),
+  lastLoginAt: z.iso.datetime().nullable(),
+});
+// `passwordHash` is deliberately absent — it never leaves the repository layer.
+export type Person = z.infer<typeof person>;
+
+export const clubMemberType = z.enum([
+  'new',
+  'renewing',
+  'dual',
+  'reinstated',
+  'charter',
+  'transfer',
+  'honorary',
+]);
+export type ClubMemberType = z.infer<typeof clubMemberType>;
+
+export const clubMembershipTiStanding = z.enum(['good', 'lapsed', 'unknown']);
+export const clubMembershipLocalStatus = z.enum(['active', 'inactive', 'on_leave', 'suspended']);
+export const clubMembershipProvenance = z.enum(['portal', 'ti_import']);
+
+export const clubMembership = z.object({
+  id: z.uuid(),
+  personId: z.uuid(),
+  clubUnitId: z.uuid(),
+  memberType: clubMemberType,
+  joinedAt: z.iso.datetime(),
+  leftAt: z.iso.datetime().nullable(),
+  isPrimary: z.boolean(),
+  tiStanding: clubMembershipTiStanding,
+  localStatus: clubMembershipLocalStatus,
+  provenance: clubMembershipProvenance,
+  lastReconciledAt: z.iso.datetime().nullable(),
+});
+export type ClubMembership = z.infer<typeof clubMembership>;
+
+export const roleAssignmentStatus = z.enum(['pending', 'active', 'ended', 'revoked']);
+export type RoleAssignmentStatus = z.infer<typeof roleAssignmentStatus>;
+
+export const roleAssignmentEndedReason = z.enum(['term_end', 'resigned', 'removed', 'succeeded']);
+export type RoleAssignmentEndedReason = z.infer<typeof roleAssignmentEndedReason>;
+
+export const roleAssignment = z.object({
+  id: z.uuid(),
+  personId: z.uuid(),
+  orgUnitId: z.uuid(),
+  // Plain string until Slice 3 seeds role_template and this narrows to a
+  // catalogued RoleKey — see rbac-design.md §3 table 2.
+  role: z.string().min(1),
+  programYearId: z.string().min(1),
+  termStart: z.iso.date(),
+  termEnd: z.iso.date(),
+  status: roleAssignmentStatus,
+  appointedBy: z.uuid(),
+  appointedAt: z.iso.datetime(),
+  trainedAt: z.array(z.object({ period: z.enum(['R1', 'R2']), at: z.iso.datetime() })),
+  endedReason: roleAssignmentEndedReason.nullable(),
+});
+export type RoleAssignment = z.infer<typeof roleAssignment>;
+
+export const programYearStatus = z.enum(['upcoming', 'current', 'closed']);
+export type ProgramYearStatus = z.infer<typeof programYearStatus>;
+
+export const programYear = z.object({
+  id: z.string().min(1), // e.g. "2026-2027"
+  startsOn: z.iso.date(),
+  endsOn: z.iso.date(),
+  status: programYearStatus,
+});
+export type ProgramYear = z.infer<typeof programYear>;
+```
+
+Add to `packages/contracts/src/index.ts`:
+
+```ts
+export * from './identity';
+```
+
+- [ ] **Step 2: Add the Prisma models**
+
+In `packages/db/prisma/schema.prisma`, append:
+
+```prisma
+enum PersonStatus {
+  invited
+  active
+  disabled
+}
+
+model Person {
+  id                String       @id @default(uuid()) @db.Uuid
+  email             String       @unique
+  passwordHash      String?      @map("password_hash")
+  fullName          String       @map("full_name")
+  phone             String?
+  photoUrl          String?      @map("photo_url")
+  bio               String?
+  tiMemberNumber    String?      @map("ti_member_number")
+  status            PersonStatus @default(invited)
+  mfaEnabled        Boolean      @default(false) @map("mfa_enabled")
+  permissionVersion Int          @default(1) @map("permission_version")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  lastLoginAt       DateTime?    @map("last_login_at")
+
+  clubMemberships ClubMembership[]
+  roleAssignments RoleAssignment[] @relation("RoleAssignmentPerson")
+  appointedRoles  RoleAssignment[] @relation("RoleAssignmentAppointedBy")
+
+  @@map("person")
+}
+
+enum ClubMemberType {
+  new
+  renewing
+  dual
+  reinstated
+  charter
+  transfer
+  honorary
+}
+
+enum ClubMembershipTiStanding {
+  good
+  lapsed
+  unknown
+}
+
+enum ClubMembershipLocalStatus {
+  active
+  inactive
+  on_leave
+  suspended
+}
+
+enum ClubMembershipProvenance {
+  portal
+  ti_import
+}
+
+model ClubMembership {
+  id               String                    @id @default(uuid()) @db.Uuid
+  personId         String                    @map("person_id") @db.Uuid
+  person           Person                    @relation(fields: [personId], references: [id])
+  clubUnitId       String                    @map("club_unit_id") @db.Uuid
+  clubUnit         OrgUnit                   @relation(fields: [clubUnitId], references: [id])
+  memberType       ClubMemberType            @map("member_type")
+  joinedAt         DateTime                  @default(now()) @map("joined_at")
+  leftAt           DateTime?                 @map("left_at")
+  isPrimary        Boolean                   @default(false) @map("is_primary")
+  tiStanding       ClubMembershipTiStanding  @default(unknown) @map("ti_standing")
+  localStatus      ClubMembershipLocalStatus @default(active) @map("local_status")
+  provenance       ClubMembershipProvenance  @default(portal)
+  lastReconciledAt DateTime?                 @map("last_reconciled_at")
+
+  @@map("club_membership")
+}
+
+enum RoleAssignmentStatus {
+  pending
+  active
+  ended
+  revoked
+}
+
+enum RoleAssignmentEndedReason {
+  term_end
+  resigned
+  removed
+  succeeded
+}
+
+model RoleAssignment {
+  id                String                     @id @default(uuid()) @db.Uuid
+  personId          String                     @map("person_id") @db.Uuid
+  person            Person                     @relation("RoleAssignmentPerson", fields: [personId], references: [id])
+  orgUnitId         String                     @map("org_unit_id") @db.Uuid
+  orgUnit           OrgUnit                    @relation(fields: [orgUnitId], references: [id])
+  // Plain text until Slice 3 seeds role_template and adds the FK — rbac-design.md §3.
+  role              String
+  programYearId     String                     @map("program_year_id")
+  programYear       ProgramYear                @relation(fields: [programYearId], references: [id])
+  termStart         DateTime                   @map("term_start") @db.Date
+  termEnd           DateTime                   @map("term_end") @db.Date
+  status            RoleAssignmentStatus       @default(pending)
+  appointedBy       String                     @map("appointed_by") @db.Uuid
+  appointedByPerson Person                     @relation("RoleAssignmentAppointedBy", fields: [appointedBy], references: [id])
+  appointedAt       DateTime                   @default(now()) @map("appointed_at")
+  trainedAt         Json                       @default("[]") @map("trained_at")
+  endedReason       RoleAssignmentEndedReason? @map("ended_reason")
+
+  @@map("role_assignment")
+}
+
+enum ProgramYearStatus {
+  upcoming
+  current
+  closed
+}
+
+model ProgramYear {
+  id       String            @id // e.g. "2026-2027" — not a UUID
+  startsOn DateTime          @map("starts_on") @db.Date
+  endsOn   DateTime          @map("ends_on") @db.Date
+  status   ProgramYearStatus @default(upcoming)
+
+  roleAssignments RoleAssignment[]
+
+  @@map("program_year")
+}
+```
+
+And add the two reverse relations to the existing `OrgUnit` model:
+
+```prisma
+model OrgUnit {
+  // ...existing fields...
+  clubMemberships ClubMembership[]
+  roleAssignments RoleAssignment[]
+}
+```
+
+- [ ] **Step 3: Generate the migration with `--create-only`, then add the partial unique indexes**
+
+Run: `pnpm --filter @toastmasters/db exec prisma migrate dev --create-only --name identity`
+Then edit the newly generated (uncommitted) `migration.sql`, appending after the `CREATE TABLE` statements:
+
+```sql
+-- One active assignment per (unit, role, year) — rbac-design.md §3. M1 applies
+-- this to every role; Slice 3 (role_template.is_singleton) may relax it for
+-- roles that are legitimately non-singleton.
+CREATE UNIQUE INDEX "role_assignment_singleton"
+  ON "role_assignment" ("org_unit_id", "role", "program_year_id")
+  WHERE "status" = 'active';
+
+-- One primary (home) club membership per person, while current — a past
+-- primary that has since left doesn't block a new one.
+CREATE UNIQUE INDEX "club_membership_one_primary"
+  ON "club_membership" ("person_id")
+  WHERE "is_primary" = true AND "left_at" IS NULL;
+```
+
+- [ ] **Step 4: Apply the migration**
+
+Run: `pnpm --filter @toastmasters/db exec prisma migrate dev --name identity`
+Expected: applies cleanly; `prisma generate` runs.
+
+- [ ] **Step 5: Write the failing integration tests**
+
+Create `apps/api/test/integration/identity.repository.int-spec.ts`:
+
+```ts
+import { describe, it, beforeAll, afterAll, expect } from 'vitest';
+import type { PrismaClient } from '@toastmasters/db';
+import { startTestDb } from '../support/test-db';
+import { OrgUnitRepository } from '../../src/modules/org/org.repository';
+import { ProgramYearRepository } from '../../src/modules/identity/program-year.repository';
+import { PersonRepository } from '../../src/modules/identity/person.repository';
+import { ClubMembershipRepository } from '../../src/modules/identity/club-membership.repository';
+import { RoleAssignmentRepository } from '../../src/modules/identity/role-assignment.repository';
+
+describe('Identity repositories (integration)', () => {
+  let db: PrismaClient;
+  let stop: () => Promise<void>;
+  let orgUnits: OrgUnitRepository;
+  let programYears: ProgramYearRepository;
+  let people: PersonRepository;
+  let clubMemberships: ClubMembershipRepository;
+  let roleAssignments: RoleAssignmentRepository;
+
+  let clubId: string;
+  let programYearId: string;
+
+  beforeAll(async () => {
+    ({ db, stop } = await startTestDb());
+    orgUnits = new OrgUnitRepository(db);
+    programYears = new ProgramYearRepository(db);
+    people = new PersonRepository(db);
+    clubMemberships = new ClubMembershipRepository(db);
+    roleAssignments = new RoleAssignmentRepository(db);
+
+    const region = await orgUnits.createRoot({
+      type: 'region',
+      code: 'r1',
+      name: 'Region 1',
+      timezone: 'Asia/Dhaka',
+    });
+    const district = await orgUnits.createChild({
+      parentId: region.id,
+      type: 'district',
+      code: 'd41',
+      name: 'District 41',
+      timezone: 'Asia/Dhaka',
+    });
+    const club = await orgUnits.createChild({
+      parentId: district.id,
+      type: 'club',
+      code: 'c1234',
+      name: 'Club 1234',
+      timezone: 'Asia/Dhaka',
+    });
+    clubId = club.id;
+
+    const year = await programYears.create({
+      id: '2026-2027',
+      startsOn: new Date('2026-07-01'),
+      endsOn: new Date('2027-06-30'),
+    });
+    programYearId = year.id;
+  });
+  afterAll(async () => {
+    await stop();
+  });
+
+  describe('PersonRepository', () => {
+    it('creates a person with a lowercased, unique email', async () => {
+      const created = await people.create({ email: 'Karim@Example.com', fullName: 'Karim Rahman' });
+      expect(created.email).toBe('karim@example.com');
+      expect(created.status).toBe('invited');
+
+      const found = await people.findByEmail('karim@EXAMPLE.com');
+      expect(found?.id).toBe(created.id);
+    });
+
+    it('rejects a duplicate email at the database', async () => {
+      await people.create({ email: 'dupe@example.com', fullName: 'First' });
+      await expect(
+        people.create({ email: 'dupe@example.com', fullName: 'Second' }),
+      ).rejects.toThrow();
+    });
+  });
+
+  describe('ClubMembershipRepository', () => {
+    it('allows only one primary membership per person', async () => {
+      const p = await people.create({ email: 'primary@example.com', fullName: 'Primary Person' });
+      const first = await clubMemberships.create({
+        personId: p.id,
+        clubUnitId: clubId,
+        memberType: 'new',
+        isPrimary: true,
+      });
+      expect(first.isPrimary).toBe(true);
+
+      const district = await orgUnits.findByPath('r1.d41');
+      const secondClub = await orgUnits.createChild({
+        parentId: district!.id,
+        type: 'club',
+        code: 'c5678',
+        name: 'Club 5678',
+        timezone: 'Asia/Dhaka',
+      });
+
+      await expect(
+        clubMemberships.create({
+          personId: p.id,
+          clubUnitId: secondClub.id,
+          memberType: 'dual',
+          isPrimary: true,
+        }),
+      ).rejects.toThrow();
+    });
+  });
+
+  describe('RoleAssignmentRepository', () => {
+    it('assigns an active role and rejects a second active one for the same unit/role/year', async () => {
+      const president = await people.create({
+        email: 'president@example.com',
+        fullName: 'President One',
+      });
+      const challenger = await people.create({
+        email: 'challenger@example.com',
+        fullName: 'Challenger Two',
+      });
+
+      const assignment = await roleAssignments.assign({
+        personId: president.id,
+        orgUnitId: clubId,
+        role: 'club_president',
+        programYearId,
+        termStart: new Date('2026-07-01'),
+        termEnd: new Date('2027-06-30'),
+        appointedBy: president.id,
+      });
+      expect(assignment.status).toBe('active');
+
+      await expect(
+        roleAssignments.assign({
+          personId: challenger.id,
+          orgUnitId: clubId,
+          role: 'club_president',
+          programYearId,
+          termStart: new Date('2026-07-01'),
+          termEnd: new Date('2027-06-30'),
+          appointedBy: president.id,
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('retains an ended assignment with status="ended" rather than deleting it', async () => {
+      const p = await people.create({ email: 'vpe@example.com', fullName: 'VPE Person' });
+      const assignment = await roleAssignments.assign({
+        personId: p.id,
+        orgUnitId: clubId,
+        role: 'club_vpe',
+        programYearId,
+        termStart: new Date('2026-07-01'),
+        termEnd: new Date('2027-06-30'),
+        appointedBy: p.id,
+      });
+
+      await roleAssignments.end(assignment.id, 'resigned');
+
+      const found = await roleAssignments.findById(assignment.id);
+      expect(found?.status).toBe('ended');
+      expect(found?.endedReason).toBe('resigned');
+
+      const active = await roleAssignments.findActiveForUnit(clubId, 'club_vpe');
+      expect(active).toHaveLength(0);
+    });
+  });
+});
+```
+
+- [ ] **Step 6: Run it to verify it fails**
+
+Run: `pnpm --filter @toastmasters/api test:int`
+Expected: FAIL — `Cannot find module '../../src/modules/identity/program-year.repository'` (and siblings).
+
+- [ ] **Step 7: Implement `ProgramYearRepository` and `PersonRepository`**
+
+Create `apps/api/src/modules/identity/program-year.repository.ts`:
+
+```ts
+import { Injectable } from '@nestjs/common';
+import { getPrisma, type PrismaClient } from '@toastmasters/db';
+import type { ProgramYear } from '@toastmasters/contracts';
+
+type ProgramYearRow = Awaited<ReturnType<PrismaClient['programYear']['create']>>;
+
+function toProgramYear(row: ProgramYearRow): ProgramYear {
+  return {
+    id: row.id,
+    startsOn: row.startsOn.toISOString().slice(0, 10),
+    endsOn: row.endsOn.toISOString().slice(0, 10),
+    status: row.status,
+  };
+}
+
+@Injectable()
+export class ProgramYearRepository {
+  constructor(private readonly db: PrismaClient = getPrisma()) {}
+
+  async create(input: { id: string; startsOn: Date; endsOn: Date }): Promise<ProgramYear> {
+    const row = await this.db.programYear.create({
+      data: { id: input.id, startsOn: input.startsOn, endsOn: input.endsOn },
+    });
+    return toProgramYear(row);
+  }
+
+  async findById(id: string): Promise<ProgramYear | null> {
+    const row = await this.db.programYear.findUnique({ where: { id } });
+    return row ? toProgramYear(row) : null;
+  }
+}
+```
+
+Create `apps/api/src/modules/identity/person.repository.ts`:
+
+```ts
+import { Injectable } from '@nestjs/common';
+import { getPrisma, type PrismaClient } from '@toastmasters/db';
+import type { Person } from '@toastmasters/contracts';
+
+type PersonRow = Awaited<ReturnType<PrismaClient['person']['create']>>;
+
+function toPerson(row: PersonRow): Person {
+  return {
+    id: row.id,
+    email: row.email,
+    fullName: row.fullName,
+    phone: row.phone,
+    photoUrl: row.photoUrl,
+    bio: row.bio,
+    tiMemberNumber: row.tiMemberNumber,
+    status: row.status,
+    mfaEnabled: row.mfaEnabled,
+    permissionVersion: row.permissionVersion,
+    createdAt: row.createdAt.toISOString(),
+    lastLoginAt: row.lastLoginAt?.toISOString() ?? null,
+  };
+}
+
+@Injectable()
+export class PersonRepository {
+  constructor(private readonly db: PrismaClient = getPrisma()) {}
+
+  async create(input: {
+    email: string;
+    fullName: string;
+    phone?: string | null;
+    tiMemberNumber?: string | null;
+  }): Promise<Person> {
+    const row = await this.db.person.create({
+      data: {
+        email: input.email.toLowerCase(),
+        fullName: input.fullName,
+        phone: input.phone ?? null,
+        tiMemberNumber: input.tiMemberNumber ?? null,
+      },
+    });
+    return toPerson(row);
+  }
+
+  async findById(id: string): Promise<Person | null> {
+    const row = await this.db.person.findUnique({ where: { id } });
+    return row ? toPerson(row) : null;
+  }
+
+  async findByEmail(email: string): Promise<Person | null> {
+    const row = await this.db.person.findUnique({ where: { email: email.toLowerCase() } });
+    return row ? toPerson(row) : null;
+  }
+}
+```
+
+- [ ] **Step 8: Implement `ClubMembershipRepository`**
+
+Create `apps/api/src/modules/identity/club-membership.repository.ts`:
+
+```ts
+import { Injectable } from '@nestjs/common';
+import { getPrisma, type PrismaClient } from '@toastmasters/db';
+import type { ClubMembership, ClubMemberType } from '@toastmasters/contracts';
+
+type ClubMembershipRow = Awaited<ReturnType<PrismaClient['clubMembership']['create']>>;
+
+function toClubMembership(row: ClubMembershipRow): ClubMembership {
+  return {
+    id: row.id,
+    personId: row.personId,
+    clubUnitId: row.clubUnitId,
+    memberType: row.memberType,
+    joinedAt: row.joinedAt.toISOString(),
+    leftAt: row.leftAt?.toISOString() ?? null,
+    isPrimary: row.isPrimary,
+    tiStanding: row.tiStanding,
+    localStatus: row.localStatus,
+    provenance: row.provenance,
+    lastReconciledAt: row.lastReconciledAt?.toISOString() ?? null,
+  };
+}
+
+@Injectable()
+export class ClubMembershipRepository {
+  constructor(private readonly db: PrismaClient = getPrisma()) {}
+
+  async create(input: {
+    personId: string;
+    clubUnitId: string;
+    memberType: ClubMemberType;
+    isPrimary?: boolean;
+  }): Promise<ClubMembership> {
+    const row = await this.db.clubMembership.create({
+      data: {
+        personId: input.personId,
+        clubUnitId: input.clubUnitId,
+        memberType: input.memberType,
+        isPrimary: input.isPrimary ?? false,
+      },
+    });
+    return toClubMembership(row);
+  }
+
+  async findByPerson(personId: string): Promise<ClubMembership[]> {
+    const rows = await this.db.clubMembership.findMany({
+      where: { personId },
+      orderBy: { joinedAt: 'asc' },
+    });
+    return rows.map(toClubMembership);
+  }
+}
+```
+
+- [ ] **Step 9: Implement `RoleAssignmentRepository`**
+
+Create `apps/api/src/modules/identity/role-assignment.repository.ts`:
+
+```ts
+import { Injectable } from '@nestjs/common';
+import { getPrisma, type PrismaClient } from '@toastmasters/db';
+import type { RoleAssignment, RoleAssignmentEndedReason } from '@toastmasters/contracts';
+
+type RoleAssignmentRow = Awaited<ReturnType<PrismaClient['roleAssignment']['create']>>;
+
+function toRoleAssignment(row: RoleAssignmentRow): RoleAssignment {
+  return {
+    id: row.id,
+    personId: row.personId,
+    orgUnitId: row.orgUnitId,
+    role: row.role,
+    programYearId: row.programYearId,
+    termStart: row.termStart.toISOString().slice(0, 10),
+    termEnd: row.termEnd.toISOString().slice(0, 10),
+    status: row.status,
+    appointedBy: row.appointedBy,
+    appointedAt: row.appointedAt.toISOString(),
+    trainedAt: (row.trainedAt as RoleAssignment['trainedAt']) ?? [],
+    endedReason: row.endedReason,
+  };
+}
+
+@Injectable()
+export class RoleAssignmentRepository {
+  constructor(private readonly db: PrismaClient = getPrisma()) {}
+
+  /** Always creates status: 'active' — M1 has no pending-approval workflow. */
+  async assign(input: {
+    personId: string;
+    orgUnitId: string;
+    role: string;
+    programYearId: string;
+    termStart: Date;
+    termEnd: Date;
+    appointedBy: string;
+  }): Promise<RoleAssignment> {
+    const row = await this.db.roleAssignment.create({
+      data: {
+        personId: input.personId,
+        orgUnitId: input.orgUnitId,
+        role: input.role,
+        programYearId: input.programYearId,
+        termStart: input.termStart,
+        termEnd: input.termEnd,
+        status: 'active',
+        appointedBy: input.appointedBy,
+        trainedAt: [],
+      },
+    });
+    return toRoleAssignment(row);
+  }
+
+  /** Ended assignments are retained as history, never deleted. */
+  async end(id: string, reason: RoleAssignmentEndedReason): Promise<void> {
+    await this.db.roleAssignment.update({
+      where: { id },
+      data: { status: 'ended', endedReason: reason },
+    });
+  }
+
+  async findById(id: string): Promise<RoleAssignment | null> {
+    const row = await this.db.roleAssignment.findUnique({ where: { id } });
+    return row ? toRoleAssignment(row) : null;
+  }
+
+  async findActiveForUnit(orgUnitId: string, role?: string): Promise<RoleAssignment[]> {
+    const rows = await this.db.roleAssignment.findMany({
+      where: { orgUnitId, status: 'active', ...(role ? { role } : {}) },
+    });
+    return rows.map(toRoleAssignment);
+  }
+}
+```
+
+- [ ] **Step 10: Run it to verify it passes**
+
+Run: `pnpm --filter @toastmasters/api test:int`
+Expected: PASS (all five identity tests, plus the three existing org tests).
+
+- [ ] **Step 11: Verify the wider gate is still green**
+
+Run: `pnpm --filter @toastmasters/contracts build && pnpm --filter @toastmasters/api typecheck && pnpm --filter @toastmasters/api lint`
+Expected: no errors.
+
+- [ ] **Step 12: Commit**
+
+```bash
+git add packages/contracts/src/identity.ts packages/contracts/src/index.ts packages/db/prisma/schema.prisma packages/db/prisma/migrations apps/api/src/modules/identity apps/api/test/integration/identity.repository.int-spec.ts
+git commit -m "feat(identity): person, club membership and role assignment"
+```
+
+---
+
+## Slices 3–10
+
+Each is expanded to Slice 0/1/2 depth (files, interfaces, bite-sized TDD steps with full code) immediately before it is executed, against the now-proven foundation. Their deliverables, dependencies, and ship criteria are fixed in the roadmap table above; the canonical schema and algorithms they implement are `rbac-design.md` §3–§9 and `system-design.md` §5–§7, and the design decisions specific to this deployment are in `docs/superpowers/specs/2026-07-28-platform-tier-super-admin-design.md`.
 
 **Self-review (this plan vs the spec):**
 

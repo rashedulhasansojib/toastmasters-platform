@@ -259,3 +259,29 @@
 - [x] Repository + controller wiring (lifecycle transitions on `MeetingController`; status transition on `MeetingRoleAssignmentController`).
 - [x] lint/typecheck clean; test suite deferred (session note above).
 - [x] Commit: `feat(meeting): guarded close-out — meeting lifecycle + role confirm/decline`
+
+---
+
+## Slice 12 — Printable agenda
+
+**Why:** `system-design.md` §9.1's "printable agenda" — the last item in M3's roadmap-listed content.
+
+**Scoping decision — no PDF library added:** `CLAUDE.md` §3 pins "server-side PDF render" as a stack layer but never names a specific library, and §3's own rule is unconditional: "before adding any dependency, ask." No one was reachable to ask this slice. Rather than guess a library (`pdfkit`, `puppeteer`, `@react-pdf/renderer`, …) and lock in a choice that isn't mine to make silently, this ships a self-contained, print-ready **HTML** document instead — every browser's own "print to PDF" already produces the artifact the ship gate needs, and the route's contract (one meeting → its printable agenda) doesn't change when a real PDF renderer is chosen later.
+
+**Files:** `apps/api/src/modules/meeting/agenda-print.controller.ts` (new — no repository needed beyond the existing `MeetingRepository`/`AgendaItemRepository`; no schema, seed, or contracts changes; reuses `meeting.agenda_item:read`).
+
+**Tests** (`agenda-print-http.int-spec.ts`, new): a VPE requests the printable agenda for a meeting with one item — response is `text/html`, contains the item's title, role, and formatted duration.
+
+- [x] Controller wiring, no schema/seed/contract changes.
+- [x] lint/typecheck clean; test suite deferred (session note above).
+- [x] Commit: `feat(meeting): printable agenda — print-ready HTML, no PDF dependency added without asking`
+
+---
+
+**M3 status:** all roadmap-listed content shipped (agenda builder, roles-as-entities, speech-slot request/approval, agenda templates, checklists, capability tokens, live meeting-day tools, role rotation suggestions, ballots, guarded close-out, printable agenda). Deferred, explicitly, for a later slice: `reopen`, domain-event emission (`MeetingHeld` etc. — needs an event bus that doesn't exist yet), guest ballot voting via capability tokens, `ProspectRef` ballot candidates (needs M4's `Prospect`), a real PDF renderer (needs a dependency decision), assignee-scoped (vs. officer-only) role confirm/decline.
+
+**Verification status:** slices 8–12 above have `lint`/`typecheck` green but **the test suite (`pnpm test`, `pnpm test:int`) and `pnpm build` have not been run** — deliberately skipped per an explicit mid-session instruction to defer verification to a single batch run later. Run the full gate before trusting this milestone as done:
+
+```
+pnpm lint && pnpm typecheck && pnpm test && pnpm test:int && pnpm build
+```

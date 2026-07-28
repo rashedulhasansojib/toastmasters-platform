@@ -449,7 +449,7 @@ reparent(input: { actorId: string; orgUnitId: string; newParentId: string }): Pr
 
 **TDD steps:**
 
-- [ ] **Step 1: Schema, seed, migration**
+- [x] **Step 1: Schema, seed, migration**
 
   Red — extend `access.seed.int-spec.ts`: `org.unit`'s `allowedActions` includes `create` and `update`; `unit_admin`'s grants include both.
 
@@ -470,7 +470,7 @@ reparent(input: { actorId: string; orgUnitId: string; newParentId: string }): Pr
 
   Rerun — green. Also rerun `authorization-matrix.int-spec.ts` unchanged.
 
-- [ ] **Step 2: `OrgUnitRepository.reparent()` — permission-version bump + audit event**
+- [x] **Step 2: `OrgUnitRepository.reparent()` — permission-version bump + audit event**
 
   Red (`org.repository.int-spec.ts` additions): a `club_member` holding a `RoleAssignment` at a club that gets re-parented has their `permissionVersion` incremented by exactly 1 after `reparent()`; a person with no grant anywhere in the moved subtree is untouched; calling `reparent(nodeId, newParentId)` **without** an `actorId` (the existing 2-arg call sites) still compiles and runs unchanged, and writes no `AuditEvent`; calling it **with** an `actorId` writes exactly one `AuditEvent` row with `type: 'org_unit_reparented'`, `orgUnitId` set to the moved node, and `metadata` carrying the old/new parent ids.
 
@@ -524,7 +524,7 @@ reparent(input: { actorId: string; orgUnitId: string; newParentId: string }): Pr
 
   Rerun — green, including all four pre-existing tests in this file **unchanged**.
 
-- [ ] **Step 3: `OrgUnitService`**
+- [x] **Step 3: `OrgUnitService`**
 
   Red (`org.service.spec.ts`, mocked `OrgUnitRepository`/`AccessRepository`): `createChild` passes straight through to the repository; `reparent` calls the repository when the actor holds `org.unit:create` at the destination's scope; `reparent` throws `ForbiddenException` — and never calls the repository — when the actor holds authority over the source but not the destination.
 
@@ -573,7 +573,7 @@ reparent(input: { actorId: string; orgUnitId: string; newParentId: string }): Pr
 
   Rerun — green.
 
-- [ ] **Step 4: `OrgUnitController` + module wiring**
+- [x] **Step 4: `OrgUnitController` + module wiring**
 
   Red — folded into Step 5's end-to-end tests (per M1 Slice 9 Step 4 / M2 Slice 1 Step 6 precedent — a controller-only test would just re-exercise Steps 2–3's already-green paths).
 
@@ -615,7 +615,7 @@ reparent(input: { actorId: string; orgUnitId: string; newParentId: string }): Pr
 
   Rerun — green. **Rerun `identity-module-boot.int-spec.ts`** (extend it to also boot `OrgModule` alongside `IdentityModule`, or confirm the existing combined-boot test still covers it — it already imports both `IdentityModule`/`OrgModule` together) to catch any DI-boot cycle the same way M2 Slice 1's `PasswordService` cycle was caught.
 
-- [ ] **Step 5: End-to-end HTTP tests**
+- [x] **Step 5: End-to-end HTTP tests**
 
   Red (`org-http.int-spec.ts`, real Postgres + Redis, real `AppModule`, `jose`-minted JWTs):
 
@@ -627,7 +627,7 @@ reparent(input: { actorId: string; orgUnitId: string; newParentId: string }): Pr
 
   Rerun — green. Then the full gate: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`, plus `pnpm test:int`.
 
-- [ ] **Step 6: Authorisation-matrix update**
+- [x] **Step 6: Authorisation-matrix update**
 
   Red — add `{ resource: 'org.unit', actions: ['create', 'update'] }` to `authorization-matrix.int-spec.ts`'s `RESOURCE_ACTIONS`.
 
@@ -635,7 +635,7 @@ reparent(input: { actorId: string; orgUnitId: string; newParentId: string }): Pr
 
   Rerun — green, full matrix suite.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/db packages/contracts/src/org.ts apps/api/src/modules/org apps/api/test/integration/org.repository.int-spec.ts apps/api/test/integration/org-http.int-spec.ts apps/api/test/integration/authorization-matrix.int-spec.ts apps/api/test/integration/access.seed.int-spec.ts

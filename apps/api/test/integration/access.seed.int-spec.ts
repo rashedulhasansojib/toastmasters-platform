@@ -19,7 +19,7 @@ describe('seedAccessVocabulary (integration)', () => {
     await seedAccessVocabulary(db);
 
     const resourceCount = await db.resourceCatalog.count();
-    expect(resourceCount).toBe(8);
+    expect(resourceCount).toBe(9);
   });
 
   it('marks exactly the four canonical resources as restricted', async () => {
@@ -134,5 +134,27 @@ describe('seedAccessVocabulary (integration)', () => {
       },
     });
     expect(canAssign?.effect).toBe('allow');
+  });
+
+  it('gives unit_admin org.unit create/update — the org tree editor (system-design.md §7.7)', async () => {
+    const orgUnitResource = await db.resourceCatalog.findUnique({
+      where: { resource: 'org.unit' },
+    });
+    expect(orgUnitResource?.allowedActions).toContain('create');
+    expect(orgUnitResource?.allowedActions).toContain('update');
+
+    for (const action of ['create', 'update'] as const) {
+      const grant = await db.roleTemplateGrant.findUnique({
+        where: {
+          role_resource_action_condition: {
+            role: 'unit_admin',
+            resource: 'org.unit',
+            action,
+            condition: 'any',
+          },
+        },
+      });
+      expect(grant?.effect).toBe('allow');
+    }
   });
 });

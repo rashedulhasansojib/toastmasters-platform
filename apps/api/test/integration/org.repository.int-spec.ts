@@ -2,15 +2,27 @@ import { describe, it, beforeAll, afterAll, expect } from 'vitest';
 import type { PrismaClient } from '@toastmasters/db';
 import { startTestDb } from '../support/test-db';
 import { OrgUnitRepository } from '../../src/modules/org/org.repository';
+import { ProgramYearRepository } from '../../src/modules/identity/program-year.repository';
+import { PersonRepository } from '../../src/modules/identity/person.repository';
+import { RoleAssignmentRepository } from '../../src/modules/identity/role-assignment.repository';
 
 describe('OrgUnitRepository (integration)', () => {
   let db: PrismaClient;
   let stop: () => Promise<void>;
   let repo: OrgUnitRepository;
+  let programYearId: string;
 
   beforeAll(async () => {
     ({ db, stop } = await startTestDb());
     repo = new OrgUnitRepository(db);
+
+    const programYears = new ProgramYearRepository(db);
+    const year = await programYears.create({
+      id: '2026-2027',
+      startsOn: new Date('2026-07-01'),
+      endsOn: new Date('2027-06-30'),
+    });
+    programYearId = year.id;
   });
   afterAll(async () => {
     await stop();
@@ -146,5 +158,103 @@ describe('OrgUnitRepository (integration)', () => {
     await expect(repo.reparent(d70.id, d70.id)).rejects.toThrow(
       /Cannot reparent a node under itself or its own descendant/,
     );
+  });
+
+  it('reparent(nodeId, newParentId) without an actorId still works and writes no AuditEvent', async () => {
+    const region = await repo.findByPath('r1');
+    const dNoActor = await repo.createChild({
+      parentId: region!.id,
+      type: 'district',
+      code: 'd-no-actor',
+      name: 'District No Actor',
+      timezone: 'UTC',
+    });
+    const dNoActorDest = await repo.createChild({
+      parentId: region!.id,
+      type: 'district',
+      code: 'd-no-actor-dest',
+      name: 'District No Actor Dest',
+      timezone: 'UTC',
+    });
+    const club = await repo.createChild({
+      parentId: dNoActor.id,
+      type: 'club',
+      code: 'c-no-actor',
+      name: 'Club No Actor',
+      timezone: 'UTC',
+    });
+
+    const before = await db.auditEvent.count({ where: { type: 'org_unit_reparented' } });
+    await repo.reparent(club.id, dNoActorDest.id); // 2-arg call — the pre-existing signature
+    const after = await db.auditEvent.count({ where: { type: 'org_unit_reparented' } });
+    expect(after).toBe(before);
+  });
+
+  it('reparent(nodeId, newParentId, actorId) bumps permissionVersion for everyone with a grant in the moved subtree, and writes one AuditEvent', async () => {
+    const region = await repo.findByPath('r1');
+    const people = new PersonRepository(db);
+    const roleAssignments = new RoleAssignmentRepository(db);
+
+    const sourceDistrict = await repo.createChild({
+      parentId: region!.id,
+      type: 'district',
+      code: 'd-bump-src',
+      name: 'District Bump Src',
+      timezone: 'UTC',
+    });
+    const destDistrict = await repo.createChild({
+      parentId: region!.id,
+      type: 'district',
+      code: 'd-bump-dest',
+      name: 'District Bump Dest',
+      timezone: 'UTC',
+    });
+    const club = await repo.createChild({
+      parentId: sourceDistrict.id,
+      type: 'club',
+      code: 'c-bump',
+      name: 'Club Bump',
+      timezone: 'UTC',
+    });
+
+    const president = await people.create({
+      email: 'bump-president@example.com',
+      fullName: 'Bump President',
+    });
+    await roleAssignments.assign({
+      personId: president.id,
+      orgUnitId: club.id,
+      role: 'club_president',
+      programYearId,
+      termStart: new Date('2026-07-01'),
+      termEnd: new Date('2027-06-30'),
+      appointedBy: president.id,
+    });
+    const bystander = await people.create({
+      email: 'bump-bystander@example.com',
+      fullName: 'Bump Bystander',
+    });
+
+    const actor = await people.create({ email: 'bump-actor@example.com', fullName: 'Bump Actor' });
+    const beforePresident = await db.person.findUnique({ where: { id: president.id } });
+    const beforeBystander = await db.person.findUnique({ where: { id: bystander.id } });
+
+    await repo.reparent(club.id, destDistrict.id, actor.id);
+
+    const afterPresident = await db.person.findUnique({ where: { id: president.id } });
+    expect(afterPresident?.permissionVersion).toBe(beforePresident!.permissionVersion + 1);
+
+    const afterBystander = await db.person.findUnique({ where: { id: bystander.id } });
+    expect(afterBystander?.permissionVersion).toBe(beforeBystander!.permissionVersion);
+
+    const events = await db.auditEvent.findMany({
+      where: { type: 'org_unit_reparented', orgUnitId: club.id },
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.actorPersonId).toBe(actor.id);
+    expect(events[0]?.metadata).toMatchObject({
+      oldParentId: sourceDistrict.id,
+      newParentId: destDistrict.id,
+    });
   });
 });

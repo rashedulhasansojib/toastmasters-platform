@@ -412,6 +412,7 @@ model PersonGrant {
 enum AuditEventType {
   break_glass_mint
   restricted_read
+  org_unit_reparented
 }
 
 model AuditEvent {

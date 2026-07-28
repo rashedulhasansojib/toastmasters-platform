@@ -99,11 +99,16 @@ export class OrgUnitRepository {
     return rows.map(toOrgUnit);
   }
 
-  async reparent(nodeId: string, newParentId: string): Promise<void> {
+  /**
+   * `actorId` is optional so the pre-existing 2-arg call sites (fixtures that
+   * reparent directly, not through the HTTP route) keep working unchanged —
+   * the audit event is only written when an actor is known.
+   */
+  async reparent(nodeId: string, newParentId: string, actorId?: string): Promise<void> {
     await this.db.$transaction(async (tx) => {
       const node = (
-        await tx.$queryRaw<Array<{ path: string }>>`
-          SELECT path::text AS path FROM org_unit WHERE id = ${nodeId}::uuid`
+        await tx.$queryRaw<Array<{ path: string; parent_id: string | null }>>`
+          SELECT path::text AS path, parent_id FROM org_unit WHERE id = ${nodeId}::uuid`
       )[0];
       const parent = (
         await tx.$queryRaw<Array<{ path: string; depth: number }>>`
@@ -135,7 +140,7 @@ export class OrgUnitRepository {
       // since `<@` matches self too (offset == nlevel(node.path) there). The
       // CASE branches route the self-row around subpath entirely instead of
       // relying on it to return an empty tail.
-      await tx.$executeRaw`
+      const affected = await tx.$queryRaw<Array<{ id: string }>>`
         UPDATE org_unit
         SET path = CASE
                      WHEN path = ${node.path}::ltree THEN ${newPath}::ltree
@@ -148,7 +153,63 @@ export class OrgUnitRepository {
                     END,
             updated_at = now()
         WHERE path <@ ${node.path}::ltree
+        RETURNING id
       `;
+
+      // rbac-design.md §5: "org unit reparented → bump everyone with a grant
+      // under either path" — the moved node's own row is the same before and
+      // after this transaction, so this is one id set, not two to union. See
+      // the Slice 2 plan's scoping note for why this set (not ancestors) is
+      // the correct one, not merely a simpler one.
+      const affectedIds = affected.map((r) => r.id);
+      const [roleHolders, platformHolders, personGrantHolders, policySubjects] = await Promise.all([
+        tx.roleAssignment.findMany({
+          where: { orgUnitId: { in: affectedIds } },
+          select: { personId: true },
+        }),
+        tx.platformRoleAssignment.findMany({
+          where: { orgUnitId: { in: affectedIds } },
+          select: { personId: true },
+        }),
+        tx.personGrant.findMany({
+          where: { orgUnitId: { in: affectedIds } },
+          select: { personId: true },
+        }),
+        tx.unitPolicyGrant.findMany({
+          where: { orgUnitId: { in: affectedIds }, subjectKind: 'person' },
+          select: { subjectPersonId: true },
+        }),
+      ]);
+      const affectedPersonIds = [
+        ...new Set([
+          ...roleHolders.map((r) => r.personId),
+          ...platformHolders.map((r) => r.personId),
+          ...personGrantHolders.map((r) => r.personId),
+          ...policySubjects.map((r) => r.subjectPersonId).filter((id): id is string => id != null),
+        ]),
+      ];
+      if (affectedPersonIds.length > 0) {
+        await tx.person.updateMany({
+          where: { id: { in: affectedPersonIds } },
+          data: { permissionVersion: { increment: 1 } },
+        });
+      }
+
+      if (actorId) {
+        await tx.auditEvent.create({
+          data: {
+            actorPersonId: actorId,
+            type: 'org_unit_reparented',
+            orgUnitId: nodeId,
+            metadata: {
+              oldParentId: node.parent_id,
+              newParentId,
+              oldPath: node.path,
+              newPath,
+            },
+          },
+        });
+      }
     });
   }
 }

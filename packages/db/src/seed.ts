@@ -97,6 +97,14 @@ const RESOURCES: ResourceSeed[] = [
     clubScoped: false, // can target any org-unit tier, not just clubs
     sensitivity: 'normal',
   },
+  {
+    resource: 'org.unit',
+    context: 'org',
+    label: 'Organisation unit',
+    allowedActions: ['create', 'update'],
+    clubScoped: false, // spans every tier: region, district, division, area, club
+    sensitivity: 'normal',
+  },
 ];
 
 // Grants transcribed verbatim from system-design.md §7.5 for the resources
@@ -184,6 +192,8 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
     grants: [
       { resource: 'identity.invitation', action: 'create' },
       { resource: 'identity.role_assignment', action: 'create' },
+      { resource: 'org.unit', action: 'create' },
+      { resource: 'org.unit', action: 'update' },
     ],
   },
   {

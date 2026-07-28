@@ -828,6 +828,11 @@ model Prospect {
   createdAt           DateTime               @default(now()) @map("created_at")
   visits              ProspectVisit[]
   communications      ProspectCommunication[]
+  /// M4 Slice 3: set by the nightly retention job once PII is redacted — CLAUDE.md §2 decision 4.
+  /// Anonymises (fullName/email/phone/whatsapp/photoUrl/bio) rather than deleting the row, so
+  /// ProspectVisit/ProspectCommunication history and lead-source aggregates stay intact — same
+  /// "correct with a new fact, don't destroy the old one" reasoning as append-only ledger rows.
+  piiRedactedAt       DateTime?              @map("pii_redacted_at")
 
   @@map("prospect")
 }

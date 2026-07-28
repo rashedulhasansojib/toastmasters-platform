@@ -31,6 +31,7 @@ export const prospect = z.object({
   deleteAfter: z.iso.datetime(),
   createdBy: z.uuid(),
   createdAt: z.iso.datetime(),
+  piiRedactedAt: z.iso.datetime().nullable(),
 });
 export type Prospect = z.infer<typeof prospect>;
 

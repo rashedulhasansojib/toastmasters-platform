@@ -23,6 +23,7 @@ function toProspect(row: ProspectRow): Prospect {
     deleteAfter: row.deleteAfter.toISOString(),
     createdBy: row.createdBy,
     createdAt: row.createdAt.toISOString(),
+    piiRedactedAt: row.piiRedactedAt?.toISOString() ?? null,
   };
 }
 

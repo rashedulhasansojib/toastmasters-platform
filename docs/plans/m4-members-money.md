@@ -128,3 +128,22 @@ enum ProspectPipelineStatus {
 - [x] Commit + push.
 
 **Migration-generation note (new since Slice 1):** rather than hand-writing `migration.sql`, used `prisma migrate diff --from-schema <previous-committed-schema.prisma> --to-schema <current-schema.prisma> --script` — a pure file-to-file diff that needs no database connection at all, so it sidesteps the shadow-DB slowness/lock issue Slice 1 hit entirely. Applied with the already-established `prisma migrate deploy` (direct connection, no shadow DB). Reuse this for every remaining slice.
+
+---
+
+## Slice 3 — Retention job (nightly, past `deleteAfter`)
+
+**Why:** decision 4 says retention is enforced by a job, not aspirational (`FR-MEM-3`). Worker-only — no new resource, no new route.
+
+**Design choice — anonymise, don't delete the row:** the literal PII fields (`fullName`, `email`, `phone`, `whatsapp`, `photoUrl`, `bio`) are wiped to `null`/`'[redacted]'`, but the `Prospect` row itself stays — same reasoning CLAUDE.md already applies to person/financial/governance deletion ("integrity outranks erasure"). Deleting the row outright would either cascade-delete `ProspectVisit`/`ProspectCommunication` history or hit an FK `RESTRICT` error, and would silently corrupt lead-source aggregates (§15.4). Added `Prospect.piiRedactedAt` (nullable timestamp) so the job is idempotent (`WHERE piiRedactedAt IS NULL`) and so the API/UI can tell a redacted row apart from a live one. `pipelineStatus: 'joined'` prospects are excluded — they're a converted `Person` now, under that model's own retention.
+
+**Worker:** first-ever processor in `apps/worker` (it previously had none). Added `@toastmasters/db` as a worker dependency (previously only the API/worker's own repositories touched Prisma — this is still within the CLAUDE.md §4 rule: "`PrismaClient` appears only in `*.repository.ts` (api) and `processors/` (worker)"). `ProspectRetentionProcessor` (`@Processor('prospect-retention')`) does the `updateMany`; `ProspectRetentionScheduler` registers a nightly repeatable job (`0 2 * * *`) on module init — BullMQ dedupes repeatable jobs by name+pattern, so re-registering on every boot is safe.
+
+**Steps:**
+
+- [x] Schema: `Prospect.piiRedactedAt` + migration (diff-generated, applied via `migrate deploy`).
+- [x] Contracts + repository mapper updated to surface `piiRedactedAt`.
+- [x] `apps/worker`: `prospect-retention.processor.ts` + `prospect-retention.scheduler.ts`, wired into `app.module.ts`; `@toastmasters/db` added as a dependency.
+- [x] `pnpm lint && pnpm typecheck && pnpm build` — green.
+- [ ] Tests / `test:int` / manual trigger of the job — **skipped**, per the same autopilot instruction noted in Slice 2. The job has not been exercised against real data (no prospect in the dev DB is yet past its 180-day `deleteAfter`, so there's nothing to manually verify against either). Flagged, not hidden.
+- [x] Commit + push.

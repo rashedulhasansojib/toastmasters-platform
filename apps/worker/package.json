@@ -17,6 +17,7 @@
     "@nestjs/common": "11.1.28",
     "@nestjs/core": "11.1.28",
     "@toastmasters/config": "workspace:*",
+    "@toastmasters/db": "workspace:*",
     "@toastmasters/logger": "workspace:*",
     "bullmq": "5.81.2",
     "nestjs-pino": "4.6.1",

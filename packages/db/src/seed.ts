@@ -66,6 +66,14 @@ const RESOURCES: ResourceSeed[] = [
     sensitivity: 'normal',
   },
   {
+    resource: 'meeting.speech_slot',
+    context: 'meeting',
+    label: 'Speech slot',
+    allowedActions: ['read', 'create', 'approve'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
+  {
     resource: 'finance.ledger',
     context: 'finance',
     label: 'Club ledger',
@@ -137,6 +145,7 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'meeting.meeting', action: 'read' },
       { resource: 'meeting.role', action: 'read' },
       { resource: 'meeting.agenda_item', action: 'read' },
+      { resource: 'meeting.speech_slot', action: 'read' },
       { resource: 'finance.ledger', action: 'read' },
       { resource: 'identity.role_assignment', action: 'create' },
       { resource: 'identity.role_assignment', action: 'update' },
@@ -158,6 +167,8 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'meeting.role', action: 'update' },
       { resource: 'meeting.agenda_item', action: 'create' },
       { resource: 'meeting.agenda_item', action: 'read' },
+      { resource: 'meeting.speech_slot', action: 'read' },
+      { resource: 'meeting.speech_slot', action: 'approve' },
       { resource: 'identity.role_assignment', action: 'read' },
     ],
   },
@@ -187,6 +198,8 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'meeting.meeting', action: 'read' },
       { resource: 'meeting.role', action: 'read' },
       { resource: 'meeting.agenda_item', action: 'read' },
+      { resource: 'meeting.speech_slot', action: 'read' },
+      { resource: 'meeting.speech_slot', action: 'create' },
       { resource: 'identity.role_assignment', action: 'read' },
       { resource: 'finance.ledger', action: 'read', condition: 'own' },
     ],
@@ -279,6 +292,71 @@ export async function seedAccessVocabulary(db: PrismaClient): Promise<void> {
           effect: 'allow',
         },
         update: { effect: 'allow' },
+      });
+    }
+  }
+}
+
+interface PathwayProjectSeed {
+  projectCode: string;
+  name: string;
+  level: number;
+  minMinutes: number;
+  maxMinutes: number;
+}
+
+interface PathwayPathSeed {
+  pathCode: string;
+  name: string;
+  credential: string;
+  projects: PathwayProjectSeed[];
+}
+
+/**
+ * M3 Slice 4: system-design.md §10.1's PathCatalog, trimmed (see the schema
+ * comment on `PathwayPath`) to what speech-slot validation needs. TI's full
+ * path list is much longer — extend this seed as more paths are needed, no
+ * migration required.
+ */
+const PATHWAY_PATHS: PathwayPathSeed[] = [
+  {
+    pathCode: 'PM',
+    name: 'Presentation Mastery',
+    credential: 'Presentation Mastery',
+    projects: [
+      {
+        projectCode: 'PM-ICE-BREAKER',
+        name: 'Ice Breaker',
+        level: 1,
+        minMinutes: 4,
+        maxMinutes: 6,
+      },
+      {
+        projectCode: 'PM-EVAL-FEEDBACK',
+        name: 'Evaluation and Feedback',
+        level: 1,
+        minMinutes: 2,
+        maxMinutes: 3,
+      },
+    ],
+  },
+];
+
+export async function seedPathwayCatalog(db: PrismaClient): Promise<void> {
+  for (const path of PATHWAY_PATHS) {
+    await db.pathwayPath.upsert({
+      where: { pathCode: path.pathCode },
+      create: { pathCode: path.pathCode, name: path.name, credential: path.credential },
+      update: { name: path.name, credential: path.credential },
+    });
+
+    for (const project of path.projects) {
+      await db.pathwayProject.upsert({
+        where: {
+          pathCode_projectCode: { pathCode: path.pathCode, projectCode: project.projectCode },
+        },
+        create: { pathCode: path.pathCode, ...project },
+        update: project,
       });
     }
   }

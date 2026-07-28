@@ -2,7 +2,7 @@ import { createPrismaClient } from './client';
 
 export { createPrismaClient } from './client';
 export type { PrismaClient } from './generated/prisma/client';
-export { seedAccessVocabulary } from './seed';
+export { seedAccessVocabulary, seedPathwayCatalog } from './seed';
 
 let singleton: ReturnType<typeof createPrismaClient> | undefined;
 

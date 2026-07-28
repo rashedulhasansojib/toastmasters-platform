@@ -106,3 +106,39 @@ export const createMeetingRoleAssignmentRequestSchema = z
 export type CreateMeetingRoleAssignmentRequest = z.infer<
   typeof createMeetingRoleAssignmentRequestSchema
 >;
+
+export const speechSlotStatus = z.enum(['requested', 'approved', 'declined']);
+export type SpeechSlotStatus = z.infer<typeof speechSlotStatus>;
+
+/** M3 Slice 4: system-design.md §9.1's speechSlot[] — request/approval with path validation. */
+export const speechSlot = z.object({
+  id: z.uuid(),
+  meetingId: z.uuid(),
+  title: z.string().min(1),
+  pathCode: z.string().min(1),
+  projectCode: z.string().min(1),
+  level: z.number().int().positive(),
+  plannedDurationSeconds: z.number().int().positive(),
+  requestedBy: z.uuid(),
+  status: speechSlotStatus,
+  createdAt: z.iso.datetime(),
+});
+export type SpeechSlot = z.infer<typeof speechSlot>;
+
+/** `level` is derived server-side from the matched PathwayProject — never client-supplied. */
+export const createSpeechSlotRequestSchema = z
+  .object({
+    title: z.string().min(1),
+    pathCode: z.string().min(1),
+    projectCode: z.string().min(1),
+    plannedDurationSeconds: z.number().int().positive(),
+  })
+  .strict();
+export type CreateSpeechSlotRequest = z.infer<typeof createSpeechSlotRequestSchema>;
+
+export const decideSpeechSlotRequestSchema = z
+  .object({
+    status: z.enum(['approved', 'declined']),
+  })
+  .strict();
+export type DecideSpeechSlotRequest = z.infer<typeof decideSpeechSlotRequestSchema>;

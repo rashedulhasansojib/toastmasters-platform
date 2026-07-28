@@ -1,9 +1,10 @@
 import { createPrismaClient } from '../src/client';
-import { seedAccessVocabulary } from '../src/seed';
+import { seedAccessVocabulary, seedPathwayCatalog } from '../src/seed';
 
 async function main(): Promise<void> {
   const db = createPrismaClient();
   await seedAccessVocabulary(db);
+  await seedPathwayCatalog(db);
   await db.$disconnect();
 }
 

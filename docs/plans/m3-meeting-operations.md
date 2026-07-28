@@ -73,3 +73,27 @@
 - [x] Bumped `authorization-matrix.int-spec.ts`'s `meeting.role` actions to include `create`.
 - [x] Full gate — green (366 integration, up from 352; 72 unit; lint/typecheck/build clean).
 - [x] Commit: `feat(meeting): role assignments are entities — roles reference identity, not strings`
+
+---
+
+## Slice 4 — Speech-slot request/approval with path validation
+
+**Why:** `system-design.md` §9.1's `speechSlot[]` — a member requests a speech slot against a Pathways project; a VPE approves or declines it. This is the first resource to use the `approve` action (the roadmap flags `approve` as distinct from `update` specifically for this kind of workflow) and the first write path that validates against seeded reference data rather than accepting free text.
+
+**Scoping decisions:**
+
+- **Trimmed `PathCatalog`.** §10.1's full shape (`isVintage`, `requiredRoleKeys`, `requiresEducationSeries`, levels-with-nested-projects) is `EducationRecord`'s (M7) concern. This slice only needs `pathCode → projects[{ projectCode, level, minMinutes, maxMinutes }]` to validate a request — modeled as two flat tables (`PathwayPath`, `PathwayProject`), not the nested JSON shape. Seeded with one real path (Presentation Mastery) and two real projects (Ice Breaker, Evaluation and Feedback) — enough to prove the mechanism; extending the catalog is a seed-data edit, no migration, no deploy.
+- **`level` is server-derived**, not client-supplied — taken from the matched `PathwayProject` row, same append-only-adjacent principle as Slice 1's server-assigned `position`.
+- **Duration is validated against the project's `minMinutes`/`maxMinutes`** at request time (400 if out of bounds) — the one piece of real business validation in this slice, done inline in the repository (still no service layer, matching this module's precedent).
+- **No catalog-listing endpoint yet** — a member needs to already know the path/project codes. Deferred until the dashboard actually needs a picker.
+- **`club_vpe` decides via a single `PATCH .../approve`-scoped endpoint** taking `{ status: 'approved' | 'declined' }`, not two separate routes — same officer decision, same `approve` grant either way.
+
+**Files:** `packages/db/prisma/schema.prisma` (+`PathwayPath`, `PathwayProject`, `SpeechSlot`, +migration), `packages/db/src/seed.ts` (`meeting.speech_slot` resource + grants, `seedPathwayCatalog()`), `packages/db/prisma/seed.ts` (calls it), `packages/contracts/src/meeting.ts` (+`speechSlot`, create/decide request schemas), `apps/api/src/modules/meeting/speech-slot.{repository,controller}.ts` (new), `meeting.module.ts` (register both).
+
+**Tests** (`speech-slot-http.int-spec.ts`, new): (1) a member requests a valid Ice Breaker slot (level derived as 1), a VPE approves it; (2) an out-of-bounds duration 400s; (3) sibling-club member 403's (non-negotiable).
+
+- [x] Schema + migration + seed (resource, grants, pathway catalog).
+- [x] Repository + controller + module wiring, TDD against the 3 tests above.
+- [x] Bumped `access.seed.int-spec.ts`'s resource count (11→12) and `authorization-matrix.int-spec.ts`'s `RESOURCE_ACTIONS`.
+- [x] Full gate — green (405 integration, up from 366; 72 unit; lint/typecheck/build clean).
+- [x] Commit: `feat(meeting): speech-slot request/approval with path validation`

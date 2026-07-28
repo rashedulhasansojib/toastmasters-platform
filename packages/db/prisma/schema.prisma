@@ -99,6 +99,7 @@ model Person {
   invitationsSent           Invitation[] @relation("InvitationInvitedBy")
   invitationsAccepted       Invitation[] @relation("InvitationAcceptedBy")
   meetingRoleAssignments    MeetingRoleAssignment[]
+  speechSlotsRequested      SpeechSlot[]
 
   @@map("person")
 }
@@ -222,6 +223,7 @@ model Meeting {
   createdAt       DateTime    @default(now()) @map("created_at")
   agendaItems     AgendaItem[]
   roleAssignments MeetingRoleAssignment[]
+  speechSlots     SpeechSlot[]
 
   @@map("meeting")
 }
@@ -303,6 +305,66 @@ model MeetingRoleAssignment {
   createdAt              DateTime                    @default(now()) @map("created_at")
 
   @@map("meeting_role_assignment")
+}
+
+/**
+ * M3 Slice 4: system-design.md §10.1's PathCatalog, trimmed to what
+ * speech-slot request validation needs — `requiredRoleKeys` /
+ * `requiresEducationSeries` / `isVintage` are EducationRecord (M7)
+ * concerns, deferred until that model exists. Seeded reference data,
+ * editable without a deploy — same rule as the RBAC resource catalogue.
+ */
+model PathwayPath {
+  pathCode   String            @id @map("path_code")
+  name       String
+  credential String
+  isActive   Boolean           @default(true) @map("is_active")
+  createdAt  DateTime          @default(now()) @map("created_at")
+  projects   PathwayProject[]
+  speechSlots SpeechSlot[]
+
+  @@map("pathway_path")
+}
+
+model PathwayProject {
+  id          String      @id @default(uuid()) @db.Uuid
+  pathCode    String      @map("path_code")
+  path        PathwayPath @relation(fields: [pathCode], references: [pathCode])
+  projectCode String      @map("project_code")
+  name        String
+  level       Int
+  minMinutes  Int         @map("min_minutes")
+  maxMinutes  Int         @map("max_minutes")
+
+  @@unique([pathCode, projectCode])
+  @@map("pathway_project")
+}
+
+enum SpeechSlotStatus {
+  requested
+  approved
+  declined
+
+  @@map("speech_slot_status")
+}
+
+/** M3 Slice 4: system-design.md §9.1's speechSlot[] — request/approval with path validation. */
+model SpeechSlot {
+  id                     String           @id @default(uuid()) @db.Uuid
+  meetingId              String           @map("meeting_id") @db.Uuid
+  meeting                Meeting          @relation(fields: [meetingId], references: [id])
+  title                  String
+  pathCode               String           @map("path_code")
+  path                   PathwayPath      @relation(fields: [pathCode], references: [pathCode])
+  projectCode            String           @map("project_code")
+  level                  Int
+  plannedDurationSeconds Int              @map("planned_duration_seconds")
+  requestedBy            String           @map("requested_by") @db.Uuid
+  requestedByPerson      Person           @relation(fields: [requestedBy], references: [id])
+  status                 SpeechSlotStatus @default(requested)
+  createdAt              DateTime         @default(now()) @map("created_at")
+
+  @@map("speech_slot")
 }
 
 enum InvitationStatus {

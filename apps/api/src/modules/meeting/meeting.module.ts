@@ -7,6 +7,8 @@ import { AgendaItemRepository } from './agenda-item.repository';
 import { AgendaItemController } from './agenda-item.controller';
 import { MeetingRoleAssignmentRepository } from './meeting-role-assignment.repository';
 import { MeetingRoleAssignmentController } from './meeting-role-assignment.controller';
+import { SpeechSlotRepository } from './speech-slot.repository';
+import { SpeechSlotController } from './speech-slot.controller';
 
 @Module({
   providers: [
@@ -14,8 +16,14 @@ import { MeetingRoleAssignmentController } from './meeting-role-assignment.contr
     MeetingRepository,
     AgendaItemRepository,
     MeetingRoleAssignmentRepository,
+    SpeechSlotRepository,
   ],
-  controllers: [MeetingController, AgendaItemController, MeetingRoleAssignmentController],
+  controllers: [
+    MeetingController,
+    AgendaItemController,
+    MeetingRoleAssignmentController,
+    SpeechSlotController,
+  ],
   exports: [MeetingRepository],
 })
 export class MeetingModule {}

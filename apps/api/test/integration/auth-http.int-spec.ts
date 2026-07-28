@@ -221,6 +221,63 @@ describe('Login + session HTTP surface (integration)', () => {
     await request(app.getHttpServer()).get('/v1/auth/me').expect(401);
   });
 
+  it('reissues the session cookie when permissionVersion has drifted, and not when it has not', async () => {
+    // A dedicated person, not the shared login@example.com fixture — this
+    // test bumps permissionVersion via a real role assignment, which would
+    // otherwise leak into the later switchable-units assertions.
+    const roleAssignments = new RoleAssignmentRepository();
+    const people = new PersonRepository();
+    const passwords = new PasswordService();
+    const versionPerson = await people.create({
+      email: 'version-drift@example.com',
+      fullName: 'Version Drift Person',
+    });
+    await people.setCredentials(
+      versionPerson.id,
+      await passwords.hash('correct horse battery staple'),
+    );
+
+    const loginRes = await request(app.getHttpServer())
+      .post('/v1/auth/login')
+      .send({ email: 'version-drift@example.com', password: 'correct horse battery staple' })
+      .expect(200);
+    const staleCookie = sessionCookieFrom(loginRes.headers['set-cookie']);
+    const { payload: staleV } = await jwtVerify(
+      tokenFrom(staleCookie),
+      new TextEncoder().encode(secret),
+    );
+
+    // Still current — /me above already proves the no-reissue case, but this
+    // pins it against the same fixture the mismatch case below uses.
+    const stillFresh = await request(app.getHttpServer())
+      .get('/v1/auth/me')
+      .set('Cookie', staleCookie)
+      .expect(200);
+    expect(stillFresh.headers['set-cookie']).toBeUndefined();
+
+    await roleAssignments.assign({
+      personId: String(staleV.sub),
+      orgUnitId: otherClubId,
+      role: 'club_secretary',
+      programYearId: '2026-2027',
+      termStart: new Date('2026-07-01'),
+      termEnd: new Date('2027-06-30'),
+      appointedBy: String(staleV.sub),
+    });
+
+    const afterBump = await request(app.getHttpServer())
+      .get('/v1/auth/me')
+      .set('Cookie', staleCookie)
+      .expect(200);
+    const reissued = sessionCookieFrom(afterBump.headers['set-cookie']);
+    const { payload: newV } = await jwtVerify(
+      tokenFrom(reissued),
+      new TextEncoder().encode(secret),
+    );
+    expect(newV.v).toBe((staleV.v as number) + 1);
+    expect(newV.activeUnitId).toBe(staleV.activeUnitId); // unchanged — only v refreshes
+  });
+
   it('GET /switchable-units lists units the person actually holds a role at, and [] for one who holds none', async () => {
     const loginRes = await request(app.getHttpServer())
       .post('/v1/auth/login')

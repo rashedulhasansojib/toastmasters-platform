@@ -1,8 +1,9 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getAgendaItems, getMeeting } from '@/lib/meetings';
+import { getAgendaItems, getAgendaTemplates, getMeeting } from '@/lib/meetings';
 import { AgendaItemsList } from '@/components/agenda/AgendaItemsList';
 import { AddAgendaItemForm } from '@/components/agenda/AddAgendaItemForm';
+import { ApplyAgendaTemplateButton } from '@/components/agenda/ApplyAgendaTemplateButton';
 import { MeetingStatusActions } from '@/components/meetings/MeetingStatusActions';
 
 export default async function MeetingPage({
@@ -11,9 +12,10 @@ export default async function MeetingPage({
   params: Promise<{ clubUnitId: string; meetingId: string }>;
 }) {
   const { clubUnitId, meetingId } = await params;
-  const [meeting, items] = await Promise.all([
+  const [meeting, items, templates] = await Promise.all([
     getMeeting(clubUnitId, meetingId),
     getAgendaItems(clubUnitId, meetingId),
+    getAgendaTemplates(clubUnitId),
   ]);
   if (!meeting) notFound();
 
@@ -35,8 +37,23 @@ export default async function MeetingPage({
       </div>
 
       <section className="flex flex-col gap-3">
-        <h2>Agenda</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2>Agenda</h2>
+          <a
+            href={`/api/clubs/${clubUnitId}/meetings/${meetingId}/agenda-print`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-muted-foreground underline underline-offset-2"
+          >
+            Print agenda
+          </a>
+        </div>
         <AddAgendaItemForm clubUnitId={clubUnitId} meetingId={meetingId} />
+        <ApplyAgendaTemplateButton
+          clubUnitId={clubUnitId}
+          meetingId={meetingId}
+          templates={templates}
+        />
         <AgendaItemsList items={items} />
       </section>
     </main>

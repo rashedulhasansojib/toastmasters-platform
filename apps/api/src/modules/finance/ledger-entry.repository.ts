@@ -62,4 +62,20 @@ export class LedgerEntryRepository {
     const row = await this.db.ledgerEntry.findUnique({ where: { id } });
     return row ? toLedgerEntry(row) : null;
   }
+
+  /** M4 Slice 9: opening-balance input for `FinancialReportService` — every entry strictly before a report's period start. */
+  async findByClubBefore(orgUnitId: string, before: Date): Promise<LedgerEntry[]> {
+    const rows = await this.db.ledgerEntry.findMany({
+      where: { orgUnitId, occurredOn: { lt: before } },
+    });
+    return rows.map(toLedgerEntry);
+  }
+
+  /** M4 Slice 9: income/expense-by-category input for `FinancialReportService` — inclusive of both endpoints. */
+  async findByClubInRange(orgUnitId: string, from: Date, to: Date): Promise<LedgerEntry[]> {
+    const rows = await this.db.ledgerEntry.findMany({
+      where: { orgUnitId, occurredOn: { gte: from, lte: to } },
+    });
+    return rows.map(toLedgerEntry);
+  }
 }

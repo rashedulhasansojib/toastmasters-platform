@@ -260,3 +260,72 @@ export type RecordInstallmentPaymentRequest = z.infer<typeof recordInstallmentPa
 
 export const cancelInstallmentPlanRequestSchema = z.object({ reason: z.string().min(1) }).strict();
 export type CancelInstallmentPlanRequest = z.infer<typeof cancelInstallmentPlanRequestSchema>;
+
+/**
+ * M4 Slice 9: system-design.md §12.4. "A report is a frozen snapshot, not a
+ * saved query" — every figure here is computed once at generation and
+ * stored; there is deliberately no endpoint that recomputes or edits a
+ * report's figures, only one that finalizes it (`status: 'final'`, I-19).
+ */
+export const financialReportType = z.enum(['monthly', 'quarterly', 'annual', 'handover']);
+export type FinancialReportType = z.infer<typeof financialReportType>;
+
+export const financialReportStatus = z.enum(['draft', 'final']);
+export type FinancialReportStatus = z.infer<typeof financialReportStatus>;
+
+export const financialReportCategoryAmount = z.object({
+  category: z.string(),
+  amount: z.number(),
+});
+export type FinancialReportCategoryAmount = z.infer<typeof financialReportCategoryAmount>;
+
+export const financialReportDuesSummary = z.object({
+  billed: z.number(),
+  collected: z.number(),
+  outstanding: z.number(),
+  waived: z.number(),
+});
+export type FinancialReportDuesSummary = z.infer<typeof financialReportDuesSummary>;
+
+export const financialReportMemberCounts = z.object({
+  start: z.number().int(),
+  end: z.number().int(),
+  paid: z.number().int(),
+  unpaid: z.number().int(),
+});
+export type FinancialReportMemberCounts = z.infer<typeof financialReportMemberCounts>;
+
+export const financialReport = z.object({
+  id: z.uuid(),
+  orgUnitId: z.uuid(),
+  programYearId: z.string(),
+  type: financialReportType,
+  periodFrom: z.iso.date(),
+  periodTo: z.iso.date(),
+  openingBalance: z.number(),
+  closingBalance: z.number(),
+  currency: z.string(),
+  income: z.array(financialReportCategoryAmount),
+  expenses: z.array(financialReportCategoryAmount),
+  duesSummary: financialReportDuesSummary,
+  memberCounts: financialReportMemberCounts,
+  narrative: z.string().nullable(),
+  status: financialReportStatus,
+  generatedBy: z.uuid(),
+  generatedAt: z.iso.datetime(),
+  approvedBy: z.uuid().nullable(),
+  approvedAt: z.iso.datetime().nullable(),
+  snapshotUrl: z.string().nullable(),
+});
+export type FinancialReport = z.infer<typeof financialReport>;
+
+export const generateFinancialReportRequestSchema = z
+  .object({
+    programYearId: z.string().min(1),
+    type: financialReportType,
+    periodFrom: z.iso.date(),
+    periodTo: z.iso.date(),
+    narrative: z.string().min(1).optional(),
+  })
+  .strict();
+export type GenerateFinancialReportRequest = z.infer<typeof generateFinancialReportRequestSchema>;

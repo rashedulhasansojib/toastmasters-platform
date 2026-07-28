@@ -211,6 +211,16 @@ const RESOURCES: ResourceSeed[] = [
     clubScoped: true,
     sensitivity: 'restricted',
   },
+  {
+    // M4 Slice 9: system-design.md §12.4. `update` here means "finalize" —
+    // a report's figures are never edited after generation (§19.3 I-19).
+    resource: 'finance.report',
+    context: 'finance',
+    label: 'Financial report',
+    allowedActions: ['read', 'create', 'update'],
+    clubScoped: true,
+    sensitivity: 'restricted',
+  },
 ];
 
 // Grants transcribed verbatim from system-design.md §7.5 for the resources
@@ -235,6 +245,8 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'meeting.ballot', action: 'approve' },
       { resource: 'meeting.vote', action: 'create' },
       { resource: 'finance.ledger', action: 'read' },
+      { resource: 'finance.report', action: 'read' },
+      { resource: 'finance.report', action: 'update' },
       { resource: 'identity.role_assignment', action: 'create' },
       { resource: 'identity.role_assignment', action: 'update' },
     ],
@@ -291,6 +303,9 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'finance.installment_plan', action: 'read' },
       { resource: 'finance.installment_plan', action: 'create' },
       { resource: 'finance.installment_plan', action: 'update' },
+      { resource: 'finance.report', action: 'read' },
+      { resource: 'finance.report', action: 'create' },
+      { resource: 'finance.report', action: 'update' },
       { resource: 'meeting.meeting', action: 'read' },
       { resource: 'identity.role_assignment', action: 'read' },
     ],
@@ -336,6 +351,10 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'finance.invoice', action: 'read', condition: 'own' },
       { resource: 'finance.installment_plan', action: 'read', condition: 'own' },
     ],
+    // finance.report is club-wide (opening/closing balances, member counts),
+    // not per-member — it deliberately gets no `own`-condition grant here;
+    // read access is Treasurer/President only, same as finance.ledger's
+    // full (non-`own`) read.
   },
   // Platform roles: tier 'platform', not bound to a unit type. Zero grants —
   // see the Slice 3 plan's note on why these are deferred to Slices 4/6.

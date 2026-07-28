@@ -73,6 +73,7 @@ model OrgUnit {
   invoices               Invoice[]
   invoiceSequences       InvoiceSequence[]
   installmentPlans       InstallmentPlan[]
+  financialReports       FinancialReport[]
 
   @@map("org_unit")
 }
@@ -125,6 +126,8 @@ model Person {
   duesRecords               DuesRecord[]
   installmentPlans          InstallmentPlan[] @relation("InstallmentPlanPerson")
   installmentPlansApproved  InstallmentPlan[] @relation("InstallmentPlanApprovedBy")
+  financialReportsGenerated FinancialReport[] @relation("FinancialReportGeneratedBy")
+  financialReportsApproved  FinancialReport[] @relation("FinancialReportApprovedBy")
 
   @@map("person")
 }
@@ -231,6 +234,7 @@ model ProgramYear {
   duesRecords     DuesRecord[]
   invoices        Invoice[]
   invoiceSequences InvoiceSequence[]
+  financialReports FinancialReport[]
 
   @@map("program_year")
 }
@@ -1128,4 +1132,57 @@ model InstallmentPlan {
   notes          String?
 
   @@map("installment_plan")
+}
+
+enum FinancialReportType {
+  monthly
+  quarterly
+  annual
+  handover
+
+  @@map("financial_report_type")
+}
+
+enum FinancialReportStatus {
+  draft
+  final
+
+  @@map("financial_report_status")
+}
+
+/**
+ * M4 Slice 9: system-design.md §12.4. "A report is a frozen snapshot, not a
+ * saved query" — every figure is computed once by `FinancialReportService.
+ * generate()` and stored (`income`/`expenses`/`duesSummary`/`memberCounts`
+ * Json), never recomputed on read. I-19: a `final` report's figures never
+ * change — enforced at the service layer (no endpoint edits a report after
+ * `finalize()`), not a DB constraint.
+ */
+model FinancialReport {
+  id                String                 @id @default(uuid()) @db.Uuid
+  orgUnitId         String                 @map("org_unit_id") @db.Uuid
+  orgUnit           OrgUnit                @relation(fields: [orgUnitId], references: [id])
+  programYearId     String                 @map("program_year_id")
+  programYear       ProgramYear            @relation(fields: [programYearId], references: [id])
+  type              FinancialReportType
+  periodFrom        DateTime               @map("period_from") @db.Date
+  periodTo          DateTime               @map("period_to") @db.Date
+  openingBalance    Decimal                @map("opening_balance") @db.Decimal(12, 2)
+  closingBalance    Decimal                @map("closing_balance") @db.Decimal(12, 2)
+  currency          String
+  income            Json
+  expenses          Json
+  duesSummary       Json                   @map("dues_summary")
+  memberCounts      Json                   @map("member_counts")
+  narrative         String?
+  status            FinancialReportStatus  @default(draft)
+  generatedBy       String                 @map("generated_by") @db.Uuid
+  generatedByPerson Person                 @relation("FinancialReportGeneratedBy", fields: [generatedBy], references: [id])
+  generatedAt       DateTime               @default(now()) @map("generated_at")
+  approvedBy        String?                @map("approved_by") @db.Uuid
+  approvedByPerson  Person?                @relation("FinancialReportApprovedBy", fields: [approvedBy], references: [id])
+  approvedAt        DateTime?              @map("approved_at")
+  snapshotUrl       String?                @map("snapshot_url")
+
+  @@map("financial_report")
 }

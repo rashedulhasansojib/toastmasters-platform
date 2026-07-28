@@ -16,6 +16,9 @@ import { InvoiceController } from './invoice.controller';
 import { InstallmentPlanRepository } from './installment-plan.repository';
 import { InstallmentPlanService } from './installment-plan.service';
 import { InstallmentPlanController } from './installment-plan.controller';
+import { FinancialReportRepository } from './financial-report.repository';
+import { FinancialReportService } from './financial-report.service';
+import { FinancialReportController } from './financial-report.controller';
 
 @Module({
   imports: [IdentityModule],
@@ -30,6 +33,8 @@ import { InstallmentPlanController } from './installment-plan.controller';
     InvoiceService,
     InstallmentPlanRepository,
     InstallmentPlanService,
+    FinancialReportRepository,
+    FinancialReportService,
   ],
   controllers: [
     LedgerEntryController,
@@ -37,6 +42,7 @@ import { InstallmentPlanController } from './installment-plan.controller';
     DuesRecordController,
     InvoiceController,
     InstallmentPlanController,
+    FinancialReportController,
   ],
   exports: [LedgerEntryRepository, LedgerEntryService],
 })

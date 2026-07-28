@@ -58,4 +58,13 @@ export class ClubMembershipRepository {
     });
     return rows.map(toClubMembership);
   }
+
+  /** M4 Slice 9: point-in-time member counts need every membership (including ones since left), not just currently-active ones. */
+  async findAllByClub(clubUnitId: string): Promise<ClubMembership[]> {
+    const rows = await this.db.clubMembership.findMany({
+      where: { clubUnitId },
+      orderBy: { joinedAt: 'asc' },
+    });
+    return rows.map(toClubMembership);
+  }
 }

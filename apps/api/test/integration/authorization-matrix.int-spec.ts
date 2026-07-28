@@ -71,6 +71,7 @@ describe('Authorisation matrix (generated from role_template × resource_catalog
     { resource: 'finance.dues', actions: ['read', 'create', 'update'] },
     { resource: 'finance.invoice', actions: ['read', 'create', 'update'] },
     { resource: 'finance.installment_plan', actions: ['read', 'create', 'update'] },
+    { resource: 'finance.report', actions: ['read', 'create', 'update'] },
   ];
 
   /**

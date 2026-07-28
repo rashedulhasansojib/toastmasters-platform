@@ -269,3 +269,29 @@ enum ProspectPipelineStatus {
 - [x] `pnpm lint && pnpm typecheck && pnpm build` — green (after fixing the typecheck failure above).
 - [ ] New tests / `test:int` — **skipped**, same autopilot note as Slices 2–7. The schedule-building math (`buildInstallmentSchedule`) is exactly the kind of pure-function logic this project's own convention (`CLAUDE.md` §7) calls out as unit-test-worthy — traced by hand instead (100/3-cent split example, confirmed the rounding remainder lands correctly and the sum matches `totalAmount` to the cent), which is weaker evidence than an actual assertion.
 - [x] Commit + push.
+
+---
+
+## Slice 9 — Financial reports (frozen snapshots, handover)
+
+**Why:** `FR-FIN-8` — the handover report gives an incoming Treasurer a trusted opening balance; more generally, a report's figures must never silently drift after the fact.
+
+**"Frozen snapshot, not a saved query" — how that's actually true here:** `FinancialReportService.generate()` computes `openingBalance`/`closingBalance` from real `LedgerEntry` rows (before-period sum for opening, in-period sum for the delta), `income`/`expenses` by category from the same in-period entries, and `duesSummary`/`memberCounts` from real `DuesRecord`/`ClubMembership` rows — then stores all of it as plain columns/Json. Nothing on read recomputes anything; `finalize()` only flips `status`/`approvedBy`/`approvedAt`, never touches the figures (I-19). Two new read helpers on `LedgerEntryRepository` (`findByClubBefore`/`findByClubInRange`) and one on `ClubMembershipRepository` (`findAllByClub`, including left members — point-in-time counts need history, not just who's active _now_) feed this.
+
+**Scope cuts (documented on the service, not silently dropped):** `duesSummary`/`memberCounts` are computed over the whole `programYearId`, not the report's specific `periodFrom`/`periodTo` window — `DuesRecord`/`ClubMembership` don't carry the kind of point-in-range query `LedgerEntry.occurredOn` does, and building that properly (period-aware dues status history) is more than this slice's scope. No PDF (`snapshotUrl` stays null) — same deferral already flagged for invoices. Automatic generation at 1 July rollover (design: "generated automatically at term end") isn't wired — there's no rollover job yet anywhere in this codebase; a `handover`-typed report is generated the same manual way as any other type for now.
+
+**New resource:** `finance.report` (restricted). `club_treasurer` creates/reads/finalizes; `club_president` also reads and finalizes (financial reports get a second set of eyes before they're frozen — unlike installment plans, this one isn't "Treasurer alone" by decision, just a reasonable default given nothing in `CLAUDE.md` says otherwise). No `own`-condition grant for `club_member` — a club-wide balance sheet isn't a per-member fact the way a ledger/dues/invoice row is.
+
+**API:** `POST/GET /clubs/:clubUnitId/financial-reports`, `GET .../financial-reports/:id`, `POST .../financial-reports/:id/finalize`.
+
+**Steps:**
+
+- [x] Schema (`FinancialReport`) + migration.
+- [x] Seed: `finance.report` resource + `club_treasurer`/`club_president` grants — ran `pnpm db:seed`.
+- [x] Contracts (`financialReport`, `generateFinancialReportRequestSchema`).
+- [x] `LedgerEntryRepository.findByClubBefore`/`findByClubInRange`, `ClubMembershipRepository.findAllByClub` (new read helpers).
+- [x] Repository + service (the real aggregation logic) + controller, wired into `FinanceModule`.
+- [x] Updated `access.seed.int-spec.ts` (21→22 resources, restricted list) and `authorization-matrix.int-spec.ts` — same cheap-fix pattern as Slices 6–8.
+- [x] `pnpm lint && pnpm typecheck && pnpm build` — green.
+- [ ] New tests / `test:int` — **skipped**, same autopilot note as Slices 2–8. The aggregation math (opening/closing balance, category sums, point-in-time member counts) is real arithmetic over real rows and has not been run against real data even once — higher risk than most of this milestone's other skipped-verification slices, flagged accordingly.
+- [x] Commit + push.

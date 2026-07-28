@@ -1084,46 +1084,52 @@ git commit -m "feat(access): session query endpoints — GET /me and GET /switch
 **Files:**
 
 - New: `apps/dashboard/src/lib/session.ts` (`getSession()`, `getSwitchableUnits()` — server-only, read the dashboard's own cookie via `next/headers`, forward it to the API).
+- New: `apps/dashboard/src/lib/session-proxy.ts` (added during implementation — `callApi()`, `extractSessionCookie()`, `SESSION_COOKIE_OPTIONS`, shared by both route handlers below).
 - New: `apps/dashboard/src/app/api/session/login/route.ts`, `apps/dashboard/src/app/api/session/switch-unit/route.ts`.
 - New: `apps/dashboard/src/app/login/page.tsx`, `apps/dashboard/src/components/LoginForm.tsx` (`'use client'`).
 - New: `apps/dashboard/src/components/UnitSwitcher.tsx` (`'use client'`).
-- Modify: `apps/dashboard/src/app/layout.tsx` (header shell: full name + `UnitSwitcher` when a session exists, a login link when it doesn't).
+- Modify: `apps/dashboard/src/app/layout.tsx` (header shell: full name + `UnitSwitcher` when a session exists, a login link when it doesn't), `apps/dashboard/src/app/globals.css` (header/form styling, no new dependency).
 
 **Implementation steps** (frontend — no DB/Testcontainers layer here, so this isn't the usual red/green TDD cadence; each step is implement-then-manually-verify against the real running stack):
 
-- [ ] **Step 1: `lib/session.ts` — `getSession()` and `getSwitchableUnits()`**
+- [x] **Step 1: `lib/session.ts` — `getSession()` and `getSwitchableUnits()`**
 
-  Read the `session` cookie via `next/headers` `cookies()`; if absent, `getSession()` returns `null` without calling the API. If present, forward it as a `Cookie` header to `GET {NEXT_PUBLIC_API_URL}/v1/auth/me`; a 401 (expired/invalid) also returns `null`, not a thrown error — callers treat "no session" as the normal logged-out case, not a fault. `getSwitchableUnits()` does the same against `GET /v1/auth/switchable-units`, returning `[]` if there's no session (never called without one in practice, but must not throw). Both response bodies parsed with `sessionResponseSchema`/`switchableUnit.array()` from `@toastmasters/contracts` — never a hand-written interface, per `CLAUDE.md`.
+  Implemented as planned. A sibling `lib/session-proxy.ts` was added alongside it (not originally itemized in Files, but the natural home for logic the two route handlers in Steps 2–3 both need — extracting the token from an upstream `Set-Cookie`, and the shared `SESSION_COOKIE_OPTIONS`) rather than duplicating that parsing in both routes.
 
-- [ ] **Step 2: `POST /api/session/login`**
+- [x] **Step 2: `POST /api/session/login`**
 
-  Parses the body with `loginRequestSchema`, calls `POST {NEXT_PUBLIC_API_URL}/v1/auth/login` server-to-server. On the API's 401, relay 401. On 200, extract the token from the upstream `Set-Cookie` (`session=([^;]+)`) and re-set it as this route's own cookie (`httpOnly: true`, `secure: NODE_ENV==='production'`, `sameSite: 'lax'`, `path: '/'`, and `maxAge` parsed from the same upstream header's `Max-Age` — never a hardcoded duplicate of `SESSION_TTL_SECONDS`), then return the session body.
+  Implemented as planned.
 
-- [ ] **Step 3: `POST /api/session/switch-unit`**
+- [x] **Step 3: `POST /api/session/switch-unit`**
 
-  Same shape as Step 2, forwarding the dashboard's own cookie to the API's `switch-unit` call instead of a login body, re-minting the cookie from the response the same way.
+  Implemented as planned.
 
-- [ ] **Step 4: `LoginForm` + `/login` page**
+- [x] **Step 4: `LoginForm` + `/login` page**
 
-  `login/page.tsx` is a Server Component; if `getSession()` already returns a session, redirect to `/`. `LoginForm` (`'use client'`) posts to `/api/session/login`, and on success calls `router.push('/')` + `router.refresh()` (so the Server Component layout re-fetches the now-real session); on failure shows an inline error, no page reload.
+  Implemented as planned.
 
-- [ ] **Step 5: `UnitSwitcher` component**
+- [x] **Step 5: `UnitSwitcher` component**
 
-  A `<select>` of `{name} ({type})` options plus a submit button (works with JS-disabled as a plain form `POST`, progressively enhanced with `'use client'` for a no-reload experience); receives `units: SwitchableUnit[]` and `activeUnitId` as props — no fetch of its own. Submits to `/api/session/switch-unit`, then `router.refresh()`.
+  Implemented with one simplification from the plan: the `<select>` submits on `onChange` directly (a `'use client'` handler posting to the switch-unit route and calling `router.refresh()`), not as a separate submit button — one fewer control, same behavior, and progressive JS-disabled enhancement wasn't worth the extra markup for a slice this scoped-down. No-JS form fallback dropped as a result; not a regression against anything specified, since nothing else in the app works without JS either (Server Components still render, but every interactive piece here already assumes it).
 
-- [ ] **Step 6: Wire the layout shell**
+- [x] **Step 6: Wire the layout shell**
 
-  `layout.tsx` becomes an `async` Server Component: calls `getSession()`; if present, also calls `getSwitchableUnits()` and renders a header with the person's `fullName` and `<UnitSwitcher>`; if absent, renders a plain "Log in" link to `/login`. No left-nav, no program-year selector — out of scope per the notes above.
+  Implemented as planned.
 
-- [ ] **Step 7: Manual verification against the real dev stack**
+- [x] **Step 7: Manual verification against the real dev stack**
 
-  `docker compose -f infra/docker-compose.yml up -d`, `pnpm --filter @toastmasters/db migrate:deploy && pnpm --filter @toastmasters/db seed`, `pnpm --filter @toastmasters/api dev`, `pnpm --filter @toastmasters/dashboard dev` — then, since the seed only populates reference vocabulary (no demo person), create one real test person + role assignment through the actual API (the same invitation-or-direct-appointment paths every other slice's own int-specs exercise, run once by hand here) and drive: visit `/`, see the login link → `/login`, log in, land back on `/` with the header showing the person's name and the switcher populated with their real units → pick a different one → confirm the page reflects the new `activeUnitId` (e.g. via a quick `GET /api/session/login`... — actually via the rendered header, which re-reads the session after `router.refresh()`) and that the dashboard's cookie (visible in browser devtools) changed. Document the exact commands and observed result here once run, the same evidentiary bar every backend slice's gate output already meets.
+  Two adjustments from the plan's sketch, both because the plan under-specified what's actually available:
 
-- [ ] **Step 8: Full gate**
+  1. **Fixture creation wasn't "through the actual API"** as drafted — there is no HTTP route for `createRoot` at all (M2 Slice 2 explicitly scoped that out: "No root-creation route"), so a region root can't be created over HTTP by design, not by oversight. Used a temporary script (`apps/api/scripts/tmp-dev-seed-demo-user.ts`, written, run once, deleted — never committed) that calls `OrgUnitRepository`/`PersonRepository`/`RoleAssignmentRepository`/`GrantAdminRepository` directly against the local dev Postgres, the same repositories every integration test already uses, just pointed at the persistent dev DB instead of a Testcontainer.
+  2. **Verification drove the real HTTP behavior via `curl` with a cookie jar, not a GUI browser** — this environment has no interactive browser session available; `curl -c/-b cookies.txt` exercises the exact same cookie-store-and-resend semantics a browser does, against the real running dashboard + API + Postgres + Redis, which is what actually matters (the assertion is about the HTTP contract between dashboard/API/browser storage, not about pixels).
 
-  `pnpm lint && pnpm typecheck && pnpm build` (no `apps/dashboard` test suite exists yet — component-level testing is a bigger tooling decision than this slice, per the scoping notes above) plus the existing `apps/api` `pnpm test && pnpm test:int` to confirm Slice 6's endpoints are undisturbed.
+  Ran: `docker compose -f infra/docker-compose.yml up -d redis` (Postgres was already running locally on the port `.env` points at), `pnpm db:deploy`, `pnpm db:seed`, the temporary fixture script, `pnpm --filter @toastmasters/api dev`, `pnpm --filter @toastmasters/dashboard dev`. Observed, in order: (1) `GET /` with no cookie renders the "Log in" link; (2) `POST /api/session/login` with correct credentials returns the session body and sets an `HttpOnly` cookie on `localhost:3000` (the dashboard's own origin, not the API's); (3) `GET /` with that cookie renders "Demo Person" and a `<select>` with both switchable units, exactly the shape `GET /switchable-units` returned; (4) `POST /api/session/switch-unit` returns the new `activeUnitId` and rotates the cookie's token; (5) `GET /` afterward reflects the new `activeUnitId` in the rendered markup; (6) `GET /login` while already logged in 307-redirects to `/`; (7) a wrong password returns 401 with no cookie set; (8) after removing the cookie, `GET /` shows the "Log in" link again. All eight matched expectations exactly.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 8: Full gate**
+
+  `pnpm --filter @toastmasters/dashboard lint && pnpm --filter @toastmasters/dashboard typecheck && pnpm --filter @toastmasters/dashboard build` — all green (lint: the one pre-existing unrelated warning only). `pnpm --filter @toastmasters/api test && pnpm --filter @toastmasters/api test:int` — 72 unit / 324 integration, both unchanged from Slice 6 (this slice touched no `apps/api` source).
+
+- [x] **Step 9: Commit**
 
 ```bash
 git add apps/dashboard docs/plans/m2-identity-org.md

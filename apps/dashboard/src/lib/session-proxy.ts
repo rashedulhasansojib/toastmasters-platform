@@ -1,3 +1,5 @@
+import { cookies } from 'next/headers';
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
 /**
@@ -9,6 +11,22 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
  */
 export async function callApi(path: string, init: RequestInit): Promise<Response> {
   return fetch(`${API_BASE}${path}`, { ...init, cache: 'no-store' });
+}
+
+/** The dashboard's own session cookie, as a `Cookie` header value — null if not logged in. */
+export async function sessionCookieHeader(): Promise<string | null> {
+  const jar = await cookies();
+  const token = jar.get('session')?.value;
+  return token ? `session=${token}` : null;
+}
+
+/** Forwards the dashboard's own cookie to the API (M3 Slice 1) — every read/write route handler beyond login/switch-unit uses this, not callApi() directly, since those don't reissue a cookie. */
+export async function authedFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const cookieHeader = await sessionCookieHeader();
+  return callApi(path, {
+    ...init,
+    headers: { ...(init.headers ?? {}), ...(cookieHeader ? { Cookie: cookieHeader } : {}) },
+  });
 }
 
 /**

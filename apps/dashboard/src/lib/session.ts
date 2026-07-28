@@ -1,18 +1,12 @@
-import { cookies } from 'next/headers';
 import {
   sessionResponseSchema,
   switchableUnit,
   type SessionResponse,
   type SwitchableUnit,
 } from '@toastmasters/contracts';
+import { sessionCookieHeader } from './session-proxy';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
-
-async function sessionCookieHeader(): Promise<string | null> {
-  const jar = await cookies();
-  const token = jar.get('session')?.value;
-  return token ? `session=${token}` : null;
-}
 
 /** Server-only: no session cookie, or an expired/invalid one, both resolve to null — never throw for the ordinary logged-out case. */
 export async function getSession(): Promise<SessionResponse | null> {

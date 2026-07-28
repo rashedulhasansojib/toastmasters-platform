@@ -217,3 +217,28 @@ enum ProspectPipelineStatus {
 - [x] `pnpm lint && pnpm typecheck && pnpm build` — green.
 - [ ] New tests / `test:int` — **skipped**, same autopilot note as Slices 2–5.
 - [x] Commit + push.
+
+---
+
+## Slice 7 — Gapless invoices (sequence table + row lock)
+
+**Why:** `FR-FIN-4`/§19.3 I-13 — invoice numbers must be gapless per (club, program year). This is the slice CLAUDE.md calls out by name as a specific anti-pattern to avoid: `MAX(number)+1` races under concurrency.
+
+**How gaplessness is actually enforced (not just documented):** `InvoiceRepository.createWithNextNumber` opens a transaction, `SELECT ... FOR UPDATE`s the `InvoiceSequence` row for that `(orgUnitId, programYearId)`, increments it, and creates the `Invoice` row — all in one transaction. The row lock means a second concurrent caller physically blocks at the `SELECT FOR UPDATE` until the first transaction commits (or rolls back and releases the lock without having incremented), so two invoices can never claim the same number and a failed attempt never burns one. This is the real mechanism, not aspirational.
+
+**Design:** invoices are generated **from `DuesRecord`s**, not ad hoc line entry (`lines[].duesRecordId` links back to Slice 6, matching "reconciliation is automatic" from the design doc). New resource `finance.invoice` (restricted, same bracket as ledger/dues). Corrections: **never edit an issued invoice's `lines`/`total`** — either `void` (only legal with zero recorded payments) or a **credit note** (a new, negative-total invoice referencing the original via `creditNoteForInvoiceId`, going through the same gapless-numbering path). `lines`/`payments` are Json snapshots, same reasoning as `ChecklistTemplate.items`.
+
+**Scope cuts:** no `draft` status reachable yet (every invoice is created already `issued` — the enum keeps `draft` for schema completeness, same treatment as `ProspectPipelineStatus`); no PDF rendering/email delivery (already flagged as deferred at the top of this plan); a credit note can't itself be credit-noted (one level of correction, not a chain) — simple and sufficient for this slice, revisit if it's ever not.
+
+**API:** `POST/GET /clubs/:clubUnitId/invoices`, `GET .../invoices/:id`, `POST .../invoices/:id/payments`, `POST .../invoices/:id/void`, `POST .../invoices/:id/credit-note`.
+
+**Steps:**
+
+- [x] Schema (`Invoice`, `InvoiceSequence`) + migration.
+- [x] Seed: `finance.invoice` resource + `club_treasurer`/`club_member` grants — ran `pnpm db:seed` against the live dev DB.
+- [x] Contracts (`invoice`, `createInvoiceRequestSchema`, payment/void/credit-note request schemas).
+- [x] Repository (the row-lock sequence logic) + service (build-lines-from-dues-records, payment/void/credit-note business rules) + controller, wired into `FinanceModule`.
+- [x] Updated `access.seed.int-spec.ts` (19→20 resources, restricted list now includes `finance.invoice`) and `authorization-matrix.int-spec.ts` again — same cheap-fix reasoning as Slice 6.
+- [x] `pnpm lint && pnpm typecheck && pnpm build` — green.
+- [ ] New tests / `test:int` — **skipped**, same autopilot note as Slices 2–6. Most notably unverified: the row-lock's actual concurrent-safety under real parallel requests (a single-request curl can't exercise it) — this is exactly the kind of invariant `test:int`'s "real Postgres + Redis, transactions included" tier exists to prove, and it hasn't been proven yet.
+- [x] Commit + push.

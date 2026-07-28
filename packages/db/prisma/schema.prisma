@@ -70,6 +70,8 @@ model OrgUnit {
   prospects              Prospect[]
   ledgerEntries          LedgerEntry[]
   duesRecords            DuesRecord[]
+  invoices               Invoice[]
+  invoiceSequences       InvoiceSequence[]
 
   @@map("org_unit")
 }
@@ -224,6 +226,8 @@ model ProgramYear {
   invitations     Invitation[]
   ledgerEntries   LedgerEntry[]
   duesRecords     DuesRecord[]
+  invoices        Invoice[]
+  invoiceSequences InvoiceSequence[]
 
   @@map("program_year")
 }
@@ -996,4 +1000,79 @@ model DuesRecord {
 
   @@unique([clubMembershipId, duesPeriod])
   @@map("dues_record")
+}
+
+enum InvoiceIssuedToKind {
+  member
+  prospect
+  external
+
+  @@map("invoice_issued_to_kind")
+}
+
+enum InvoiceStatus {
+  draft
+  issued
+  partially_paid
+  paid
+  void
+
+  @@map("invoice_status")
+}
+
+/**
+ * M4 Slice 7: system-design.md §12.2/§19.3 I-13 — invoice numbers are
+ * gapless per (club, program year), via this sequence table plus a row lock
+ * (`SELECT ... FOR UPDATE` in `InvoiceRepository.nextNumber`), never
+ * `MAX(number)+1`, which races under concurrency.
+ */
+model InvoiceSequence {
+  orgUnitId     String      @map("org_unit_id") @db.Uuid
+  orgUnit       OrgUnit     @relation(fields: [orgUnitId], references: [id])
+  programYearId String      @map("program_year_id")
+  programYear   ProgramYear @relation(fields: [programYearId], references: [id])
+  nextNumber    Int         @default(1) @map("next_number")
+
+  @@id([orgUnitId, programYearId])
+  @@map("invoice_sequence")
+}
+
+/**
+ * M4 Slice 7: system-design.md §12.2. `lines`/`payments` are Json snapshots
+ * (same reasoning as `ChecklistTemplate.items`) — a line's `duesRecordId`
+ * links back to Slice 6's `DuesRecord` for reconciliation, never embeds it.
+ * Never edited after issue — corrections are a credit note (a new,
+ * negative-total `Invoice` referencing this one via `creditNoteForInvoiceId`),
+ * not a mutation of `lines`/`subtotal`/`total`; the API only ever exposes an
+ * endpoint to create one, never to edit an issued invoice's amounts.
+ */
+model Invoice {
+  id                     String              @id @default(uuid()) @db.Uuid
+  orgUnitId              String              @map("org_unit_id") @db.Uuid
+  orgUnit                OrgUnit             @relation(fields: [orgUnitId], references: [id])
+  programYearId          String              @map("program_year_id")
+  programYear            ProgramYear         @relation(fields: [programYearId], references: [id])
+  invoiceNumber          String              @map("invoice_number")
+  issuedToKind           InvoiceIssuedToKind @map("issued_to_kind")
+  issuedToRef            String?             @map("issued_to_ref") @db.Uuid
+  issuedToName           String              @map("issued_to_name")
+  issuedToEmail          String?             @map("issued_to_email")
+  issuedOn               DateTime            @default(now()) @map("issued_on") @db.Date
+  dueOn                  DateTime            @map("due_on") @db.Date
+  lines                  Json
+  subtotal               Decimal             @db.Decimal(12, 2)
+  total                  Decimal             @db.Decimal(12, 2)
+  currency               String
+  status                 InvoiceStatus       @default(issued)
+  payments               Json                @default("[]")
+  pdfUrl                 String?             @map("pdf_url")
+  sentAt                 DateTime?           @map("sent_at")
+  voidReason              String?            @map("void_reason")
+  creditNoteForInvoiceId String?             @map("credit_note_for_invoice_id") @db.Uuid
+  creditNoteForInvoice   Invoice?            @relation("InvoiceCreditNote", fields: [creditNoteForInvoiceId], references: [id])
+  creditNotes            Invoice[]           @relation("InvoiceCreditNote")
+  createdAt              DateTime            @default(now()) @map("created_at")
+
+  @@unique([orgUnitId, programYearId, invoiceNumber])
+  @@map("invoice")
 }

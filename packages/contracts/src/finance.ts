@@ -124,3 +124,84 @@ export const clubDuesSettings = z.object({
   currency: z.string().nullable(),
 });
 export type ClubDuesSettings = z.infer<typeof clubDuesSettings>;
+
+/**
+ * M4 Slice 7: system-design.md §12.2/§19.3 I-13 — invoice numbers are
+ * gapless per (club, program year) via a sequence table + row lock. Never
+ * edited after issue; corrections are a credit note (a new, negative-total
+ * invoice referencing this one), never a mutation of `lines`/`total`.
+ */
+export const invoiceIssuedToKind = z.enum(['member', 'prospect', 'external']);
+export type InvoiceIssuedToKind = z.infer<typeof invoiceIssuedToKind>;
+
+export const invoiceStatus = z.enum(['draft', 'issued', 'partially_paid', 'paid', 'void']);
+export type InvoiceStatus = z.infer<typeof invoiceStatus>;
+
+export const invoiceLine = z.object({
+  description: z.string(),
+  quantity: z.number(),
+  unitAmount: z.number(),
+  amount: z.number(),
+  duesRecordId: z.uuid().nullable(),
+});
+export type InvoiceLine = z.infer<typeof invoiceLine>;
+
+export const invoicePayment = z.object({
+  ledgerEntryId: z.uuid(),
+  amount: z.number(),
+  at: z.iso.datetime(),
+});
+export type InvoicePayment = z.infer<typeof invoicePayment>;
+
+export const invoice = z.object({
+  id: z.uuid(),
+  orgUnitId: z.uuid(),
+  programYearId: z.string(),
+  invoiceNumber: z.string(),
+  issuedToKind: invoiceIssuedToKind,
+  issuedToRef: z.uuid().nullable(),
+  issuedToName: z.string(),
+  issuedToEmail: z.string().nullable(),
+  issuedOn: z.iso.date(),
+  dueOn: z.iso.date(),
+  lines: z.array(invoiceLine),
+  subtotal: z.number(),
+  total: z.number(),
+  currency: z.string(),
+  status: invoiceStatus,
+  payments: z.array(invoicePayment),
+  pdfUrl: z.string().nullable(),
+  sentAt: z.iso.datetime().nullable(),
+  voidReason: z.string().nullable(),
+  creditNoteForInvoiceId: z.uuid().nullable(),
+  createdAt: z.iso.datetime(),
+});
+export type Invoice = z.infer<typeof invoice>;
+
+/** Generated FROM one or more DuesRecords — this is not an ad hoc line-item entry surface (system-design.md §12.2: "line items link to DuesRecord"). */
+export const createInvoiceRequestSchema = z
+  .object({
+    programYearId: z.string().min(1),
+    duesRecordIds: z.array(z.uuid()).min(1),
+    issuedToKind: invoiceIssuedToKind,
+    issuedToRef: z.uuid().optional(),
+    issuedToName: z.string().min(1),
+    issuedToEmail: z.email().optional(),
+    dueOn: z.iso.date(),
+  })
+  .strict();
+export type CreateInvoiceRequest = z.infer<typeof createInvoiceRequestSchema>;
+
+export const recordInvoicePaymentRequestSchema = z
+  .object({
+    ledgerEntryId: z.uuid(),
+    amount: z.number().positive(),
+  })
+  .strict();
+export type RecordInvoicePaymentRequest = z.infer<typeof recordInvoicePaymentRequestSchema>;
+
+export const voidInvoiceRequestSchema = z.object({ reason: z.string().min(1) }).strict();
+export type VoidInvoiceRequest = z.infer<typeof voidInvoiceRequestSchema>;
+
+export const creditNoteInvoiceRequestSchema = z.object({ reason: z.string().min(1) }).strict();
+export type CreditNoteInvoiceRequest = z.infer<typeof creditNoteInvoiceRequestSchema>;

@@ -10,6 +10,9 @@ import { ClubDuesSettingsController } from './club-dues-settings.controller';
 import { DuesRecordRepository } from './dues-record.repository';
 import { DuesRecordService } from './dues-record.service';
 import { DuesRecordController } from './dues-record.controller';
+import { InvoiceRepository } from './invoice.repository';
+import { InvoiceService } from './invoice.service';
+import { InvoiceController } from './invoice.controller';
 
 @Module({
   imports: [IdentityModule],
@@ -20,8 +23,15 @@ import { DuesRecordController } from './dues-record.controller';
     ClubDuesSettingsRepository,
     DuesRecordRepository,
     DuesRecordService,
+    InvoiceRepository,
+    InvoiceService,
   ],
-  controllers: [LedgerEntryController, ClubDuesSettingsController, DuesRecordController],
+  controllers: [
+    LedgerEntryController,
+    ClubDuesSettingsController,
+    DuesRecordController,
+    InvoiceController,
+  ],
   exports: [LedgerEntryRepository, LedgerEntryService],
 })
 export class FinanceModule {}

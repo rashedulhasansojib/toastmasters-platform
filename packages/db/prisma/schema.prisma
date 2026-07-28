@@ -105,6 +105,8 @@ model Person {
   speechSlotsRequested      SpeechSlot[]
   capabilityTokensIssued    CapabilityToken[]
   meetingLiveRecords        MeetingLiveRecord[]
+  ballotsCreated            Ballot[]
+  votesReceived             Vote[]              @relation("VoteCandidate")
 
   @@map("person")
 }
@@ -232,8 +234,81 @@ model Meeting {
   checklistRuns   ChecklistRun[]
   capabilityTokens CapabilityToken[]
   liveRecords     MeetingLiveRecord[]
+  ballots         Ballot[]
 
   @@map("meeting")
+}
+
+enum BallotCategory {
+  best_speaker
+  best_table_topic
+  best_evaluator
+  best_role_player
+
+  @@map("ballot_category")
+}
+
+enum BallotStatus {
+  open
+  tallied
+
+  @@map("ballot_status")
+}
+
+enum BallotEligibility {
+  members_present
+  all_present
+
+  @@map("ballot_eligibility")
+}
+
+/**
+ * M3 Slice 10: system-design.md §9.4. Scoped down: a ballot is created
+ * already `open` — the spec's separate closed→open transition is collapsed
+ * into one step (nothing needs a ballot to exist-but-not-yet-be-votable
+ * yet). `eligibility: all_present` is stored but not yet behaviorally wired
+ * to guest voting — casting a vote via a capability token (the natural
+ * `all_present` consumer, per the Slice 6 primitive) is deferred; only
+ * authenticated club members vote in this slice.
+ * `candidates` is a Json snapshot — member-only PersonRef for now, no
+ * ProspectRef candidates until M4.
+ */
+model Ballot {
+  id          String            @id @default(uuid()) @db.Uuid
+  meetingId   String            @map("meeting_id") @db.Uuid
+  meeting     Meeting           @relation(fields: [meetingId], references: [id])
+  category    BallotCategory
+  status      BallotStatus      @default(open)
+  eligibility BallotEligibility
+  candidates  Json
+  createdBy   String            @map("created_by") @db.Uuid
+  createdByPerson Person        @relation(fields: [createdBy], references: [id])
+  createdAt   DateTime          @default(now()) @map("created_at")
+  tallyResult Json?             @map("tally_result")
+  talliedBy   String?           @map("tallied_by") @db.Uuid
+  talliedAt   DateTime?         @map("tallied_at")
+  votes       Vote[]
+
+  @@unique([meetingId, category])
+  @@map("ballot")
+}
+
+/**
+ * `voterHash = HMAC-SHA256(key: ballotId, message: personId)` (system-design.md
+ * §9.4) — enforces one vote per person per ballot and detects duplicates
+ * without the row itself revealing who voted for whom.
+ */
+model Vote {
+  id                String   @id @default(uuid()) @db.Uuid
+  ballotId          String   @map("ballot_id") @db.Uuid
+  ballot            Ballot   @relation(fields: [ballotId], references: [id])
+  voterHash         String   @map("voter_hash")
+  candidatePersonId String   @map("candidate_person_id") @db.Uuid
+  candidate         Person   @relation("VoteCandidate", fields: [candidatePersonId], references: [id])
+  castAt            DateTime @default(now()) @map("cast_at")
+
+  @@unique([ballotId, voterHash])
+  @@map("vote")
 }
 
 enum MeetingLiveToolKind {

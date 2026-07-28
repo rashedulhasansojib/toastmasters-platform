@@ -348,3 +348,58 @@ export const meetingLiveRecord = z.object({
   createdAt: z.iso.datetime(),
 });
 export type MeetingLiveRecord = z.infer<typeof meetingLiveRecord>;
+
+/**
+ * M3 Slice 10: system-design.md §9.4. Scoped down (see the schema comment
+ * on `Ballot`): created already `open`, member candidates only,
+ * `all_present`/guest voting not yet wired.
+ */
+export const ballotCategory = z.enum([
+  'best_speaker',
+  'best_table_topic',
+  'best_evaluator',
+  'best_role_player',
+]);
+export type BallotCategory = z.infer<typeof ballotCategory>;
+
+export const ballotStatus = z.enum(['open', 'tallied']);
+export type BallotStatus = z.infer<typeof ballotStatus>;
+
+export const ballotEligibility = z.enum(['members_present', 'all_present']);
+export type BallotEligibility = z.infer<typeof ballotEligibility>;
+
+export const ballotCandidate = z.object({ personId: z.uuid(), label: z.string().min(1) });
+export type BallotCandidate = z.infer<typeof ballotCandidate>;
+
+export const ballotTallyResult = z.object({
+  winnerPersonId: z.uuid().nullable(),
+  tally: z.array(z.object({ personId: z.uuid(), count: z.number().int().nonnegative() })),
+  tiedWith: z.array(z.uuid()),
+});
+export type BallotTallyResult = z.infer<typeof ballotTallyResult>;
+
+export const ballot = z.object({
+  id: z.uuid(),
+  meetingId: z.uuid(),
+  category: ballotCategory,
+  status: ballotStatus,
+  eligibility: ballotEligibility,
+  candidates: z.array(ballotCandidate),
+  createdBy: z.uuid(),
+  createdAt: z.iso.datetime(),
+  tallyResult: ballotTallyResult.nullable(),
+  talliedAt: z.iso.datetime().nullable(),
+});
+export type Ballot = z.infer<typeof ballot>;
+
+export const createBallotRequestSchema = z
+  .object({
+    category: ballotCategory,
+    eligibility: ballotEligibility,
+    candidates: z.array(ballotCandidate).min(2),
+  })
+  .strict();
+export type CreateBallotRequest = z.infer<typeof createBallotRequestSchema>;
+
+export const castVoteRequestSchema = z.object({ candidatePersonId: z.uuid() }).strict();
+export type CastVoteRequest = z.infer<typeof castVoteRequestSchema>;

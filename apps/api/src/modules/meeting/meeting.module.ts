@@ -21,6 +21,8 @@ import { MeetingLiveRecordController } from './meeting-live-record.controller';
 import { RoleRotationRepository } from './role-rotation.repository';
 import { AgendaTemplateRepository } from './agenda-template.repository';
 import { AgendaTemplateController } from './agenda-template.controller';
+import { BallotRepository } from './ballot.repository';
+import { BallotController } from './ballot.controller';
 
 @Module({
   providers: [
@@ -36,6 +38,7 @@ import { AgendaTemplateController } from './agenda-template.controller';
     MeetingLiveRecordRepository,
     RoleRotationRepository,
     AgendaTemplateRepository,
+    BallotRepository,
   ],
   controllers: [
     MeetingController,
@@ -47,6 +50,7 @@ import { AgendaTemplateController } from './agenda-template.controller';
     CapabilityTokenController,
     MeetingLiveRecordController,
     AgendaTemplateController,
+    BallotController,
   ],
   exports: [MeetingRepository, CapabilityTokenRepository],
 })

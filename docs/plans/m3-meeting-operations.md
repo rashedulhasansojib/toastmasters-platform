@@ -211,3 +211,28 @@
 - [x] Repository + controller wiring.
 - [x] lint/typecheck clean; test suite deferred (session note above).
 - [x] Commit: `feat(meeting): agenda templates — build once, apply to any meeting`
+
+---
+
+## Slice 10 — Ballots (anonymous meeting awards)
+
+**Why:** `system-design.md` §9.4. Ballot anonymity (Phase 0 decision #2) is already settled for this specific case per `CLAUDE.md` §5's documented divergence: "meeting award ballots are anonymous" (governance motion votes, a separate later resource, are attributable — not the same thing).
+
+**Scoping decisions:**
+
+- **Created already `open`** — the spec's `closed → open` transition is collapsed into one step; nothing yet needs a ballot to exist-but-not-votable.
+- **Member candidates only** — `ProspectRef` candidates wait for M4's `Prospect` model.
+- **Member-only voting** — `eligibility: all_present` is stored (schema-complete) but not yet behaviorally wired to guest voting through the Slice 6 capability-token primitive; that's the natural next consumer, deferred as its own increment.
+- **`voterHash = HMAC-SHA256(key: ballotId, message: personId)`**, exactly as specified — one vote per `(ballot, voter)` via the DB's own unique constraint (`P2002` → 409), not an in-transaction check.
+- **Tally freezes the result** — `tallyResult` is written once on tally and never recomputed; re-tallying 400s.
+- **Two resources**: `meeting.ballot` (officer-controlled: create/read/approve-to-tally) and `meeting.vote` (member-level: create) — kept separate so a member's vote grant doesn't also let them create or tally ballots.
+
+**Files:** `packages/db/prisma/schema.prisma` (+`Ballot`, `Vote`, +migration), `packages/db/src/seed.ts` (two resources + grants), `packages/contracts/src/meeting.ts` (+ballot/vote schemas), `apps/api/src/modules/meeting/ballot.{repository,controller}.ts` (new), `meeting.module.ts`.
+
+**Tests** (`ballot-http.int-spec.ts`, new): a VPE opens a best-speaker ballot, two members vote, a duplicate vote 409s, tallying picks the correct winner, voting after tally 400s; sibling-club member 403's on ballot creation. (Test setup note: two `club_member` RoleAssignments in one club needed a second `ProgramYear` to dodge the pre-existing `role_assignment_singleton` index, which isn't scoped by `role_template.is_singleton` yet — same latent gap Slice 8's test hit.)
+
+- [x] Schema + migration + seed (two resources).
+- [x] Repository + controller + module wiring.
+- [x] Bumped resource count (15→17) and `authorization-matrix.int-spec.ts`.
+- [x] lint/typecheck clean; test suite deferred (session note above).
+- [x] Commit: `feat(meeting): ballots — anonymous meeting-award voting with a frozen tally`

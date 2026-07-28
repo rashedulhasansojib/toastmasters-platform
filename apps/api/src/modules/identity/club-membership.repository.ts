@@ -1,0 +1,51 @@
+import { Injectable } from '@nestjs/common';
+import { getPrisma, type PrismaClient } from '@toastmasters/db';
+import type { ClubMembership, ClubMemberType } from '@toastmasters/contracts';
+
+type ClubMembershipRow = Awaited<ReturnType<PrismaClient['clubMembership']['create']>>;
+
+function toClubMembership(row: ClubMembershipRow): ClubMembership {
+  return {
+    id: row.id,
+    personId: row.personId,
+    clubUnitId: row.clubUnitId,
+    memberType: row.memberType,
+    joinedAt: row.joinedAt.toISOString(),
+    leftAt: row.leftAt?.toISOString() ?? null,
+    isPrimary: row.isPrimary,
+    tiStanding: row.tiStanding,
+    localStatus: row.localStatus,
+    provenance: row.provenance,
+    lastReconciledAt: row.lastReconciledAt?.toISOString() ?? null,
+  };
+}
+
+@Injectable()
+export class ClubMembershipRepository {
+  constructor(private readonly db: PrismaClient = getPrisma()) {}
+
+  async create(input: {
+    personId: string;
+    clubUnitId: string;
+    memberType: ClubMemberType;
+    isPrimary?: boolean;
+  }): Promise<ClubMembership> {
+    const row = await this.db.clubMembership.create({
+      data: {
+        personId: input.personId,
+        clubUnitId: input.clubUnitId,
+        memberType: input.memberType,
+        isPrimary: input.isPrimary ?? false,
+      },
+    });
+    return toClubMembership(row);
+  }
+
+  async findByPerson(personId: string): Promise<ClubMembership[]> {
+    const rows = await this.db.clubMembership.findMany({
+      where: { personId },
+      orderBy: { joinedAt: 'asc' },
+    });
+    return rows.map(toClubMembership);
+  }
+}

@@ -51,5 +51,135 @@ model OrgUnit {
   createdAt DateTime      @default(now()) @map("created_at")
   updatedAt DateTime      @updatedAt @map("updated_at")
 
+  clubMemberships ClubMembership[]
+  roleAssignments RoleAssignment[]
+
   @@map("org_unit")
+}
+
+enum PersonStatus {
+  invited
+  active
+  disabled
+}
+
+model Person {
+  id                String       @id @default(uuid()) @db.Uuid
+  email             String       @unique
+  passwordHash      String?      @map("password_hash")
+  fullName          String       @map("full_name")
+  phone             String?
+  photoUrl          String?      @map("photo_url")
+  bio               String?
+  tiMemberNumber    String?      @map("ti_member_number")
+  status            PersonStatus @default(invited)
+  mfaEnabled        Boolean      @default(false) @map("mfa_enabled")
+  permissionVersion Int          @default(1) @map("permission_version")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  lastLoginAt       DateTime?    @map("last_login_at")
+
+  clubMemberships ClubMembership[]
+  roleAssignments RoleAssignment[] @relation("RoleAssignmentPerson")
+  appointedRoles  RoleAssignment[] @relation("RoleAssignmentAppointedBy")
+
+  @@map("person")
+}
+
+enum ClubMemberType {
+  new
+  renewing
+  dual
+  reinstated
+  charter
+  transfer
+  honorary
+}
+
+enum ClubMembershipTiStanding {
+  good
+  lapsed
+  unknown
+}
+
+enum ClubMembershipLocalStatus {
+  active
+  inactive
+  on_leave
+  suspended
+}
+
+enum ClubMembershipProvenance {
+  portal
+  ti_import
+}
+
+model ClubMembership {
+  id               String                    @id @default(uuid()) @db.Uuid
+  personId         String                    @map("person_id") @db.Uuid
+  person           Person                    @relation(fields: [personId], references: [id])
+  clubUnitId       String                    @map("club_unit_id") @db.Uuid
+  clubUnit         OrgUnit                   @relation(fields: [clubUnitId], references: [id])
+  memberType       ClubMemberType            @map("member_type")
+  joinedAt         DateTime                  @default(now()) @map("joined_at")
+  leftAt           DateTime?                 @map("left_at")
+  isPrimary        Boolean                   @default(false) @map("is_primary")
+  tiStanding       ClubMembershipTiStanding  @default(unknown) @map("ti_standing")
+  localStatus      ClubMembershipLocalStatus @default(active) @map("local_status")
+  provenance       ClubMembershipProvenance  @default(portal)
+  lastReconciledAt DateTime?                 @map("last_reconciled_at")
+
+  @@map("club_membership")
+}
+
+enum RoleAssignmentStatus {
+  pending
+  active
+  ended
+  revoked
+}
+
+enum RoleAssignmentEndedReason {
+  term_end
+  resigned
+  removed
+  succeeded
+}
+
+model RoleAssignment {
+  id                String                     @id @default(uuid()) @db.Uuid
+  personId          String                     @map("person_id") @db.Uuid
+  person            Person                     @relation("RoleAssignmentPerson", fields: [personId], references: [id])
+  orgUnitId         String                     @map("org_unit_id") @db.Uuid
+  orgUnit           OrgUnit                    @relation(fields: [orgUnitId], references: [id])
+  // Plain text until Slice 3 seeds role_template and adds the FK — rbac-design.md §3.
+  role              String
+  programYearId     String                     @map("program_year_id")
+  programYear       ProgramYear                @relation(fields: [programYearId], references: [id])
+  termStart         DateTime                   @map("term_start") @db.Date
+  termEnd           DateTime                   @map("term_end") @db.Date
+  status            RoleAssignmentStatus       @default(pending)
+  appointedBy       String                     @map("appointed_by") @db.Uuid
+  appointedByPerson Person                     @relation("RoleAssignmentAppointedBy", fields: [appointedBy], references: [id])
+  appointedAt       DateTime                   @default(now()) @map("appointed_at")
+  trainedAt         Json                       @default("[]") @map("trained_at")
+  endedReason       RoleAssignmentEndedReason? @map("ended_reason")
+
+  @@map("role_assignment")
+}
+
+enum ProgramYearStatus {
+  upcoming
+  current
+  closed
+}
+
+model ProgramYear {
+  id       String            @id // e.g. "2026-2027" — not a UUID
+  startsOn DateTime          @map("starts_on") @db.Date
+  endsOn   DateTime          @map("ends_on") @db.Date
+  status   ProgramYearStatus @default(upcoming)
+
+  roleAssignments RoleAssignment[]
+
+  @@map("program_year")
 }

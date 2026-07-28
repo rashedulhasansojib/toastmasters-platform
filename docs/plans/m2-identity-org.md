@@ -10,14 +10,13 @@
 
 > **Scope note.** M1's plan sketched its full slice roadmap before detailing
 > any slice, because the whole milestone's shape was known up front. M2 is
-> being scoped incrementally instead: **Slices 1–6** below are detailed and
-> execution-ready. Slice 7 (the unit switcher's dashboard UI, consuming
-> Slice 6's two endpoints) and permission-versioning UX (mid-session JWT
-> reissue) will each get their own detailed section, written just before
-> they're implemented, once each prior slice's shape has proven out —
-> mirroring M1's own governing principle: "if `authorize()` feels awkward
-> here, fix it before M2" applies equally to "if the invitation/org-editor/
-> unit-policy shape feels awkward here, fix it before the next slice."
+> being scoped incrementally instead: **Slices 1–7** below are detailed and
+> execution-ready. Permission-versioning UX (mid-session JWT reissue) will
+> get its own detailed section, written just before it's implemented, once
+> Slice 7's shape has proven out — mirroring M1's own governing principle:
+> "if `authorize()` feels awkward here, fix it before M2" applies equally to
+> "if the invitation/org-editor/unit-policy/dashboard shape feels awkward
+> here, fix it before the next slice."
 
 ---
 
@@ -1060,6 +1059,75 @@ git commit -m "feat(access): audit every grant-mutating write path, not just bre
 ```bash
 git add packages/contracts apps/api/src/modules/identity apps/api/src/modules/access apps/api/src/modules/org apps/api/src/common/auth apps/api/test
 git commit -m "feat(access): session query endpoints — GET /me and GET /switchable-units"
+```
+
+---
+
+## Slice 7 — Dashboard shell: login + unit switcher (first frontend UI)
+
+**Why:** `system-design.md` §22: the dashboard shell renders "**unit switcher** (District / Division / Area / Club)." Slice 6 built the two reads it needs (`GET /me`, `GET /switchable-units`); `POST /v1/auth/switch-unit` has worked since M1 Slice 8. Nothing in `apps/dashboard` consumes any of it yet — the app is still exactly the Phase-0 scaffold (`layout.tsx`, `page.tsx`, `globals.css`, `lib/api.ts`, an empty `components/`), with no routing beyond the root page and no auth of any kind. This is the first real frontend slice in the project.
+
+**A real architecture decision, not scope creep — the cross-origin cookie problem:** the API (`localhost:4000`) and dashboard (`localhost:3000`) are different origins in dev, and `docs/deployment.md` (production topology) doesn't exist yet, so there's no answer yet to "do they share a domain in prod." An httpOnly cookie the API sets is invisible to the dashboard's own Next.js server — a Server Component reading `next/headers` `cookies()` for SSR would see nothing, because the browser only attaches a cookie to requests to the domain that set it. Resolved here with the standard **BFF (backend-for-frontend) proxy pattern**, which sidesteps the undecided prod-domain question entirely rather than presuming an answer to it: two Next.js **Route Handlers** inside `apps/dashboard` (`/api/session/login`, `/api/session/switch-unit`) call the real API server-to-server (Node process to Node process — no browser, no CORS involved), then re-mint the session cookie on the **dashboard's own origin** by extracting just the token value from the API's `Set-Cookie` response header. The browser only ever talks to the dashboard's own origin for anything session-related — matching `playwright.config.ts`'s existing `baseURL: 'http://localhost:3000'`, which already assumes exactly this shape. `CLAUDE.md`'s rule that "the browser never holds a long-lived token" holds either way — it's still only ever an httpOnly cookie, just minted by the dashboard's own route handler instead of directly by the API.
+
+**A minimal login page is in scope, not scope creep.** A unit switcher cannot be demonstrated end-to-end without a way to log in first, and `CLAUDE.md`'s Definition of Done requires "behaviour demonstrated end-to-end," not green tests in isolation.
+
+**Scoping decisions:**
+
+- **Switchable units = exactly what Slice 6's endpoint returns** — no client-side re-derivation, no tree/search widget. A `&lt;select&gt;` is enough to prove the mechanism for however many units a person holds.
+- **No logout route in this slice.** Not needed to demonstrate login → switch; a one-line addition later (clear the dashboard's own cookie) when something actually needs it.
+- **No new UI dependency.** Plain CSS matching `globals.css`'s existing convention — `CLAUDE.md` requires asking before any new dependency, and a `&lt;select&gt;` and a form don't need one.
+- **Only the unit switcher, not the rest of `system-design.md` §22's "Shell" bullet** (program-year selector, date-range selector, grant-filtered left nav) — those are independent widgets with their own data needs; bundling them here would be exactly the kind of scope creep `CLAUDE.md` warns against ("fix the ticket").
+- **Server Components own every data fetch; `'use client'` is scoped to exactly the two interactive pieces** (the login form, the switcher's `<select>` + submit) — `CLAUDE.md`'s frontend convention. The switcher receives its unit list as a prop from the Server Component layout, not via its own client-side fetch-on-mount.
+- **`NEXT_PUBLIC_API_URL`** (already the dashboard's one existing env var, used by `lib/api.ts`'s health check) **is reused for the route handlers' server-to-server calls** — no new env var. It's misleadingly `NEXT_PUBLIC_`-prefixed for what's about to become a server-only usage too, but renaming it is a separate, unrelated cleanup, not this slice's job.
+- **Verification is manual-browser-driven, not a new Playwright suite, this slice.** `playwright.config.ts` exists but `tests/e2e/` doesn't yet, and the browser binary Playwright 1.62 wants (chromium-1234) isn't in the local cache (only older 1223/1228 builds are) — installing it is a one-time environment action, not a code change, and downloading it unprompted mid-slice isn't this slice's call to make. More fundamentally, a real Playwright run needs the API + Postgres + Redis actually running with known login credentials, and no seed/fixture strategy for that exists yet (`playwright.config.ts`'s `webServer` currently boots only the dashboard). Both are flagged here rather than guessed at or silently built around. This slice is verified instead by running the real dev stack (`docker compose up`, `pnpm --filter api dev`, `pnpm --filter dashboard dev`) and driving the actual login → see units → switch flow in a real browser by hand — satisfying `CLAUDE.md`'s "drive the real behaviour... not just green tests" for UI work without inventing e2e infrastructure this slice doesn't need to invent.
+
+**Files:**
+
+- New: `apps/dashboard/src/lib/session.ts` (`getSession()`, `getSwitchableUnits()` — server-only, read the dashboard's own cookie via `next/headers`, forward it to the API).
+- New: `apps/dashboard/src/app/api/session/login/route.ts`, `apps/dashboard/src/app/api/session/switch-unit/route.ts`.
+- New: `apps/dashboard/src/app/login/page.tsx`, `apps/dashboard/src/components/LoginForm.tsx` (`'use client'`).
+- New: `apps/dashboard/src/components/UnitSwitcher.tsx` (`'use client'`).
+- Modify: `apps/dashboard/src/app/layout.tsx` (header shell: full name + `UnitSwitcher` when a session exists, a login link when it doesn't).
+
+**Implementation steps** (frontend — no DB/Testcontainers layer here, so this isn't the usual red/green TDD cadence; each step is implement-then-manually-verify against the real running stack):
+
+- [ ] **Step 1: `lib/session.ts` — `getSession()` and `getSwitchableUnits()`**
+
+  Read the `session` cookie via `next/headers` `cookies()`; if absent, `getSession()` returns `null` without calling the API. If present, forward it as a `Cookie` header to `GET {NEXT_PUBLIC_API_URL}/v1/auth/me`; a 401 (expired/invalid) also returns `null`, not a thrown error — callers treat "no session" as the normal logged-out case, not a fault. `getSwitchableUnits()` does the same against `GET /v1/auth/switchable-units`, returning `[]` if there's no session (never called without one in practice, but must not throw). Both response bodies parsed with `sessionResponseSchema`/`switchableUnit.array()` from `@toastmasters/contracts` — never a hand-written interface, per `CLAUDE.md`.
+
+- [ ] **Step 2: `POST /api/session/login`**
+
+  Parses the body with `loginRequestSchema`, calls `POST {NEXT_PUBLIC_API_URL}/v1/auth/login` server-to-server. On the API's 401, relay 401. On 200, extract the token from the upstream `Set-Cookie` (`session=([^;]+)`) and re-set it as this route's own cookie (`httpOnly: true`, `secure: NODE_ENV==='production'`, `sameSite: 'lax'`, `path: '/'`, and `maxAge` parsed from the same upstream header's `Max-Age` — never a hardcoded duplicate of `SESSION_TTL_SECONDS`), then return the session body.
+
+- [ ] **Step 3: `POST /api/session/switch-unit`**
+
+  Same shape as Step 2, forwarding the dashboard's own cookie to the API's `switch-unit` call instead of a login body, re-minting the cookie from the response the same way.
+
+- [ ] **Step 4: `LoginForm` + `/login` page**
+
+  `login/page.tsx` is a Server Component; if `getSession()` already returns a session, redirect to `/`. `LoginForm` (`'use client'`) posts to `/api/session/login`, and on success calls `router.push('/')` + `router.refresh()` (so the Server Component layout re-fetches the now-real session); on failure shows an inline error, no page reload.
+
+- [ ] **Step 5: `UnitSwitcher` component**
+
+  A `<select>` of `{name} ({type})` options plus a submit button (works with JS-disabled as a plain form `POST`, progressively enhanced with `'use client'` for a no-reload experience); receives `units: SwitchableUnit[]` and `activeUnitId` as props — no fetch of its own. Submits to `/api/session/switch-unit`, then `router.refresh()`.
+
+- [ ] **Step 6: Wire the layout shell**
+
+  `layout.tsx` becomes an `async` Server Component: calls `getSession()`; if present, also calls `getSwitchableUnits()` and renders a header with the person's `fullName` and `<UnitSwitcher>`; if absent, renders a plain "Log in" link to `/login`. No left-nav, no program-year selector — out of scope per the notes above.
+
+- [ ] **Step 7: Manual verification against the real dev stack**
+
+  `docker compose -f infra/docker-compose.yml up -d`, `pnpm --filter @toastmasters/db migrate:deploy && pnpm --filter @toastmasters/db seed`, `pnpm --filter @toastmasters/api dev`, `pnpm --filter @toastmasters/dashboard dev` — then, since the seed only populates reference vocabulary (no demo person), create one real test person + role assignment through the actual API (the same invitation-or-direct-appointment paths every other slice's own int-specs exercise, run once by hand here) and drive: visit `/`, see the login link → `/login`, log in, land back on `/` with the header showing the person's name and the switcher populated with their real units → pick a different one → confirm the page reflects the new `activeUnitId` (e.g. via a quick `GET /api/session/login`... — actually via the rendered header, which re-reads the session after `router.refresh()`) and that the dashboard's cookie (visible in browser devtools) changed. Document the exact commands and observed result here once run, the same evidentiary bar every backend slice's gate output already meets.
+
+- [ ] **Step 8: Full gate**
+
+  `pnpm lint && pnpm typecheck && pnpm build` (no `apps/dashboard` test suite exists yet — component-level testing is a bigger tooling decision than this slice, per the scoping notes above) plus the existing `apps/api` `pnpm test && pnpm test:int` to confirm Slice 6's endpoints are undisturbed.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add apps/dashboard docs/plans/m2-identity-org.md
+git commit -m "feat(dashboard): login and unit switcher — the first dashboard UI"
 ```
 
 ---

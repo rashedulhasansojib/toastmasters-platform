@@ -19,6 +19,7 @@ import { RequestSpeechSlotForm } from '@/components/speechslots/RequestSpeechSlo
 import { SpeechSlotsList } from '@/components/speechslots/SpeechSlotsList';
 import { ChecklistRunsList } from '@/components/checklists/ChecklistRunsList';
 import { StartChecklistRunButton } from '@/components/checklists/StartChecklistRunButton';
+import { IssueGuestLinkCard } from '@/components/guest/IssueGuestLinkCard';
 
 export default async function MeetingPage({
   params,
@@ -107,6 +108,11 @@ export default async function MeetingPage({
           templates={checklistTemplates}
         />
         <ChecklistRunsList clubUnitId={clubUnitId} meetingId={meetingId} runs={checklistRuns} />
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2>Guest links</h2>
+        <IssueGuestLinkCard clubUnitId={clubUnitId} meetingId={meetingId} />
       </section>
     </main>
   );

@@ -2,6 +2,7 @@ import {
   agendaItem,
   agendaTemplate,
   ballot,
+  capabilityTokenVerification,
   checklistRun,
   checklistTemplate,
   meeting,
@@ -12,6 +13,7 @@ import {
   type AgendaItem,
   type AgendaTemplate,
   type Ballot,
+  type CapabilityTokenVerification,
   type ChecklistRun,
   type ChecklistTemplate,
   type Meeting,
@@ -21,7 +23,7 @@ import {
   type RoleRotationSuggestion,
   type SpeechSlot,
 } from '@toastmasters/contracts';
-import { authedFetch } from './session-proxy';
+import { authedFetch, callApi } from './session-proxy';
 
 export async function listMeetings(clubUnitId: string): Promise<Meeting[]> {
   const response = await authedFetch(`/v1/clubs/${clubUnitId}/meetings`);
@@ -106,4 +108,15 @@ export async function getBallots(clubUnitId: string, meetingId: string): Promise
   const response = await authedFetch(`/v1/clubs/${clubUnitId}/meetings/${meetingId}/ballots`);
   if (!response.ok) return [];
   return ballot.array().parse(await response.json());
+}
+
+/** M3 Slice 6: `@Public()` on the API — guests hit this with no session/account, so it goes through `callApi` directly rather than `authedFetch`, which would forward a cookie a guest never has. */
+export async function verifyCapabilityToken(token: string): Promise<CapabilityTokenVerification> {
+  const response = await callApi('/v1/capability-tokens/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  });
+  if (!response.ok) return { valid: false, meetingId: null, purpose: null };
+  return capabilityTokenVerification.parse(await response.json());
 }

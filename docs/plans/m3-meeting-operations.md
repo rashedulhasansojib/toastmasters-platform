@@ -236,3 +236,26 @@
 - [x] Bumped resource count (15→17) and `authorization-matrix.int-spec.ts`.
 - [x] lint/typecheck clean; test suite deferred (session note above).
 - [x] Commit: `feat(meeting): ballots — anonymous meeting-award voting with a frozen tally`
+
+---
+
+## Slice 11 — Role confirm/decline + guarded meeting close-out
+
+**Why:** `system-design.md` §9.5, the ship gate's final piece. Bundles two things because the second is unusable without the first: `Meeting` had no lifecycle status at all (M1 left it deliberately bare); and Slice 3 deferred `MeetingRoleAssignment` status transitions, which means without this slice a meeting with _any_ role assignment could never satisfy close's "no proposed roles remain" guard — they'd be stuck at `proposed` forever.
+
+**Scoping decisions:**
+
+- **`reopen` deferred** — §9.5 requires it to be reason-audited; that's a real feature (wiring into the existing `AuditEvent` trail from M2 Slice 5), not a quick add, and nothing downstream needs it yet.
+- **No domain events** (`MeetingHeld`, `RoleFulfilled`×n, `SpeechDelivered`×n, `AttendanceRecorded`) — no event bus exists in this codebase yet (that's M7/M8 territory: education records, DCP projection). Close's two _persisted_ effects — role fulfillment and token revocation — happen directly, in the same transaction as the status change, without an event layer in between.
+- **`publish`'s "checklist run created"/"role invitations sent" and `start`'s "tools go live"** are UX-surface effects with nothing to persist here — skipped as transition guards, not modeled at all.
+- **Confirm/decline is officer-gated** (`meeting.role:update`, already granted to `club_vpe` since Slice 3) rather than assignee-scoped — the assignee calling it themselves needs an `own`-condition check this slice doesn't build.
+- **`cancel` uses a distinct `cancelled` status**, not reusing `closed` — the design's ASCII diagram is ambiguous on this point, but collapsing "never happened" into "happened and closed" loses real information (attendance, DCP) the product needs later.
+
+**Files:** `packages/db/prisma/schema.prisma` (+`Meeting.status`, +`MeetingStatus`, +migration), `packages/contracts/src/meeting.ts` (+`meetingStatus`, +`updateMeetingRoleAssignmentStatusRequestSchema`), `apps/api/src/modules/meeting/meeting-lifecycle.repository.ts` (new — the only repository in this module with a real multi-step transaction), `meeting.controller.ts` (+publish/start/close/cancel), `meeting-role-assignment.repository.ts` (+`updateStatus`), `meeting-role-assignment.controller.ts` (+`PATCH :id`), `meeting.repository.ts` (`toMeeting` gains `status`), `meeting.module.ts`.
+
+**Tests** (`meeting-lifecycle-http.int-spec.ts`, new): (1) full happy path draft→published→in_progress→closed, with a confirmed role becoming `fulfilled` on close; (2) a `proposed` role assignment blocks close (400); (3) starting a `draft` meeting (skipping `publish`) is rejected (400).
+
+- [x] Schema + migration.
+- [x] Repository + controller wiring (lifecycle transitions on `MeetingController`; status transition on `MeetingRoleAssignmentController`).
+- [x] lint/typecheck clean; test suite deferred (session note above).
+- [x] Commit: `feat(meeting): guarded close-out — meeting lifecycle + role confirm/decline`

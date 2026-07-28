@@ -23,11 +23,13 @@ import { AgendaTemplateRepository } from './agenda-template.repository';
 import { AgendaTemplateController } from './agenda-template.controller';
 import { BallotRepository } from './ballot.repository';
 import { BallotController } from './ballot.controller';
+import { MeetingLifecycleRepository } from './meeting-lifecycle.repository';
 
 @Module({
   providers: [
     { provide: PRISMA_CLIENT, useFactory: () => getPrisma() },
     MeetingRepository,
+    MeetingLifecycleRepository,
     AgendaItemRepository,
     MeetingRoleAssignmentRepository,
     SpeechSlotRepository,

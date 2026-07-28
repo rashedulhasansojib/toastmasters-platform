@@ -11,6 +11,7 @@ function toMeeting(row: MeetingRow): Meeting {
     clubUnitId: row.clubUnitId,
     programYearId: row.programYearId,
     scheduledAt: row.scheduledAt.toISOString(),
+    status: row.status,
     createdBy: row.createdBy,
     createdAt: row.createdAt.toISOString(),
   };

@@ -1,16 +1,19 @@
 import { z } from 'zod';
 
 /**
- * Deliberately bare (Slice 9 of the M1 walking-skeleton plan): a record to
- * hang authorization on, not the full meeting-operations entity
- * (system-design.md's agenda/roles/speech-slots/lifecycle) — that's a later
- * milestone.
+ * Deliberately bare at first (Slice 9 of the M1 walking-skeleton plan): a
+ * record to hang authorization on. M3 built the aggregate underneath it;
+ * Slice 11 adds the lifecycle status system-design.md §9.5 describes.
  */
+export const meetingStatus = z.enum(['draft', 'published', 'in_progress', 'closed', 'cancelled']);
+export type MeetingStatus = z.infer<typeof meetingStatus>;
+
 export const meeting = z.object({
   id: z.uuid(),
   clubUnitId: z.uuid(),
   programYearId: z.string().min(1),
   scheduledAt: z.iso.datetime(),
+  status: meetingStatus,
   createdBy: z.uuid(),
   createdAt: z.iso.datetime(),
 });
@@ -135,6 +138,17 @@ export const createMeetingRoleAssignmentRequestSchema = z
   .strict();
 export type CreateMeetingRoleAssignmentRequest = z.infer<
   typeof createMeetingRoleAssignmentRequestSchema
+>;
+
+/** M3 Slice 11: the assignee/officer confirms or declines a proposed role assignment. `fulfilled`/`no_show` are set only by guarded close-out, never client-supplied. */
+export const updateMeetingRoleAssignmentStatusRequestSchema = z
+  .object({
+    status: z.enum(['confirmed', 'declined']),
+    declinedReason: z.string().min(1).optional(),
+  })
+  .strict();
+export type UpdateMeetingRoleAssignmentStatusRequest = z.infer<
+  typeof updateMeetingRoleAssignmentStatusRequestSchema
 >;
 
 /** M3 Slice 8: system-design.md §9.3 — ranked, reasoned suggestions, never auto-assignment. */

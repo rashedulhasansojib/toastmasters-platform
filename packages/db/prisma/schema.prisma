@@ -218,6 +218,16 @@ model ProgramYear {
  * (agenda, roles, speech slots, lifecycle states, checklists) is a later
  * milestone.
  */
+enum MeetingStatus {
+  draft
+  published
+  in_progress
+  closed
+  cancelled
+
+  @@map("meeting_status")
+}
+
 model Meeting {
   id              String      @id @default(uuid()) @db.Uuid
   clubUnitId      String      @map("club_unit_id") @db.Uuid
@@ -225,6 +235,7 @@ model Meeting {
   programYearId   String      @map("program_year_id")
   programYear     ProgramYear @relation(fields: [programYearId], references: [id])
   scheduledAt     DateTime    @map("scheduled_at")
+  status          MeetingStatus @default(draft)
   createdBy       String      @map("created_by") @db.Uuid
   createdByPerson Person      @relation(fields: [createdBy], references: [id])
   createdAt       DateTime    @default(now()) @map("created_at")

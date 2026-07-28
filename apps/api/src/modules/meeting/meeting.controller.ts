@@ -10,6 +10,7 @@ import { ResourceScope } from '../../common/authz/resource-scope.decorator';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
 import type { Principal } from '../../common/authz/authz.types';
 import { MeetingRepository } from './meeting.repository';
+import { MeetingLifecycleRepository } from './meeting-lifecycle.repository';
 
 const uuidPipe = new ZodValidationPipe(z.uuid());
 
@@ -20,7 +21,10 @@ const uuidPipe = new ZodValidationPipe(z.uuid());
  */
 @Controller('clubs/:clubUnitId/meetings')
 export class MeetingController {
-  constructor(private readonly meetings: MeetingRepository) {}
+  constructor(
+    private readonly meetings: MeetingRepository,
+    private readonly lifecycle: MeetingLifecycleRepository,
+  ) {}
 
   @Post()
   @ResourceScope('meeting.meeting', 'create', { source: 'param', key: 'clubUnitId' })
@@ -54,5 +58,54 @@ export class MeetingController {
       throw new NotFoundException('Meeting not found');
     }
     return found;
+  }
+
+  private async assertMeetingInClub(clubUnitId: string, meetingId: string): Promise<void> {
+    const meeting = await this.meetings.findById(meetingId);
+    if (!meeting || meeting.clubUnitId !== clubUnitId) {
+      throw new NotFoundException('Meeting not found');
+    }
+  }
+
+  /** M3 Slice 11: system-design.md §9.5's lifecycle — see the repository's own scoping note on what's skipped. */
+  @Post(':meetingId/publish')
+  @ResourceScope('meeting.meeting', 'update', { source: 'param', key: 'clubUnitId' })
+  async publish(
+    @Param('clubUnitId', uuidPipe) clubUnitId: string,
+    @Param('meetingId', uuidPipe) meetingId: string,
+  ): Promise<Meeting> {
+    await this.assertMeetingInClub(clubUnitId, meetingId);
+    return this.lifecycle.publish(meetingId);
+  }
+
+  @Post(':meetingId/start')
+  @ResourceScope('meeting.meeting', 'update', { source: 'param', key: 'clubUnitId' })
+  async start(
+    @Param('clubUnitId', uuidPipe) clubUnitId: string,
+    @Param('meetingId', uuidPipe) meetingId: string,
+  ): Promise<Meeting> {
+    await this.assertMeetingInClub(clubUnitId, meetingId);
+    return this.lifecycle.start(meetingId);
+  }
+
+  /** Guard: no proposed role assignments remain. Confirmed ones become fulfilled; capability tokens are revoked — same transaction. */
+  @Post(':meetingId/close')
+  @ResourceScope('meeting.meeting', 'update', { source: 'param', key: 'clubUnitId' })
+  async close(
+    @Param('clubUnitId', uuidPipe) clubUnitId: string,
+    @Param('meetingId', uuidPipe) meetingId: string,
+  ): Promise<Meeting> {
+    await this.assertMeetingInClub(clubUnitId, meetingId);
+    return this.lifecycle.close(meetingId);
+  }
+
+  @Post(':meetingId/cancel')
+  @ResourceScope('meeting.meeting', 'update', { source: 'param', key: 'clubUnitId' })
+  async cancel(
+    @Param('clubUnitId', uuidPipe) clubUnitId: string,
+    @Param('meetingId', uuidPipe) meetingId: string,
+  ): Promise<Meeting> {
+    await this.assertMeetingInClub(clubUnitId, meetingId);
+    return this.lifecycle.cancel(meetingId);
   }
 }

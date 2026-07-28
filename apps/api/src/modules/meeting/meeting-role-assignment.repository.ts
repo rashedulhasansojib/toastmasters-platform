@@ -61,6 +61,23 @@ export class MeetingRoleAssignmentRepository {
     return toMeetingRoleAssignment(row);
   }
 
+  /** M3 Slice 11: the status transitions Slice 3 deferred — a proposed assignment is confirmed or declined by the assignee/officer. `fulfilled` is set only by guarded close-out. */
+  async updateStatus(input: {
+    id: string;
+    status: 'confirmed' | 'declined';
+    declinedReason?: string;
+  }): Promise<MeetingRoleAssignment> {
+    const row = await this.db.meetingRoleAssignment.update({
+      where: { id: input.id },
+      data: {
+        status: input.status,
+        confirmedAt: input.status === 'confirmed' ? new Date() : null,
+        declinedReason: input.status === 'declined' ? (input.declinedReason ?? null) : null,
+      },
+    });
+    return toMeetingRoleAssignment(row);
+  }
+
   async findByMeeting(meetingId: string): Promise<MeetingRoleAssignment[]> {
     const rows = await this.db.meetingRoleAssignment.findMany({
       where: { meetingId },

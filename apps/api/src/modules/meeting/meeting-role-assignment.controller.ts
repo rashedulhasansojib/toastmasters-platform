@@ -1,9 +1,20 @@
-import { Body, Controller, Get, NotFoundException, Param, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  NotFoundException,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { z } from 'zod';
 import {
   createMeetingRoleAssignmentRequestSchema,
+  updateMeetingRoleAssignmentStatusRequestSchema,
   meetingRoleKey,
   type CreateMeetingRoleAssignmentRequest,
+  type UpdateMeetingRoleAssignmentStatusRequest,
   type MeetingRoleAssignment,
   type RoleRotationSuggestion,
 } from '@toastmasters/contracts';
@@ -57,6 +68,28 @@ export class MeetingRoleAssignmentController {
   ): Promise<MeetingRoleAssignment[]> {
     await this.assertMeetingInClub(clubUnitId, meetingId);
     return this.roleAssignments.findByMeeting(meetingId);
+  }
+
+  /** M3 Slice 11: confirm/decline a proposed assignment — the transition Slice 3 deferred. Required before guarded close-out's "no proposed roles remain" guard can ever pass on a meeting with any roles at all. */
+  @Patch(':roleAssignmentId')
+  @ResourceScope('meeting.role', 'update', { source: 'param', key: 'clubUnitId' })
+  async updateStatus(
+    @Param('clubUnitId', uuidPipe) clubUnitId: string,
+    @Param('meetingId', uuidPipe) meetingId: string,
+    @Param('roleAssignmentId', uuidPipe) roleAssignmentId: string,
+    @Body(new ZodValidationPipe(updateMeetingRoleAssignmentStatusRequestSchema))
+    body: UpdateMeetingRoleAssignmentStatusRequest,
+  ): Promise<MeetingRoleAssignment> {
+    await this.assertMeetingInClub(clubUnitId, meetingId);
+    const assignments = await this.roleAssignments.findByMeeting(meetingId);
+    if (!assignments.some((a) => a.id === roleAssignmentId)) {
+      throw new NotFoundException('Role assignment not found');
+    }
+    return this.roleAssignments.updateStatus({
+      id: roleAssignmentId,
+      status: body.status,
+      declinedReason: body.declinedReason,
+    });
   }
 
   /** M3 Slice 8: system-design.md §9.3 — ranked suggestions, never auto-assignment. Reuses meeting.role:read — no new resource. */

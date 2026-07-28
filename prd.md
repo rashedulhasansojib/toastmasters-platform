@@ -281,6 +281,8 @@ prefix matches on the tree and continuity depends on years closing cleanly.
 | FR-ORG-7 | Each club has a profile (schedule, format, venue, join URL, local dues, public page, configurable health thresholds) | P1 |
 | FR-ORG-8 | Times are stored as UTC instants; club meeting times render in the club's local zone; TI dues deadlines are computed in Mountain Time; deadlines are never computed in the viewer's local zone | P0 |
 
+<!-- FR-ORG-2: this deployment always roots at region (CLAUDE.md §2, Phase-0 decision 6) — the district-only mode described here isn't built. -->
+
 *Acceptance highlights.* FR-ORG-5: after year close, an attempt to modify a record from that year is
 rejected at the data layer. FR-ORG-6: rollover flags any club with no officers recorded for the new
 year rather than failing silently.

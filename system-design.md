@@ -417,7 +417,8 @@ interface OrgUnit {
   level, and it breaks the first time someone asks for a Region.
 - Re-parenting works. Clubs move between areas at redistricting; Division Directors reassign clubs.
   One `parentId` write plus a subtree path rewrite.
-- Depth is configurable. A district-only deployment roots at `type: "district"`.
+- Depth is configurable. A district-only deployment roots at `type: "district"`. (This deployment
+  always roots at `region` — see `CLAUDE.md` §2, Phase-0 decision 6.)
 
 **Path maintenance is transactional.** On create, `path = parent.path || code`. On re-parent, rewrite
 the node and every descendant in one transaction, emit `OrgUnitReparented`, invalidate permission
@@ -833,6 +834,10 @@ Three deliberate lines in this table:
 | Club operational data | R *(audited bypass)* | Per subtree grants | R *(audited)* |
 | Ledger, evaluations, health signals | R *(audited bypass)* | Per subtree grants | **—** |
 | Audit trail | **R** | R within subtree | R |
+
+> **This deployment overrides the table above** for `system_admin`'s restricted-resource row —
+> "Ledger, evaluations, health signals" is **not** a standing audited bypass here; see
+> `docs/superpowers/specs/2026-07-28-platform-tier-super-admin-design.md` and `CLAUDE.md` §5.
 
 `unit_admin` is the "Club Admin" concept generalised: whoever holds it at a club node can retune that
 club's permissions within the bounds of what they themselves hold. Held at a district node it becomes a

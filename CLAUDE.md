@@ -74,9 +74,9 @@ If a request conflicts with any of the above, say so and stop. Don't implement i
 
 ## 2. Status, and the decisions that gate code
 
-There is no repository, no schema, no CI. Work begins at a greenfield checkout, and the first job is **Phase 0** (`roadmap.md` §3): closing the open decisions that are far cheaper to make now than after production data exists.
+Phase 0 (`roadmap.md` §3) and M1 (the walking skeleton — `docs/plans/m1-walking-skeleton.md`) are both done: there is a repository, a schema, CI, and a working `authorize()` gate proven at real HTTP routes. Work now continues from that foundation rather than a greenfield checkout.
 
-**Decided since the design docs were written** (reflected below): the database is **PostgreSQL on Neon** — this closes open decision 1 — and the ORM is **Prisma**. See §3.
+**Decided since the design docs were written** (reflected below): the database is **PostgreSQL on Neon** — this closes open decision 1 — and the ORM is **Prisma**. See §3. Decision 6 (region tier) is also closed: **the org tree always roots at `region`** — `org_unit_single_region_root` is a hard unique index, not the optional district-root `system-design.md` §5.1 and `prd.md` FR-ORG-2 describe as a general capability. Chosen in Slice 1 of the M1 walking skeleton for this single, always-region-rooted deployment; a future district-only mode would mean dropping that constraint.
 
 **Still open — do not cut a schema, or write code that presumes an answer to, any of these** (`prd.md` §13 / `system-design.md` §25):
 
@@ -84,7 +84,6 @@ There is no repository, no schema, no CI. Work begins at a greenfield checkout, 
 3. **Club-creation authority** — must a portal club map to a chartered TI club with a number?
 4. **Prospect retention window** — needed for `deleteAfter` in the first schema.
 5. **Audit retention period.**
-6. **Region tier above District** — free now, awkward to insert later.
 7. **Local dues model** — flat semiannual, monthly, or per-club configurable.
 8. **Installment plans** — permitted at all, and who approves them.
 9. **Minutes default visibility** — officers, members, or public.
@@ -211,6 +210,8 @@ This is the trickiest subsystem and the one where a wrong early decision is most
 - **Permissions are never embedded in the JWT.** Revocation is via a `permissionVersion` counter + a server-side cache (Redis); a bump takes effect without re-login.
 - **Grants are never hand-edited.** Changes go through the audited surface, with a dry-run diff and a required reason on overrides/direct grants.
 - **Ship the access inspector with the engine** (`rbac-design.md` §7.3). "Why can Karim see the ledger?" must be answerable as a decision trace, in the same milestone.
+
+> **Known divergence from the design docs.** `system-design.md` §7.7 gives `system_admin` standing **R (audited bypass)** on the ledger, evaluations, and health signals. This deployment is stricter (`docs/superpowers/specs/2026-07-28-platform-tier-super-admin-design.md`): `system_admin` holds **no** standing grant on any `restricted` resource — it mints a reason-required, expiring `person_grant` first (break-glass), and that read is audited like any other. Built in the M1 walking skeleton's Slice 6.
 
 The anti-patterns in `rbac-design.md` §11 are prohibited. The worked examples in §12 are the canonical behaviour — when in doubt, match them. **Write the 403 / wrong-scope test, not just the 200.**
 

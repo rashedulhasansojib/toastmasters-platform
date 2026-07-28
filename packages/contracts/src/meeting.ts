@@ -142,3 +142,77 @@ export const decideSpeechSlotRequestSchema = z
   })
   .strict();
 export type DecideSpeechSlotRequest = z.infer<typeof decideSpeechSlotRequestSchema>;
+
+export const checklistPhase = z.enum(['before', 'during', 'after']);
+export type ChecklistPhase = z.infer<typeof checklistPhase>;
+
+export const checklistAppliesTo = z.enum(['meeting', 'excom', 'contest', 'special_event']);
+export type ChecklistAppliesTo = z.infer<typeof checklistAppliesTo>;
+
+export const checklistTemplateItem = z.object({
+  key: z.string().min(1),
+  order: z.number().int().nonnegative(),
+  label: z.string().min(1),
+  ownerRole: z.string().nullable(),
+  phase: checklistPhase,
+});
+export type ChecklistTemplateItem = z.infer<typeof checklistTemplateItem>;
+
+/** M3 Slice 5: system-design.md §14.1. */
+export const checklistTemplate = z.object({
+  id: z.uuid(),
+  orgUnitId: z.uuid(),
+  name: z.string().min(1),
+  appliesTo: checklistAppliesTo,
+  items: z.array(checklistTemplateItem),
+  isActive: z.boolean(),
+  createdAt: z.iso.datetime(),
+});
+export type ChecklistTemplate = z.infer<typeof checklistTemplate>;
+
+export const createChecklistTemplateRequestSchema = z
+  .object({
+    name: z.string().min(1),
+    appliesTo: checklistAppliesTo,
+    items: z.array(checklistTemplateItem.omit({ order: true })).min(1),
+  })
+  .strict();
+export type CreateChecklistTemplateRequest = z.infer<typeof createChecklistTemplateRequestSchema>;
+
+export const checklistRunItem = z.object({
+  key: z.string().min(1),
+  label: z.string().min(1),
+  phase: checklistPhase,
+  done: z.boolean(),
+  doneBy: z.uuid().nullable(),
+  doneAt: z.iso.datetime().nullable(),
+  note: z.string().nullable(),
+});
+export type ChecklistRunItem = z.infer<typeof checklistRunItem>;
+
+export const checklistRun = z.object({
+  id: z.uuid(),
+  orgUnitId: z.uuid(),
+  templateId: z.uuid(),
+  meetingId: z.uuid().nullable(),
+  items: z.array(checklistRunItem),
+  startedAt: z.iso.datetime(),
+  completedAt: z.iso.datetime().nullable(),
+});
+export type ChecklistRun = z.infer<typeof checklistRun>;
+
+export const createChecklistRunRequestSchema = z
+  .object({
+    templateId: z.uuid(),
+  })
+  .strict();
+export type CreateChecklistRunRequest = z.infer<typeof createChecklistRunRequestSchema>;
+
+export const markChecklistRunItemRequestSchema = z
+  .object({
+    key: z.string().min(1),
+    done: z.boolean(),
+    note: z.string().nullable().optional(),
+  })
+  .strict();
+export type MarkChecklistRunItemRequest = z.infer<typeof markChecklistRunItemRequestSchema>;

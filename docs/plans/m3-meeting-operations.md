@@ -97,3 +97,26 @@
 - [x] Bumped `access.seed.int-spec.ts`'s resource count (11→12) and `authorization-matrix.int-spec.ts`'s `RESOURCE_ACTIONS`.
 - [x] Full gate — green (405 integration, up from 366; 72 unit; lint/typecheck/build clean).
 - [x] Commit: `feat(meeting): speech-slot request/approval with path validation`
+
+---
+
+## Slice 5 — Meeting checklists (template + run)
+
+**Why:** `system-design.md` §14.1. A `ChecklistTemplate` is reusable (`items: {key,order,label,ownerRole,phase}[]`); a `ChecklistRun` snapshots it onto a meeting so later template edits never rewrite a started run's history.
+
+**Scoping decisions:**
+
+- **No auto-creation on `publish`.** §14.1 says a run is created when a meeting publishes — `Meeting` has no lifecycle status yet (M1 left it bare by design), so a run is created explicitly by the caller for now; wiring this to `publish` is Slice 8 (guarded close-out)'s job once a lifecycle exists.
+- **`items` is `Json`**, not a child table — it's a snapshot, not independently queried rows.
+- **`order` (template) and `doneAt`/`completedAt` (run) are server-derived**, matching every prior slice's "never client-supplied" convention.
+- **One `PATCH` marks one item** (`{ key, done, note? }`); `completedAt` is recomputed (set/cleared) on every mark, not tracked separately.
+
+**Files:** `packages/db/prisma/schema.prisma` (+`ChecklistTemplate`, `ChecklistRun`, +migration), `packages/db/src/seed.ts` (`meeting.checklist` resource + grants), `packages/contracts/src/meeting.ts` (+checklist schemas), `apps/api/src/modules/meeting/checklist-{template,run}.{repository,controller}.ts` (new), `meeting.module.ts` (register all four).
+
+**Tests** (`checklist-http.int-spec.ts`, new): (1) a `club_vpe` creates a template, starts a run, marks both items done — `completedAt` sets; (2) sibling-club member 403's.
+
+- [x] Schema + migration + seed.
+- [x] Repositories + controllers + module wiring, TDD against the 2 tests above.
+- [x] Bumped `access.seed.int-spec.ts`'s resource count (12→13) and `authorization-matrix.int-spec.ts`'s `RESOURCE_ACTIONS`.
+- [x] Full gate — green (443 integration, up from 405; 72 unit; lint/typecheck/build clean).
+- [x] Commit: `feat(meeting): checklists — reusable templates, per-meeting runs`

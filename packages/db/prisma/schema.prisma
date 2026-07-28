@@ -60,6 +60,8 @@ model OrgUnit {
   meetings         Meeting[]
   invitations      Invitation[]
   meetingRoleAssignments MeetingRoleAssignment[]
+  checklistTemplates     ChecklistTemplate[]
+  checklistRuns          ChecklistRun[]
 
   @@map("org_unit")
 }
@@ -224,6 +226,7 @@ model Meeting {
   agendaItems     AgendaItem[]
   roleAssignments MeetingRoleAssignment[]
   speechSlots     SpeechSlot[]
+  checklistRuns   ChecklistRun[]
 
   @@map("meeting")
 }
@@ -365,6 +368,52 @@ model SpeechSlot {
   createdAt              DateTime         @default(now()) @map("created_at")
 
   @@map("speech_slot")
+}
+
+enum ChecklistAppliesTo {
+  meeting
+  excom
+  contest
+  special_event
+
+  @@map("checklist_applies_to")
+}
+
+/**
+ * M3 Slice 5: system-design.md §14.1. `items` is a Json snapshot
+ * (`{ key, order, label, ownerRole, phase }[]`) — reusable across runs, so
+ * not modeled as its own table. Auto-creation on meeting `publish` is
+ * deferred: `Meeting` has no lifecycle status yet (M1 left it deliberately
+ * bare) — a run is created explicitly by the caller for now.
+ */
+model ChecklistTemplate {
+  id        String             @id @default(uuid()) @db.Uuid
+  orgUnitId String             @map("org_unit_id") @db.Uuid
+  orgUnit   OrgUnit            @relation(fields: [orgUnitId], references: [id])
+  name      String
+  appliesTo ChecklistAppliesTo @map("applies_to")
+  items     Json
+  isActive  Boolean            @default(true) @map("is_active")
+  createdAt DateTime           @default(now()) @map("created_at")
+  runs      ChecklistRun[]
+
+  @@map("checklist_template")
+}
+
+/** `items` is a snapshot at run-creation time (`{ key, label, phase, done, doneBy, doneAt, note }[]`), so later template edits never rewrite history. */
+model ChecklistRun {
+  id          String            @id @default(uuid()) @db.Uuid
+  orgUnitId   String            @map("org_unit_id") @db.Uuid
+  orgUnit     OrgUnit           @relation(fields: [orgUnitId], references: [id])
+  templateId  String            @map("template_id") @db.Uuid
+  template    ChecklistTemplate @relation(fields: [templateId], references: [id])
+  meetingId   String?           @map("meeting_id") @db.Uuid
+  meeting     Meeting?          @relation(fields: [meetingId], references: [id])
+  items       Json
+  startedAt   DateTime          @default(now()) @map("started_at")
+  completedAt DateTime?         @map("completed_at")
+
+  @@map("checklist_run")
 }
 
 enum InvitationStatus {

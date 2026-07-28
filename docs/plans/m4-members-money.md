@@ -147,3 +147,24 @@ enum ProspectPipelineStatus {
 - [x] `pnpm lint && pnpm typecheck && pnpm build` — green.
 - [ ] Tests / `test:int` / manual trigger of the job — **skipped**, per the same autopilot instruction noted in Slice 2. The job has not been exercised against real data (no prospect in the dev DB is yet past its 180-day `deleteAfter`, so there's nothing to manually verify against either). Flagged, not hidden.
 - [x] Commit + push.
+
+---
+
+## Slice 4 — Conversion (Prospect → Person + ClubMembership)
+
+**Why:** system-design.md §11.1/§21.2 — a guest who joins gets a real identity, without ever getting a duplicate one if they already have an account (dual membership, §6.2).
+
+**Design:** `ProspectConversionService` (new, in `membership/`) is the first cross-context service in this codebase — it imports `IdentityModule` (already exports `PersonRepository`/`ClubMembershipRepository`) rather than duplicating person/membership logic inside `membership/`. Match-by-email: if the prospect's email hits an existing `Person`, attach (`memberType: 'dual'`); otherwise mint a new `Person` (`memberType: 'new'`). `isPrimary` is true only when this is that person's very first `ClubMembership`. Idempotent: converting an already-converted prospect a second time 409s; re-running against a person who already has a membership at this club returns the existing membership rather than creating a duplicate. No new resource — reuses `membership.prospect:update`.
+
+**Scope cut:** system-design.md's index list (§19.2) names a `membership_one` partial unique index enforcing "one active `ClubMembership` per (person, club)" at the DB layer; that index doesn't exist yet in this schema (a pre-existing gap from M1, not introduced here) — this slice's idempotency is an application-level check only (`findByPerson` + filter), not yet DB-enforced. Worth a follow-up migration, not blocking this slice.
+
+**API:** `POST /clubs/:clubUnitId/prospects/:prospectId/convert` → `{ prospect, person, clubMembership, wasExistingPerson }`.
+
+**Steps:**
+
+- [x] Contracts: `convertProspectResponseSchema` (composes the existing `person`/`clubMembership` schemas from `identity.ts`).
+- [x] `ProspectRepository.markConverted` (bypasses the client-facing `update()`'s restricted `pipelineStatus` union — `joined` is never client-reachable).
+- [x] `ProspectConversionService` + wired into `ProspectController` as `POST :prospectId/convert`; `MembershipModule` now imports `IdentityModule`.
+- [x] `pnpm lint && pnpm typecheck && pnpm build` — green.
+- [ ] Tests / `test:int` — **skipped**, same autopilot note as Slices 2–3.
+- [x] Commit + push.

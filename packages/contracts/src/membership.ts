@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { person, clubMembership } from './identity';
 
 /**
  * M4 Slice 1: system-design.md §11.1. Guests are club-local,
@@ -114,3 +115,17 @@ export const createProspectCommunicationRequestSchema = z
 export type CreateProspectCommunicationRequest = z.infer<
   typeof createProspectCommunicationRequestSchema
 >;
+
+/**
+ * M4 Slice 4: system-design.md §11.1's conversion — "create-or-attach `Person`
+ * → create `ClubMembership` → link → emit `GuestConverted`." `wasExistingPerson`
+ * tells the caller whether this matched an existing account (dual membership)
+ * or minted a brand-new one.
+ */
+export const convertProspectResponseSchema = z.object({
+  prospect,
+  person,
+  clubMembership,
+  wasExistingPerson: z.boolean(),
+});
+export type ConvertProspectResponse = z.infer<typeof convertProspectResponseSchema>;

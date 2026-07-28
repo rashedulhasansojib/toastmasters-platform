@@ -6,19 +6,24 @@ import {
   type CreateProspectRequest,
   type UpdateProspectRequest,
   type Prospect,
+  type ConvertProspectResponse,
 } from '@toastmasters/contracts';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { ResourceScope } from '../../common/authz/resource-scope.decorator';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
 import type { Principal } from '../../common/authz/authz.types';
 import { ProspectService } from './prospect.service';
+import { ProspectConversionService } from './prospect-conversion.service';
 
 const uuidPipe = new ZodValidationPipe(z.uuid());
 
 /** M4 Slice 1: the prospect pipeline. Club-scoped in the URL, matching every meeting-module controller's precedent. */
 @Controller('clubs/:clubUnitId/prospects')
 export class ProspectController {
-  constructor(private readonly prospects: ProspectService) {}
+  constructor(
+    private readonly prospects: ProspectService,
+    private readonly conversion: ProspectConversionService,
+  ) {}
 
   private async assertProspectInClub(clubUnitId: string, prospectId: string): Promise<Prospect> {
     const prospect = await this.prospects.findById(prospectId);
@@ -62,5 +67,16 @@ export class ProspectController {
   ): Promise<Prospect> {
     await this.assertProspectInClub(clubUnitId, prospectId);
     return this.prospects.update(prospectId, body);
+  }
+
+  /** M4 Slice 4: create-or-attach conversion. Reuses `membership.prospect:update` — no new resource. */
+  @Post(':prospectId/convert')
+  @ResourceScope('membership.prospect', 'update', { source: 'param', key: 'clubUnitId' })
+  async convert(
+    @Param('clubUnitId', uuidPipe) clubUnitId: string,
+    @Param('prospectId', uuidPipe) prospectId: string,
+  ): Promise<ConvertProspectResponse> {
+    await this.assertProspectInClub(clubUnitId, prospectId);
+    return this.conversion.convert(prospectId);
   }
 }

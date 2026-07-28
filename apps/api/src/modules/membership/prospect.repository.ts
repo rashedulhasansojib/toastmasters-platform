@@ -91,4 +91,13 @@ export class ProspectRepository {
     const row = await this.db.prospect.update({ where: { id }, data: patch });
     return toProspect(row);
   }
+
+  /** M4 Slice 4: sets `pipelineStatus: 'joined'` — never client-reachable via `update()`, only via ProspectConversionService. */
+  async markConverted(id: string, convertedToPersonId: string): Promise<Prospect> {
+    const row = await this.db.prospect.update({
+      where: { id },
+      data: { pipelineStatus: 'joined', convertedToPersonId, convertedAt: new Date() },
+    });
+    return toProspect(row);
+  }
 }

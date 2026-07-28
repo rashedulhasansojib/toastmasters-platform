@@ -10,14 +10,14 @@
 
 > **Scope note.** M1's plan sketched its full slice roadmap before detailing
 > any slice, because the whole milestone's shape was known up front. M2 is
-> being scoped incrementally instead: **Slices 1–3** below are detailed and
+> being scoped incrementally instead: **Slices 1–4** below are detailed and
 > execution-ready. Later M2 slices (permission versioning UX, unit switcher,
-> `ActivityEvent` emission beyond reparent, access-inspector coverage of
-> invitations) will each get their own detailed section, written just before
-> they're implemented, once each prior slice's shape has proven out —
-> mirroring M1's own governing principle: "if `authorize()` feels awkward
-> here, fix it before M2" applies equally to "if the invitation/org-editor/
-> unit-policy shape feels awkward here, fix it before the next slice."
+> `ActivityEvent` emission beyond reparent) will each get their own detailed
+> section, written just before they're implemented, once each prior slice's
+> shape has proven out — mirroring M1's own governing principle: "if
+> `authorize()` feels awkward here, fix it before M2" applies equally to "if
+> the invitation/org-editor/unit-policy shape feels awkward here, fix it
+> before the next slice."
 
 ---
 
@@ -874,6 +874,61 @@ create(input: {
 ```bash
 git add packages/db/src/seed.ts packages/contracts/src/access.ts apps/api/src/modules/access apps/api/test/integration/access-delegation.int-spec.ts apps/api/test/integration/unit-policy-http.int-spec.ts apps/api/test/integration/authorization-matrix.int-spec.ts apps/api/test/integration/access.seed.int-spec.ts
 git commit -m "feat(access): unit policy overrides over HTTP — canDelegate on allow, last-admin guard on self-deny"
+```
+
+---
+
+## Slice 4 — Access inspector coverage of the three M2 resources
+
+**Why:** `CLAUDE.md`'s Definition of Done, for any authz-affecting slice: "the access inspector covers the new resource (`FR-AUTHZ-7`)." Slices 1–3 each added a new resource (`identity.invitation`, `org.unit`, `access.unit_policy`) to `resource_catalog` and gave roles real grants on them — and none of the three extended the inspector's test coverage to prove it. That's a real gap against this milestone's own rules, caught here rather than let it compound into Slice 5.
+
+**The mechanism needs zero code changes — this is the reverse of Slices 1–3's shape.** Every prior slice found something the design docs specified that the code didn't yet do, and built it. Here it's the opposite: read closely, `rbac-design.md` §7.3 already specifies the inspector as generic over `(person, resource, action, target)` and `(resource, action)` — free parameters, never an enumerated resource list — and M1 Slice 7 built it exactly that way. `AccessInspectorRepository.explainAccess()`/`.whatCanDoAt()`/`.whoCanAccess()` all resolve through `AccessRepository.effectiveGrants()` and `evaluate()`/`explain()` (`common/authz/evaluate.ts`, `explain.ts`), and **neither file contains a single resource name in code** — `grantApplies()` is a pure structural comparison (`grant.resource === request.resource && ...`), `whoCanAccess()`'s Prisma queries filter by whatever `resource`/`action` strings the caller passes. The only thing that's ever resource-aware is `resource_catalog.sensitivity`, read from the seeded row itself — exactly as data-driven for the three new resources as it already is for `finance.ledger`. Confirmed by direct reading, not inferred: this is a **test-only slice**. There is no "Red" in the usual sense — the assertions below aren't proving a fix, they're proving the genericity the engine was already built with, for resources it had never actually been pointed at.
+
+**Scoping decisions:**
+
+- **No new production files.** `access-inspector.repository.ts`, `access-inspector.controller.ts`, `explain.ts`, `evaluate.ts` are all unmodified. If any of the new assertions below actually fail, that itself is the real finding — genericity would have quietly broken somewhere between M1 Slice 7 and now — and this slice's job would become fixing it, not just proving it. (It didn't: see Step 1.)
+- **One scenario per inspector entry point, using whichever of the three resources best exercises an untested shape** — not all nine `resource × inspector-method` combinations. `org.unit` is the one resource seeded with more than one action (`create` **and** `update`) — every existing test exercises a single-action resource in isolation, so `whatCanDoAt` against `org.unit` is the one genuinely new shape worth proving, not just a repeat of the `finance.ledger` pattern with different strings.
+- **HTTP coverage stays a single 200/403 pair**, matching `access-inspector-http.int-spec.ts`'s existing scope exactly — that file's whole job is proving the DI-boot + guard chain works over real HTTP, which is resource-independent; a second HTTP test using a different resource string would prove nothing the first doesn't already.
+
+**Files:**
+
+- Modify: `apps/api/test/integration/access-inspector.int-spec.ts` (three new scenarios — `explainAccess`/`identity.invitation`, `whatCanDoAt`/`org.unit`, `whoCanAccess`/`access.unit_policy`), `access-inspector-http.int-spec.ts` (one new HTTP scenario)
+
+**TDD steps:**
+
+- [ ] **Step 1: `explainAccess` against `identity.invitation`**
+
+  A `unit_admin` at a club; `explainAccess({ personId, resource: 'identity.invitation', action: 'create', scope: clubPath })` returns `allowed: true`, attributes the decision to `{ kind: 'platform', role: 'unit_admin' }` (matching Slice 1's seeded grant), and the rendered `text` contains the role name — proving `explain()`'s source-grouping and text rendering both work unmodified for a platform-role grant on a resource that didn't exist when Slice 7 built this.
+
+  Run it. Green on the first run — no implementation step, per the "Why" above.
+
+- [ ] **Step 2: `whatCanDoAt` against `org.unit` — the multi-action shape**
+
+  A `unit_admin` at a club; `whatCanDoAt(personId, clubPath)` contains both `{ resource: 'org.unit', action: 'create', condition: 'any' }` and `{ resource: 'org.unit', action: 'update', condition: 'any' }` — proving a single role's multiple grants on the same resource both surface, not just the first match.
+
+  Run it. Green on the first run.
+
+- [ ] **Step 3: `whoCanAccess` against `access.unit_policy`**
+
+  A `unit_admin` at a club, plus a `club_member` given an `access.unit_policy:create` override via `createUnitPolicyGrant` (the exact fixture shape Slice 3's own escalation test used); `whoCanAccess('access.unit_policy', 'create')` includes the `unit_admin` with `via: 'role:unit_admin'` **and** the `club_member` with `via: 'unit_policy'` — proving the reverse query enumerates across both a role-template source and a unit-policy-override source for a resource neither existed against before.
+
+  Run it. Green on the first run.
+
+- [ ] **Step 4: HTTP coverage — `who-can-access` against `identity.invitation`**
+
+  Add one scenario to `access-inspector-http.int-spec.ts`, same shape as its existing `finance.ledger` case: a `system_admin` (holding `identity.invitation` via its non-restricted broad synthesis, no break-glass needed — `identity.invitation` is `sensitivity: 'normal'`) gets 200 from `GET /v1/access/inspector/who-can-access?resource=identity.invitation&action=create&scope=<region path>`; a plain member gets 403.
+
+  Run it. Green on the first run.
+
+- [ ] **Step 5: Full gate**
+
+  `pnpm lint && pnpm typecheck && pnpm test && pnpm build`, plus `pnpm test:int` — confirming the full 300+-test suite, including everything Slices 1–3 added, stays green with zero production-code diff in this slice.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add apps/api/test/integration/access-inspector.int-spec.ts apps/api/test/integration/access-inspector-http.int-spec.ts
+git commit -m "test(access): inspector coverage for identity.invitation, org.unit, access.unit_policy"
 ```
 
 ---

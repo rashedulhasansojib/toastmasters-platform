@@ -9,7 +9,7 @@
 **Tech Stack:** NestJS 11 (api), Prisma 7 + `@prisma/adapter-pg` (packages/db), Postgres + `ltree`, Redis/BullMQ (permission cache), Zod 4 (packages/contracts), Vitest 4 + Testcontainers 12, Argon2id + `jose` (sessions).
 
 > **Scope note.** This is the M1 milestone plan. It is delivered as ordered
-> **slices** (§ "Slice roadmap"). Slices 0–7 below are fully detailed and
+> **slices** (§ "Slice roadmap"). Slices 0–8 below are fully detailed and
 > execution-ready. Each later slice is expanded to the same bite-sized TDD depth
 > just before it is executed, so its code is written against a proven foundation
 > rather than guessed. This matches roadmap.md §7 ("plans are living documents;
@@ -4449,9 +4449,178 @@ git commit -m "feat(access): access inspector — decision trace, reverse querie
 
 ---
 
-## Slices 8–10
+## Slice 8 — Login + session
 
-Each is expanded to Slice 0–7 depth (files, interfaces, bite-sized TDD steps with full code) immediately before it is executed, against the now-proven foundation. Their deliverables, dependencies, and ship criteria are fixed in the roadmap table above; the canonical schema and algorithms they implement are `rbac-design.md` §3–§9 and `system-design.md` §5–§7, and the design decisions specific to this deployment are in `docs/superpowers/specs/2026-07-28-platform-tier-super-admin-design.md`.
+**Why:** the first two authenticated routes (Slice 7's inspector) so far have only ever been hit with a hand-minted `jose` JWT in a test. This slice builds the thing that actually issues that token: Argon2id credential verification, a `jose`-signed httpOnly session cookie carrying `{sub, activeUnitId, programYearId, v}`, and a unit-switch endpoint that reissues the cookie with only `activeUnitId` changed.
+
+**Scoping decisions:**
+
+- **No refresh-token rotation in M1.** CLAUDE.md's target stack (§3) is "Argon2id + short-lived access JWT + rotating, HMAC-hashed refresh tokens" — but the roadmap's own Slice 8 ship criteria ("Login sets an httpOnly cookie; JwtAuthGuard admits it; unit switch changes activeUnitId only") describe a single long-lived session cookie, not a refresh pair. M1's goal is proving the authorization model, not the full session-lifecycle hardening. Building refresh rotation is real, separate work; flagged here rather than silently skipped, so it's a known gap before this ships past M1, not a surprise.
+- **No roles/scopes in the JWT.** CLAUDE.md §5: "Permissions are never embedded in the JWT." The session payload carries no role or grant data — `Principal.roles`/`.scopes` stay `[]` at login, exactly like every hand-built test principal since Slice 4. `authorize()` always re-resolves grants from `personId` against the database (through the `permission_version` cache), never from the token. The pre-existing `@Roles()` coarse-gate mechanism (scaffolded in Slice 0, never wired to a real route) stays unused until a slice actually needs tier gating.
+- **`activeUnitId` is a UI convenience, not a security boundary.** It seeds the dashboard's default org-unit context; it is never read by `authorize()`, which always checks the request's real target scope. So `switchUnit` only validates that the target org unit _exists_ (`OrgUnitRepository.findById`), not that the caller has a role or membership there — a request against a scope the caller doesn't hold still 403s/404s through the normal gate regardless of what `activeUnitId` says. Both nullable: a platform-tier person with no club membership, or a deployment with no `program_year` marked `current` yet, can still log in.
+- **No invite/registration flow.** Nothing in M1 sets a person's initial password — that's a future slice (self-service invite acceptance). `PersonRepository.setCredentials()` is the minimal seam a fixture (or, later, that flow) uses to give a `Person` a hash and flip them to `active`; Slice 8's own tests are its only caller for now.
+- **Second latent DI-boot gap, same shape as Slice 7's, fixed here too:** `identity`'s four repositories and `org`'s `OrgUnitRepository` have the exact type-only-`PrismaClient` constructor shape Slice 7 found and fixed in `access` — and neither module has ever had a `*.module.ts`. Since `AuthService` needs `PersonRepository`, `ClubMembershipRepository`, `ProgramYearRepository`, and `OrgUnitRepository` wired through real Nest DI, this slice finally gives `identity`/`org` their modules and applies the `PRISMA_CLIENT` fix everywhere it was flagged as pending. The token itself moves from `modules/access/prisma-client.token.ts` to `common/db/prisma-client.token.ts` so three modules can share one canonical provider instead of each minting their own.
+
+**Files:**
+
+- Create: `apps/api/src/common/db/prisma-client.token.ts` (moved from `modules/access/`)
+- Delete: `apps/api/src/modules/access/prisma-client.token.ts`
+- Modify: `apps/api/src/modules/access/{access.repository,grant-admin.repository,access-inspector.repository,access.module}.ts` (import path only)
+- Modify: `apps/api/src/modules/identity/{person,club-membership,program-year,role-assignment}.repository.ts` (`@Inject(PRISMA_CLIENT)`); `person.repository.ts` gains `setCredentials`/`findCredentialsByEmail`; `program-year.repository.ts` gains `findCurrent`
+- Modify: `apps/api/src/modules/org/org.repository.ts` (`@Inject(PRISMA_CLIENT)`, gains `findById`)
+- Create: `apps/api/src/modules/identity/identity.module.ts`, `apps/api/src/modules/org/org.module.ts`
+- Modify: `apps/api/src/common/authz/authz.types.ts` (`Principal` gains optional `activeUnitId`/`programYearId`)
+- Create: `apps/api/src/common/auth/session.types.ts`, `session.service.ts`, `session.service.spec.ts`
+- Modify: `apps/api/src/common/auth/jwt-auth.guard.ts` (attach `activeUnitId`/`programYearId`/`v` to `request.user`)
+- Create: `apps/api/src/common/auth/auth.service.ts`, `auth.service.spec.ts`, `auth.controller.ts`
+- Modify: `apps/api/src/common/auth/auth.module.ts` (register everything above)
+- Modify: `apps/api/src/main.ts` (`app.use(cookieParser())`)
+- Modify: `packages/contracts/src/identity.ts` (`loginRequestSchema`, `switchUnitRequestSchema`, `sessionResponseSchema`)
+- Create: `apps/api/test/integration/auth-session.int-spec.ts`, `auth-http.int-spec.ts`
+
+**Interfaces:**
+
+```ts
+// common/auth/session.types.ts
+export interface SessionClaims {
+  sub: string; // personId
+  activeUnitId: string | null;
+  programYearId: string | null;
+  v: number; // permissionVersion at issuance — carried forward verbatim on unit switch
+}
+```
+
+```ts
+// common/auth/session.service.ts
+export class SessionService {
+  issue(claims: SessionClaims): Promise<string>;
+  cookieOptions(): { httpOnly: true; secure: boolean; sameSite: 'lax'; maxAge: number; path: '/' };
+}
+```
+
+```ts
+// common/auth/auth.service.ts
+export class AuthService {
+  login(email: string, password: string): Promise<{ token: string; session: SessionResponse }>;
+  switchUnit(
+    principal: Principal,
+    orgUnitId: string,
+  ): Promise<{ token: string; session: SessionResponse }>;
+}
+```
+
+```ts
+// packages/contracts/src/identity.ts additions
+export const loginRequestSchema = z
+  .object({ email: z.email(), password: z.string().min(1) })
+  .strict();
+export const switchUnitRequestSchema = z.object({ orgUnitId: z.uuid() }).strict();
+export const sessionResponseSchema = z.object({
+  personId: z.uuid(),
+  fullName: z.string(),
+  activeUnitId: z.uuid().nullable(),
+  programYearId: z.string().nullable(),
+});
+```
+
+**TDD steps:**
+
+- [ ] **Step 1: `PRISMA_CLIENT` → `common/db`; identity/org get real modules**
+
+  Red — a DI-boot test for a not-yet-existing `IdentityModule`/`OrgModule` (same shape as Slice 7 Step 1's failing assertion), confirming `PersonRepository`/`OrgUnitRepository` can't resolve through Nest DI today.
+
+  Green:
+
+  ```ts
+  // common/db/prisma-client.token.ts (moved verbatim from modules/access/)
+  export const PRISMA_CLIENT = Symbol('PRISMA_CLIENT');
+  ```
+
+  Update the four `access` files' import path, delete the old token file. Add `@Inject(PRISMA_CLIENT)` to the `db` parameter of `PersonRepository`, `ClubMembershipRepository`, `ProgramYearRepository`, `RoleAssignmentRepository`, `OrgUnitRepository` — identical mechanical change to Slice 7 Step 1.
+
+  ```ts
+  // modules/identity/identity.module.ts
+  @Module({
+    providers: [
+      { provide: PRISMA_CLIENT, useFactory: () => getPrisma() },
+      PersonRepository,
+      ClubMembershipRepository,
+      ProgramYearRepository,
+      RoleAssignmentRepository,
+    ],
+    exports: [
+      PersonRepository,
+      ClubMembershipRepository,
+      ProgramYearRepository,
+      RoleAssignmentRepository,
+    ],
+  })
+  export class IdentityModule {}
+  ```
+
+  ```ts
+  // modules/org/org.module.ts
+  @Module({
+    providers: [{ provide: PRISMA_CLIENT, useFactory: () => getPrisma() }, OrgUnitRepository],
+    exports: [OrgUnitRepository],
+  })
+  export class OrgModule {}
+  ```
+
+  Rerun the boot test — green. Rerun every existing integration suite unchanged (manual `new XRepository(db)` construction untouched).
+
+- [ ] **Step 2: `SessionService` — issue a claims JWT**
+
+  Red (`session.service.spec.ts`): issue a token, verify with `jose.jwtVerify` directly using the same secret, assert `sub`/`activeUnitId`/`programYearId`/`v` round-trip and `roles`/`scopes` are present but empty.
+
+  Green: `SessionService` wraps `jose.SignJWT`, keyed off `ENV.SESSION_JWT_SECRET`/`SESSION_TTL_SECONDS`; `cookieOptions()` returns `secure: env.NODE_ENV === 'production'`.
+
+  Rerun — green.
+
+- [ ] **Step 3: Read/write seams — credentials, current program year, org-unit lookup**
+
+  Red — repository-level integration assertions: `setCredentials` then `findCredentialsByEmail` round-trips a hash and flips `status` to `active`; `findCurrent` returns the one `program_year` row with `status = 'current'`; `OrgUnitRepository.findById` returns `null` for an unknown id.
+
+  Green — add the four methods (plain Prisma reads/writes, no business logic, matching every other repository in the file).
+
+  Rerun — green.
+
+- [ ] **Step 4: `AuthService.login()`**
+
+  Red (`auth.service.spec.ts`, mocking the four repositories/PasswordService/SessionService as plain objects — no DB, matching the unit-test layer in CLAUDE.md §7): unknown email → generic 401; known email with no `passwordHash` (never activated) → the same generic 401 (never leak _which_ reason); wrong password → same generic 401; correct credentials on an `active` person → issues a token whose claims match `{sub: person.id, v: person.permissionVersion}` and resolves `activeUnitId` from the person's primary, still-open club membership.
+
+  Green — implement `login()`, resolving `programYearId` via `findCurrent()` and `activeUnitId` via `clubMemberships.findByPerson(...).find(m => m.isPrimary && !m.leftAt)?.clubUnitId ?? null`.
+
+  Rerun — green.
+
+- [ ] **Step 5: `AuthService.switchUnit()`**
+
+  Red: switching to a real org unit reissues a token with the same `v`/`programYearId`, only `activeUnitId` changed; switching to an unknown org-unit id throws `NotFoundException`.
+
+  Green — implement `switchUnit()`.
+
+  Rerun — green.
+
+- [ ] **Step 6: `AuthController`, cookie-parser wiring, and the login→cookie→admitted round trip**
+
+  Red (`auth-http.int-spec.ts`, real Postgres + Redis via Testcontainers, real `AppModule`): `POST /v1/auth/login` with valid credentials sets an httpOnly `session` cookie and returns `{personId, fullName, activeUnitId, programYearId}` (never the hash, never the raw JWT in the body); a follow-up authenticated request presenting that cookie is admitted by `JwtAuthGuard`; wrong password → 401; `POST /v1/auth/switch-unit` with the session cookie changes `activeUnitId` only, confirmed by decoding the reissued cookie.
+
+  Green — `@Public() @Post('login')`, `@Post('switch-unit')` (implicitly gated — no `@Public()`, so `JwtAuthGuard` requires an existing session); both `res.cookie('session', token, this.session.cookieOptions())`. `app.use(cookieParser())` added to `main.ts` (and the test's own app bootstrap, mirroring `enableVersioning`).
+
+  Rerun — green. Then the full gate: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`, plus `pnpm test:int`.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add apps/api/src/common/db apps/api/src/common/auth apps/api/src/common/authz/authz.types.ts apps/api/src/modules/access apps/api/src/modules/identity apps/api/src/modules/org apps/api/src/main.ts apps/api/package.json packages/contracts/src/identity.ts apps/api/test/integration/auth-session.int-spec.ts apps/api/test/integration/auth-http.int-spec.ts
+git commit -m "feat(identity): login, httpOnly session cookie, and unit switching"
+```
+
+---
+
+## Slices 9–10
+
+Each is expanded to Slice 0–8 depth (files, interfaces, bite-sized TDD steps with full code) immediately before it is executed, against the now-proven foundation. Their deliverables, dependencies, and ship criteria are fixed in the roadmap table above; the canonical schema and algorithms they implement are `rbac-design.md` §3–§9 and `system-design.md` §5–§7, and the design decisions specific to this deployment are in `docs/superpowers/specs/2026-07-28-platform-tier-super-admin-design.md`.
 
 **Self-review (this plan vs the spec):**
 

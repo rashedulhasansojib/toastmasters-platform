@@ -14,6 +14,12 @@ export interface Grant {
   role: string;
   /** ltree path of the scope node this applies at, e.g. "district.42.area.7.club.318". */
   scope: string;
+  /**
+   * true for a role_template.scope_rule = 'self_unit' grant: the target scope
+   * must equal this grant's scope exactly, not merely fall beneath it.
+   * Absent/false = today's prefix-or-equal behaviour (self_subtree).
+   */
+  exactOnly?: boolean;
   /** Resource key from the catalog, e.g. "finance.ledger". */
   resource: string;
   action: Action;

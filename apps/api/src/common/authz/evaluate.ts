@@ -3,10 +3,13 @@ import type { AccessDecision, AccessRequest, Condition, Grant } from './authz.ty
 /**
  * ltree prefix match: does a grant issued at `grantScope` cover `targetScope`?
  * A grant at "district.42" covers "district.42" and any descendant
- * ("district.42.area.7"), but not "district.43".
+ * ("district.42.area.7"), but not "district.43". When `exactOnly` is set
+ * (role_template.scope_rule = 'self_unit'), only an identical scope matches —
+ * descendants are excluded.
  */
-export function scopeCovers(grantScope: string, targetScope: string): boolean {
+export function scopeCovers(grantScope: string, targetScope: string, exactOnly = false): boolean {
   if (grantScope === targetScope) return true;
+  if (exactOnly) return false;
   return targetScope.startsWith(`${grantScope}.`);
 }
 
@@ -35,7 +38,7 @@ function grantApplies(grant: Grant, request: AccessRequest): boolean {
   return (
     grant.resource === request.resource &&
     grant.action === request.action &&
-    scopeCovers(grant.scope, request.scope) &&
+    scopeCovers(grant.scope, request.scope, grant.exactOnly) &&
     conditionHolds(grant.condition, request)
   );
 }

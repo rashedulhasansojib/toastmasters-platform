@@ -53,6 +53,7 @@ model OrgUnit {
 
   clubMemberships ClubMembership[]
   roleAssignments RoleAssignment[]
+  platformRoleAssignments PlatformRoleAssignment[]
 
   @@map("org_unit")
 }
@@ -81,6 +82,8 @@ model Person {
   clubMemberships ClubMembership[]
   roleAssignments RoleAssignment[] @relation("RoleAssignmentPerson")
   appointedRoles  RoleAssignment[] @relation("RoleAssignmentAppointedBy")
+  platformRoleAssignments PlatformRoleAssignment[] @relation("PlatformRoleAssignmentPerson")
+  grantedPlatformRoles    PlatformRoleAssignment[] @relation("PlatformRoleAssignmentGrantedBy")
 
   @@map("person")
 }
@@ -265,4 +268,26 @@ model RoleTemplateGrant {
 
   @@id([role, resource, action, condition])
   @@map("role_template_grant")
+}
+
+model PlatformRoleAssignment {
+  // A synthetic id, not the composite (person_id, role, org_unit_id) primary
+  // key rbac-design.md §3 table 6 shows — Postgres cannot put a nullable
+  // column (org_unit_id is NULL for global roles) inside a PRIMARY KEY. The
+  // @@unique below carries the intended uniqueness instead; Postgres treats
+  // multiple NULL org_unit_id rows as non-conflicting, which is acceptable
+  // here since this slice inserts no rows into this table at all.
+  id              String    @id @default(uuid()) @db.Uuid
+  personId        String    @map("person_id") @db.Uuid
+  person          Person    @relation("PlatformRoleAssignmentPerson", fields: [personId], references: [id])
+  role            String
+  orgUnitId       String?   @map("org_unit_id") @db.Uuid
+  orgUnit         OrgUnit?  @relation(fields: [orgUnitId], references: [id])
+  grantedBy       String    @map("granted_by") @db.Uuid
+  grantedByPerson Person    @relation("PlatformRoleAssignmentGrantedBy", fields: [grantedBy], references: [id])
+  grantedAt       DateTime  @default(now()) @map("granted_at")
+  expiresAt       DateTime? @map("expires_at")
+
+  @@unique([personId, role, orgUnitId])
+  @@map("platform_role_assignment")
 }

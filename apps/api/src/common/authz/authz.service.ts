@@ -1,21 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import type { AccessDecision, AccessRequest, Grant } from './authz.types';
 import { evaluate } from './evaluate';
+import { AccessRepository } from '../../modules/access/access.repository';
 
 @Injectable()
 export class AuthzService {
-  /**
-   * Resolve the grants that apply to a request.
-   *
-   * Greenfield state: no role templates are seeded and no assignments exist, so
-   * the effective grant set is empty and every authorize() call denies by
-   * default — which is exactly correct. M1 adds the RBAC tables
-   * (resource_catalog, role_template, role_assignment) and a repository that
-   * resolves real grants here. This is a deliberate default, not a stub: the
-   * evaluation below is complete and unit-tested.
-   */
-  async effectiveGrants(_request: AccessRequest): Promise<Grant[]> {
-    return [];
+  constructor(private readonly accessRepository: AccessRepository) {}
+
+  /** Resolve the grants that apply to a request (rbac-design.md §4.2). */
+  async effectiveGrants(request: AccessRequest): Promise<Grant[]> {
+    return this.accessRepository.effectiveGrants(request.principal.userId);
   }
 
   /** The one authorization gate. Everything funnels through here (default-deny). */

@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { AuthzService } from './authz.service';
+import { AccessModule } from '../../modules/access/access.module';
 
 /**
  * The authorization engine. Global so the ResourceGuard and any future access
@@ -8,6 +9,7 @@ import { AuthzService } from './authz.service';
  */
 @Global()
 @Module({
+  imports: [AccessModule],
   providers: [AuthzService],
   exports: [AuthzService],
 })

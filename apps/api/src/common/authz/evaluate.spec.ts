@@ -32,6 +32,10 @@ describe('scopeCovers', () => {
     expect(scopeCovers('district.1', 'district.10')).toBe(false);
     expect(scopeCovers('district.1.club.10', 'district.1')).toBe(false);
   });
+  it('an exactOnly grant matches its own scope but not a descendant', () => {
+    expect(scopeCovers('district.1.club.10', 'district.1.club.10', true)).toBe(true);
+    expect(scopeCovers('district.1.club.10', 'district.1.club.10.sub', true)).toBe(false);
+  });
 });
 
 describe('conditionHolds', () => {
@@ -84,5 +88,12 @@ describe('evaluate', () => {
   it('honours a grant from an ancestor scope', () => {
     const districtGrant = [grant({ scope: 'district.1' })];
     expect(evaluate(districtGrant, baseRequest).allowed).toBe(true);
+  });
+
+  it('a self_unit (exactOnly) grant does not reach a child unit', () => {
+    const exact = [grant({ exactOnly: true })];
+    expect(evaluate(exact, baseRequest).allowed).toBe(true);
+    const childRequest = { ...baseRequest, scope: 'district.1.club.10.sub' };
+    expect(evaluate(exact, childRequest).allowed).toBe(false);
   });
 });

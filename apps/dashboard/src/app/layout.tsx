@@ -23,7 +23,11 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
           {session ? (
             <div className="shell-header-session">
               {session.activeUnitId && (
-                <Link href={`/clubs/${session.activeUnitId}/meetings`}>Meetings</Link>
+                <>
+                  <Link href={`/clubs/${session.activeUnitId}/meetings`}>Meetings</Link>
+                  <Link href={`/clubs/${session.activeUnitId}/prospects`}>Prospects</Link>
+                  <Link href={`/clubs/${session.activeUnitId}/finance`}>Finance</Link>
+                </>
               )}
               <span>{session.fullName}</span>
               <UnitSwitcher units={units} activeUnitId={session.activeUnitId} />

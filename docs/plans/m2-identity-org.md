@@ -10,14 +10,14 @@
 
 > **Scope note.** M1's plan sketched its full slice roadmap before detailing
 > any slice, because the whole milestone's shape was known up front. M2 is
-> being scoped incrementally instead: **Slices 1–2** below are detailed and
-> execution-ready. Later M2 slices (unit policies, permission versioning UX,
-> unit switcher, `ActivityEvent` emission beyond reparent, access-inspector
-> coverage of invitations) will each get their own detailed section, written
-> just before they're implemented, once each prior slice's shape has proven
-> out — mirroring M1's own governing principle: "if `authorize()` feels
-> awkward here, fix it before M2" applies equally to "if the invitation/org-
-> editor shape feels awkward here, fix it before the next slice."
+> being scoped incrementally instead: **Slices 1–3** below are detailed and
+> execution-ready. Later M2 slices (permission versioning UX, unit switcher,
+> `ActivityEvent` emission beyond reparent, access-inspector coverage of
+> invitations) will each get their own detailed section, written just before
+> they're implemented, once each prior slice's shape has proven out —
+> mirroring M1's own governing principle: "if `authorize()` feels awkward
+> here, fix it before M2" applies equally to "if the invitation/org-editor/
+> unit-policy shape feels awkward here, fix it before the next slice."
 
 ---
 
@@ -640,6 +640,236 @@ reparent(input: { actorId: string; orgUnitId: string; newParentId: string }): Pr
 ```bash
 git add packages/db packages/contracts/src/org.ts apps/api/src/modules/org apps/api/test/integration/org.repository.int-spec.ts apps/api/test/integration/org-http.int-spec.ts apps/api/test/integration/authorization-matrix.int-spec.ts apps/api/test/integration/access.seed.int-spec.ts
 git commit -m "feat(org): org tree editor — create + transactional reparent with destination delegation check"
+```
+
+---
+
+## Slice 3 — Unit policy overrides over HTTP
+
+**Why:** `prd.md` FR-AUTHZ-9: "A unit administrator can retune their unit's permissions, but only within the bounds of what they themselves hold, and can never remove the last unit administrator." FR-AUTHZ-10: "Per-unit overrides and direct person grants require a reason and, where temporary, an expiry; expired grants are inert at resolution." The mechanism these describe — `UnitPolicyGrant` — already exists and is already correctly _resolved_ by `evaluate()`/`authorize()` (M1 Slice 6 proved "a unit-policy deny beats a role-template allow"). What's missing is everything upstream of resolution: there is no HTTP route, and the one method that creates these rows, `GrantAdminRepository.createUnitPolicyGrant`, is explicitly documented as **"Test-fixture-level creation... not `canDelegate`-gated"** — the exact same shape of gap Slice 1 closed for invitations and Slice 2 closed for org-tree reparenting.
+
+**A real gap this slice's own codebase flags about itself, closed here:** `createUnitPolicyGrant`'s doc comment is not just descriptive, it's a warning nobody has acted on yet — a `unit_admin` can retune a unit's permissions today via a raw repository call with **zero check that they hold what they're granting**, no `expiresAt` support at all (despite the Prisma model already having the column), and no protection against a `unit_admin` denying themselves into a corner. This slice closes all three, and reuses the exact `canDelegate`-in-a-service shape `InvitationService.create()` (Slice 1) and `OrgUnitService.reparent()` (Slice 2) already established — the third time this shape has been needed is a good sign it's the right one, not a coincidence to special-case around.
+
+**An open design question the docs leave silent, resolved here and stated explicitly:** does creating a **deny** override require the same `canDelegate` check as an **allow** override? `system-design.md` §7.4's `canDelegate` pseudocode is effect-agnostic (it never branches on allow vs. deny), which could argue for uniform treatment. But `rbac-design.md` §7.2's guardrail list phrases the check specifically as "cannot **grant** what the actor does not hold" — not "cannot override" — and `canDelegate`'s entire stated purpose throughout both design docs is anti-**escalation**: preventing a caller from handing out access they don't have. A deny override can only _remove_ access, never grant it — it is structurally incapable of being an escalation, whoever creates it. So this slice's decision: **`canDelegate` gates `allow` overrides only; `deny` overrides bypass the holds-check** (any actor who clears the outer `@ResourceScope('access.unit_policy', 'create', ...)` guard may deny anything at their scope). The **last-unit_admin guard applies to both** — `rbac-design.md` §12's own worked example is a `unit_admin` denying _themselves_ the ledger and being blocked specifically for that reason, so the docs are explicit that denial is where this protection actually matters.
+
+**Scoping decisions:**
+
+- **The last-unit_admin guard is scoped narrowly to `access.unit_policy` itself, not generalized to "any resource that might strand the unit."** `system-design.md` §7.4 states the invariant generically ("the operation must not remove the last `unit_admin` from targetUnit"), but a fully general version would mean re-running `effectiveGrants()`-style resolution for every resource/action in the catalog after every policy change to prove nothing essential broke — open-ended and not what any cited example asks for. `rbac-design.md` §12's own example is a `unit_admin` denying themselves the **one specific capability this slice creates**: the ability to administer the unit's policies. So the guard here is exactly that: a `deny` override whose subject is (or resolves to) the `unit_admin` role, targeting `access.unit_policy:create` at that exact unit, is rejected if it would leave zero other `unit_admin` platform-role holders **at that exact org unit** — mirroring `revokePlatformRole`'s existing row-count check (same narrowness: it doesn't credit a `unit_admin` appointed at an ancestor whose `self_subtree` reach covers this unit, either — consistent with the codebase's one existing precedent for this invariant, not a new inconsistency).
+- **Role-subject overrides only, not person-subject.** The Prisma model and `AccessInspectorRepository` already support `subjectKind: 'person'`, but `createUnitPolicyGrant` today only ever builds `subjectKind: 'role'` rows, and every existing caller uses role subjects. Person-targeted overrides ("deny this one member, specifically") are a real feature but a separate, smaller slice once this shape is proven — the same "narrower thing built, broader thing named and deferred" pattern Slice 1 used for invitation intent.
+- **`access.unit_policy` is a new resource, seeded with only a `create` action.** No `read`/`list`/`revoke` routes — matching Slice 1's "no revoke/list endpoints" precedent. A unit's active overrides are inspectable today via `AccessInspectorRepository`/the access-inspector routes (M1 Slice 7); a dedicated list view is a follow-up, not a blocker.
+- **Only `unit_admin` gets `access.unit_policy:create`.** Same reasoning as Slices 1–2: the district/division/area domain roles `system-design.md` §7.6 eventually names aren't seeded yet, and `unit_admin`'s `self_subtree` reach (already corrected in Slice 1) is precedent-consistent and sufficient.
+- **No schema/migration this slice.** `UnitPolicyGrant` already has every column needed (`expiresAt` included) — this is a pure seed-data + application-code slice, the first of the three that doesn't touch `schema.prisma`.
+
+**Files:**
+
+- Modify: `packages/db/src/seed.ts` (`access.unit_policy` resource; `unit_admin` grant) — no migration needed
+- Modify: `apps/api/src/modules/access/grant-admin.repository.ts` (`createUnitPolicyGrant` gains `expiresAt`, returns the mapped contract type), `access.module.ts` (register the new service/controller)
+- Create: `apps/api/src/modules/access/unit-policy.service.ts`, `unit-policy.controller.ts`, `unit-policy.service.spec.ts`
+- Modify: `packages/contracts/src/access.ts` (`unitPolicyGrant`, `createUnitPolicyGrantRequestSchema`)
+- Modify: `apps/api/test/integration/access-delegation.int-spec.ts` (repository-level `expiresAt`/mapped-return coverage); Create: `apps/api/test/integration/unit-policy-http.int-spec.ts`
+- Modify: `apps/api/test/integration/authorization-matrix.int-spec.ts` (add `access.unit_policy` row), `access.seed.int-spec.ts` (seed assertions)
+
+**Interfaces:**
+
+```ts
+// packages/contracts/src/access.ts additions
+export const unitPolicyGrant = z.object({
+  id: z.uuid(),
+  orgUnitId: z.uuid(),
+  subjectRole: z.string().min(1),
+  resource: z.string().min(1),
+  action: permissionAction,
+  condition: permissionCondition,
+  effect: z.enum(['allow', 'deny']),
+  createdBy: z.uuid(),
+  createdAt: z.iso.datetime(),
+  reason: z.string().min(1),
+  expiresAt: z.iso.datetime().nullable(),
+});
+export type UnitPolicyGrant = z.infer<typeof unitPolicyGrant>;
+
+export const createUnitPolicyGrantRequestSchema = z
+  .object({
+    subjectRole: z.string().min(1),
+    resource: z.string().min(1),
+    action: permissionAction,
+    effect: z.enum(['allow', 'deny']),
+    reason: z.string().min(1),
+    expiresAt: z.iso.datetime().optional(),
+  })
+  .strict();
+export type CreateUnitPolicyGrantRequest = z.infer<typeof createUnitPolicyGrantRequestSchema>;
+```
+
+```ts
+// grant-admin.repository.ts — createUnitPolicyGrant's new shape
+createUnitPolicyGrant(input: {
+  orgUnitId: string; subjectRole: string; resource: string; action: Action;
+  effect: 'allow' | 'deny'; createdBy: string; reason: string; expiresAt?: Date | null;
+}): Promise<UnitPolicyGrant>; // now the mapped contract type, not a raw Prisma row
+```
+
+```ts
+// unit-policy.service.ts — shape only
+create(input: {
+  actorId: string; orgUnitId: string; subjectRole: string; resource: string;
+  action: Action; effect: 'allow' | 'deny'; reason: string; expiresAt?: Date | null;
+}): Promise<UnitPolicyGrant>;
+```
+
+**TDD steps:**
+
+- [ ] **Step 1: Seed — `access.unit_policy` resource + `unit_admin` grant**
+
+  Red — extend `access.seed.int-spec.ts`: `access.unit_policy`'s `allowedActions` includes `create`; `unit_admin`'s grants include it.
+
+  Green — in `seed.ts`, add to `RESOURCES`:
+
+  ```ts
+  {
+    resource: 'access.unit_policy',
+    context: 'access',
+    label: 'Unit policy override',
+    allowedActions: ['create'],
+    clubScoped: false,
+    sensitivity: 'normal',
+  },
+  ```
+
+  and to `unit_admin.grants`: `{ resource: 'access.unit_policy', action: 'create' }`.
+
+  Rerun — green. Also rerun `authorization-matrix.int-spec.ts` unchanged.
+
+- [ ] **Step 2: `GrantAdminRepository.createUnitPolicyGrant` — `expiresAt` + mapped return**
+
+  Red (`access-delegation.int-spec.ts` addition): `createUnitPolicyGrant` accepts `expiresAt`; the returned shape carries no raw Prisma internals and its `expiresAt` round-trips as an ISO string; omitting `expiresAt` yields `null`.
+
+  Green — add `expiresAt?: Date | null` to the input, pass through to `data`, add a `toUnitPolicyGrant()` mapper (matching every other repository's `toX()` convention) and change the return type.
+
+  Rerun — green, including the pre-existing "a unit-policy deny beats a role-template allow" test unchanged (it never asserted on the return shape).
+
+- [ ] **Step 3: `UnitPolicyService` — the delegation check + the last-admin guard**
+
+  Red (`unit-policy.service.spec.ts`, mocked `GrantAdminRepository`/`AccessRepository`): an `allow` override succeeds when the actor holds that `resource:action` at the target scope; an `allow` override is rejected with `ForbiddenException`, and the repository is never called, when the actor does not; a `deny` override succeeds **even when the actor holds nothing on that resource at all** (the exemption this slice decided); a `deny` override whose `subjectRole` is `unit_admin` targeting `access.unit_policy:create` is rejected when it would leave zero other `unit_admin` platform-role holders at that exact unit, and succeeds when at least one other remains; a `deny` override with any other `subjectRole`/`resource`/`action` combination is never subject to the last-admin check at all.
+
+  Green:
+
+  ```ts
+  @Injectable()
+  export class UnitPolicyService {
+    constructor(
+      private readonly grantAdmin: GrantAdminRepository,
+      private readonly accessRepository: AccessRepository,
+      @Inject(PRISMA_CLIENT) private readonly db: PrismaClient = getPrisma(),
+    ) {}
+
+    async create(input: {
+      actorId: string;
+      orgUnitId: string;
+      subjectRole: string;
+      resource: string;
+      action: Action;
+      effect: 'allow' | 'deny';
+      reason: string;
+      expiresAt?: Date | null;
+    }): Promise<UnitPolicyGrant> {
+      if (input.effect === 'allow') {
+        const [actorGrants, scope] = await Promise.all([
+          this.accessRepository.effectiveGrants(input.actorId),
+          this.accessRepository.pathOf(input.orgUnitId),
+        ]);
+        if (!canDelegate(actorGrants, { resource: input.resource, action: input.action, scope })) {
+          throw new ForbiddenException(
+            'Cannot grant what you do not hold — the override would exceed your own access',
+          );
+        }
+      }
+
+      if (
+        input.effect === 'deny' &&
+        input.subjectRole === 'unit_admin' &&
+        input.resource === 'access.unit_policy' &&
+        input.action === 'create'
+      ) {
+        const remaining = await this.db.platformRoleAssignment.count({
+          where: {
+            role: 'unit_admin',
+            orgUnitId: input.orgUnitId,
+            OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+          },
+        });
+        if (remaining <= 1) {
+          throw new ForbiddenException('Cannot remove the last unit_admin for this unit');
+        }
+      }
+
+      return this.grantAdmin.createUnitPolicyGrant(input);
+    }
+  }
+  ```
+
+  Rerun — green.
+
+- [ ] **Step 4: `UnitPolicyController` + module wiring**
+
+  Red — folded into Step 5's end-to-end tests, per the established precedent.
+
+  Green:
+
+  ```ts
+  @Controller()
+  export class UnitPolicyController {
+    constructor(private readonly unitPolicies: UnitPolicyService) {}
+
+    @Post('org-units/:orgUnitId/unit-policies')
+    @ResourceScope('access.unit_policy', 'create', { source: 'param', key: 'orgUnitId' })
+    async create(
+      @Param('orgUnitId', uuidPipe) orgUnitId: string,
+      @CurrentUser() principal: Principal,
+      @Body(new ZodValidationPipe(createUnitPolicyGrantRequestSchema))
+      body: CreateUnitPolicyGrantRequest,
+    ): Promise<UnitPolicyGrant> {
+      return this.unitPolicies.create({
+        actorId: principal.userId,
+        orgUnitId,
+        ...body,
+        expiresAt: body.expiresAt ? new Date(body.expiresAt) : null,
+      });
+    }
+  }
+  ```
+
+  `access.module.ts` gains `UnitPolicyService`, `UnitPolicyController` in its `providers`/`controllers`.
+
+  Rerun — green. Rerun `identity-module-boot.int-spec.ts` (unaffected, but cheap insurance against a DI surprise, per the pattern that's twice caught a real cycle already).
+
+- [ ] **Step 5: End-to-end HTTP tests**
+
+  Red (`unit-policy-http.int-spec.ts`, real Postgres + Redis, real `AppModule`, `jose`-minted JWTs):
+
+  1. A `unit_admin` at a club creates an `allow` override for `club_member`/`meeting.meeting`/`update` (a grant the `unit_admin` itself holds via its own `self_subtree` reach synthesised the same way `system_admin`'s isn't — actually via a direct `identity.role_assignment`-adjacent capability the fixture grants them first) → 201; a subsequent `authorize()` check for a `club_member` confirms the new capability applies.
+  2. **Escalation denial:** an actor who holds `access.unit_policy:create` at a club (via a crafted `UnitPolicyGrant`, same fixture technique as Slice 1's escalation test) but nothing on `finance.ledger` attempts an `allow` override granting `club_member` → `finance.ledger:read` → 403, and no `UnitPolicyGrant` row is written.
+  3. **Deny needs no holds-check:** the same actor from (2), still holding nothing on `finance.ledger`, creates a `deny` override removing `club_treasurer`'s own `finance.ledger:read` → 201 — proving the exemption decided above.
+  4. **Last-admin guard:** a club with exactly one `unit_admin` attempts a `deny` override of `access.unit_policy:create` for `subjectRole: 'unit_admin'` at their own club → 403; granting a second `unit_admin` at the same club and repeating the same request → 201.
+  5. **Expiry is inert at resolution:** create an `allow` override with `expiresAt` in the past → 201 (creation itself isn't blocked by an already-past expiry — `notExpired()` filtering happens at _resolution_, not creation) — then confirm via `authorize()` that the expired override contributes nothing.
+
+  Green — nothing new to implement; this step verifies Steps 1–4, run for real.
+
+  Rerun — green. Then the full gate: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`, plus `pnpm test:int`.
+
+- [ ] **Step 6: Authorisation-matrix update**
+
+  Red — add `{ resource: 'access.unit_policy', actions: ['create'] }` to `authorization-matrix.int-spec.ts`'s `RESOURCE_ACTIONS`.
+
+  Green — no production code change; generated from `role_template_grant`.
+
+  Rerun — green, full matrix suite.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add packages/db/src/seed.ts packages/contracts/src/access.ts apps/api/src/modules/access apps/api/test/integration/access-delegation.int-spec.ts apps/api/test/integration/unit-policy-http.int-spec.ts apps/api/test/integration/authorization-matrix.int-spec.ts apps/api/test/integration/access.seed.int-spec.ts
+git commit -m "feat(access): unit policy overrides over HTTP — canDelegate on allow, last-admin guard on self-deny"
 ```
 
 ---

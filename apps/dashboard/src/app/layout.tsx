@@ -17,7 +17,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
 
   return (
     <html lang="en">
-      <body>
+      <body suppressHydrationWarning>
         <header className="shell-header">
           <Link href="/">Toastmasters Platform</Link>
           {session ? (

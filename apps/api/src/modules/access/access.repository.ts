@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { getPrisma, type PrismaClient } from '@toastmasters/db';
-import type { Action, Grant } from '../../common/authz/authz.types';
-import type { GrantCacheService } from './grant-cache.service';
+import type { Action, Grant, GrantSource } from '../../common/authz/authz.types';
+import { GrantCacheService } from './grant-cache.service';
+import { PRISMA_CLIENT } from './prisma-client.token';
 
 interface PathRow {
   path: string;
@@ -19,7 +20,7 @@ function notExpired() {
 @Injectable()
 export class AccessRepository {
   constructor(
-    private readonly db: PrismaClient = getPrisma(),
+    @Inject(PRISMA_CLIENT) private readonly db: PrismaClient = getPrisma(),
     private readonly cache?: GrantCacheService,
   ) {}
 
@@ -91,7 +92,9 @@ export class AccessRepository {
         out.push(...(await this.systemAdminGrants(scope)));
         continue;
       }
-      out.push(...(await this.grantsForRoleAtScope(pa.role, scope)));
+      out.push(
+        ...(await this.grantsForRoleAtScope(pa.role, scope, { kind: 'platform', role: pa.role })),
+      );
     }
     return out;
   }
@@ -117,6 +120,7 @@ export class AccessRepository {
           action,
           condition: 'any',
           effect: 'allow',
+          source: { kind: 'platform', role: 'system_admin' },
         });
       }
     }
@@ -130,7 +134,13 @@ export class AccessRepository {
     const out: Grant[] = [];
     for (const ra of assignments) {
       const scope = await this.pathOf(ra.orgUnitId);
-      out.push(...(await this.grantsForRoleAtScope(ra.role, scope)));
+      out.push(
+        ...(await this.grantsForRoleAtScope(ra.role, scope, {
+          kind: 'domain_role',
+          role: ra.role,
+          orgUnitId: ra.orgUnitId,
+        })),
+      );
     }
     return out;
   }
@@ -174,6 +184,7 @@ export class AccessRepository {
         action: ov.action,
         condition: ov.condition,
         effect: ov.effect,
+        source: { kind: 'unit_policy', orgUnitId: ov.orgUnitId },
       });
     }
     return out;
@@ -193,13 +204,18 @@ export class AccessRepository {
         action: pg.action,
         condition: pg.condition,
         effect: pg.effect,
+        source: { kind: 'direct', reason: pg.reason },
       });
     }
     return out;
   }
 
   /** Shared by both role-template grant sources: look up the template once, stamp scope + exactOnly. */
-  private async grantsForRoleAtScope(role: string, scope: string): Promise<Grant[]> {
+  private async grantsForRoleAtScope(
+    role: string,
+    scope: string,
+    source: GrantSource,
+  ): Promise<Grant[]> {
     const template = await this.db.roleTemplate.findUnique({ where: { role } });
     if (!template) return []; // role not in the catalogue — nothing to grant
     const exactOnly = template.scopeRule === 'self_unit';
@@ -212,6 +228,7 @@ export class AccessRepository {
       action: g.action,
       condition: g.condition,
       effect: g.effect,
+      source,
     }));
   }
 

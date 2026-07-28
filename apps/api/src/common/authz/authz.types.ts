@@ -7,6 +7,18 @@ export type Condition = 'any' | 'own' | 'assigned' | 'party' | 'published';
 export type Effect = 'allow' | 'deny';
 
 /**
+ * Which of effectiveGrants()'s four union sources (rbac-design.md §4.2)
+ * produced a grant. Purely additive metadata for the access inspector
+ * (rbac-design.md §7.3) — evaluate()/scopeCovers()/canDelegate() never read
+ * it, so it cannot change an authorization decision.
+ */
+export type GrantSource =
+  | { kind: 'platform'; role: string }
+  | { kind: 'domain_role'; role: string; orgUnitId: string }
+  | { kind: 'unit_policy'; orgUnitId: string }
+  | { kind: 'direct'; reason: string };
+
+/**
  * A resolved permission grant (role assignment × role-template rule).
  * Produced in M1 from the seeded catalog + assignments; consumed by evaluate().
  */
@@ -25,6 +37,8 @@ export interface Grant {
   action: Action;
   condition: Condition;
   effect: Effect;
+  /** Where this grant came from — see GrantSource. Absent for hand-built test fixtures. */
+  source?: GrantSource;
 }
 
 /** The authenticated caller. */

@@ -1,8 +1,9 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { getPrisma, type PrismaClient } from '@toastmasters/db';
 import { canDelegate } from '../../common/authz/can-delegate';
 import type { Action, Condition } from '../../common/authz/authz.types';
 import { AccessRepository } from './access.repository';
+import { PRISMA_CLIENT } from './prisma-client.token';
 
 const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
 
@@ -15,7 +16,7 @@ type PlatformRoleAssignmentRow = Awaited<
 @Injectable()
 export class GrantAdminRepository {
   constructor(
-    private readonly db: PrismaClient = getPrisma(),
+    @Inject(PRISMA_CLIENT) private readonly db: PrismaClient = getPrisma(),
     private readonly accessRepository: AccessRepository = new AccessRepository(),
   ) {}
 

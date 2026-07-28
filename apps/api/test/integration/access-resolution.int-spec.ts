@@ -19,6 +19,7 @@ describe('Access resolution (integration)', () => {
   let clubAPath: string;
   let clubBPath: string;
   let clubAId: string;
+  let clubBId: string;
   let clubCId: string;
   let clubCPath: string;
   let programYearId: string;
@@ -69,6 +70,7 @@ describe('Access resolution (integration)', () => {
     });
     clubAId = clubA.id;
     clubAPath = clubA.path;
+    clubBId = clubB.id;
     clubBPath = clubB.path;
     clubCId = clubC.id;
     clubCPath = clubC.path;
@@ -140,5 +142,30 @@ describe('Access resolution (integration)', () => {
       scope: clubCPath,
     });
     expect(decision).toEqual({ allowed: false, reason: 'default-deny' });
+  });
+
+  it('stamps each resolved grant with its source (feeds the Slice 7 access inspector)', async () => {
+    const treasurer = await people.create({
+      email: 'treasurer-source@example.com',
+      fullName: 'Treasurer Source',
+    });
+    await roleAssignments.assign({
+      personId: treasurer.id,
+      orgUnitId: clubBId,
+      role: 'club_treasurer',
+      programYearId,
+      termStart: new Date('2026-07-01'),
+      termEnd: new Date('2027-06-30'),
+      appointedBy: treasurer.id,
+    });
+
+    const access = new AccessRepository(db);
+    const grants = await access.effectiveGrants(treasurer.id);
+    const ledgerGrant = grants.find((g) => g.resource === 'finance.ledger' && g.action === 'read');
+    expect(ledgerGrant?.source).toEqual({
+      kind: 'domain_role',
+      role: 'club_treasurer',
+      orgUnitId: clubBId,
+    });
   });
 });

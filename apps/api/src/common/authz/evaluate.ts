@@ -34,7 +34,8 @@ export function conditionHolds(condition: Condition, request: AccessRequest): bo
   }
 }
 
-function grantApplies(grant: Grant, request: AccessRequest): boolean {
+/** Does a grant match the resource, action, scope and condition of a request? Exported for explain(). */
+export function grantApplies(grant: Grant, request: AccessRequest): boolean {
   return (
     grant.resource === request.resource &&
     grant.action === request.action &&

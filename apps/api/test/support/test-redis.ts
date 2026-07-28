@@ -18,12 +18,14 @@ async function start(): Promise<{ container: StartedTestContainer; url: string }
 /** Suite-level: start once, reuse across tests, stop in afterAll. */
 export async function startTestRedis(): Promise<{
   client: Redis;
+  url: string;
   stop: () => Promise<void>;
 }> {
   const { container, url } = await start();
   const client = new Redis(url);
   return {
     client,
+    url,
     stop: async () => {
       client.disconnect();
       await container.stop();

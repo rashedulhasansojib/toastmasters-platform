@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import {
   getAgendaItems,
   getAgendaTemplates,
+  getBallots,
   getChecklistRuns,
   getChecklistTemplates,
   getMeeting,
@@ -20,6 +21,8 @@ import { SpeechSlotsList } from '@/components/speechslots/SpeechSlotsList';
 import { ChecklistRunsList } from '@/components/checklists/ChecklistRunsList';
 import { StartChecklistRunButton } from '@/components/checklists/StartChecklistRunButton';
 import { IssueGuestLinkCard } from '@/components/guest/IssueGuestLinkCard';
+import { BallotsList } from '@/components/ballots/BallotsList';
+import { CreateBallotForm } from '@/components/ballots/CreateBallotForm';
 
 export default async function MeetingPage({
   params,
@@ -35,6 +38,7 @@ export default async function MeetingPage({
     speechSlots,
     checklistTemplates,
     checklistRuns,
+    ballots,
   ] = await Promise.all([
     getMeeting(clubUnitId, meetingId),
     getAgendaItems(clubUnitId, meetingId),
@@ -43,6 +47,7 @@ export default async function MeetingPage({
     getSpeechSlots(clubUnitId, meetingId),
     getChecklistTemplates(clubUnitId),
     getChecklistRuns(clubUnitId, meetingId),
+    getBallots(clubUnitId, meetingId),
   ]);
   if (!meeting) notFound();
 
@@ -121,6 +126,12 @@ export default async function MeetingPage({
       <section className="flex flex-col gap-3">
         <h2>Guest links</h2>
         <IssueGuestLinkCard clubUnitId={clubUnitId} meetingId={meetingId} />
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2>Ballots</h2>
+        <CreateBallotForm clubUnitId={clubUnitId} meetingId={meetingId} />
+        <BallotsList clubUnitId={clubUnitId} meetingId={meetingId} ballots={ballots} />
       </section>
     </main>
   );

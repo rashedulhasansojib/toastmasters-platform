@@ -18,6 +18,7 @@
     "lint": "eslint .",
     "migrate:dev": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
+    "seed": "prisma db seed",
     "studio": "prisma studio",
     "clean": "rm -rf dist .turbo src/generated"
   },

@@ -20,6 +20,7 @@
     "db:generate": "pnpm --filter @toastmasters/db generate",
     "db:migrate": "pnpm --filter @toastmasters/db migrate:dev",
     "db:deploy": "pnpm --filter @toastmasters/db migrate:deploy",
+    "db:seed": "pnpm --filter @toastmasters/db seed",
     "db:studio": "pnpm --filter @toastmasters/db studio",
     "e2e": "playwright test",
     "prepare": "husky"

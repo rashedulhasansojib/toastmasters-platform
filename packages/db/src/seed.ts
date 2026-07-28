@@ -1,0 +1,237 @@
+import type {
+  PermissionAction,
+  PermissionCondition,
+  PrismaClient,
+  ResourceSensitivity,
+  RoleTemplateScopeRule,
+  RoleTemplateTier,
+} from './generated/prisma/client';
+
+interface ResourceSeed {
+  resource: string;
+  context: string;
+  label: string;
+  allowedActions: PermissionAction[];
+  clubScoped: boolean;
+  sensitivity: ResourceSensitivity;
+}
+
+interface GrantSeed {
+  resource: string;
+  action: PermissionAction;
+  condition?: PermissionCondition;
+}
+
+interface RoleTemplateSeed {
+  role: string;
+  tier: RoleTemplateTier;
+  unitTypes: string[];
+  scopeRule: RoleTemplateScopeRule;
+  isSingleton: boolean;
+  label: string;
+  grants: GrantSeed[];
+}
+
+const RESOURCES: ResourceSeed[] = [
+  {
+    resource: 'identity.role_assignment',
+    context: 'identity',
+    label: 'Officer role assignment',
+    allowedActions: ['read', 'create', 'update'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
+  {
+    resource: 'meeting.meeting',
+    context: 'meeting',
+    label: 'Meeting',
+    allowedActions: ['read', 'update'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
+  {
+    resource: 'meeting.role',
+    context: 'meeting',
+    label: 'Meeting role assignment',
+    allowedActions: ['read', 'update'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
+  {
+    resource: 'finance.ledger',
+    context: 'finance',
+    label: 'Club ledger',
+    allowedActions: ['read', 'create', 'update'],
+    clubScoped: true,
+    sensitivity: 'restricted',
+  },
+  {
+    resource: 'education.evaluation',
+    context: 'education',
+    label: 'Speech evaluation',
+    allowedActions: ['read', 'create', 'update'],
+    clubScoped: true,
+    sensitivity: 'restricted',
+  },
+  {
+    resource: 'membership.health_signal',
+    context: 'membership',
+    label: 'Member health signal',
+    allowedActions: ['read'],
+    clubScoped: true,
+    sensitivity: 'restricted',
+  },
+  {
+    resource: 'platform.audit',
+    context: 'platform',
+    label: 'Audit trail',
+    allowedActions: ['read'],
+    clubScoped: false,
+    sensitivity: 'restricted',
+  },
+];
+
+// Grants transcribed verbatim from system-design.md §7.5 for the resources
+// seeded above. Not the full matrix — see the Slice 3 plan's scoping note.
+const ROLE_TEMPLATES: RoleTemplateSeed[] = [
+  {
+    role: 'club_president',
+    tier: 'club',
+    unitTypes: ['club'],
+    scopeRule: 'self_unit',
+    isSingleton: true,
+    label: 'Club President',
+    grants: [
+      { resource: 'meeting.meeting', action: 'read' },
+      { resource: 'meeting.role', action: 'read' },
+      { resource: 'finance.ledger', action: 'read' },
+      { resource: 'identity.role_assignment', action: 'create' },
+      { resource: 'identity.role_assignment', action: 'update' },
+    ],
+  },
+  {
+    role: 'club_vpe',
+    tier: 'club',
+    unitTypes: ['club'],
+    scopeRule: 'self_unit',
+    isSingleton: true,
+    label: 'Vice President Education',
+    grants: [
+      { resource: 'meeting.meeting', action: 'update' },
+      { resource: 'meeting.role', action: 'update' },
+      { resource: 'identity.role_assignment', action: 'read' },
+    ],
+  },
+  {
+    role: 'club_treasurer',
+    tier: 'club',
+    unitTypes: ['club'],
+    scopeRule: 'self_unit',
+    isSingleton: true,
+    label: 'Treasurer',
+    grants: [
+      { resource: 'finance.ledger', action: 'read' },
+      { resource: 'finance.ledger', action: 'create' },
+      { resource: 'finance.ledger', action: 'update' },
+      { resource: 'meeting.meeting', action: 'read' },
+      { resource: 'identity.role_assignment', action: 'read' },
+    ],
+  },
+  {
+    role: 'club_member',
+    tier: 'club',
+    unitTypes: ['club'],
+    scopeRule: 'self_unit',
+    isSingleton: false,
+    label: 'Member',
+    grants: [
+      { resource: 'meeting.meeting', action: 'read' },
+      { resource: 'meeting.role', action: 'read' },
+      { resource: 'identity.role_assignment', action: 'read' },
+      { resource: 'finance.ledger', action: 'read', condition: 'own' },
+    ],
+  },
+  // Platform roles: tier 'platform', not bound to a unit type. Zero grants —
+  // see the Slice 3 plan's note on why these are deferred to Slices 4/6.
+  {
+    role: 'system_admin',
+    tier: 'platform',
+    unitTypes: [],
+    scopeRule: 'self_subtree',
+    isSingleton: false,
+    label: 'System Administrator',
+    grants: [],
+  },
+  {
+    role: 'unit_admin',
+    tier: 'platform',
+    unitTypes: [],
+    scopeRule: 'self_unit',
+    isSingleton: false,
+    label: 'Unit Administrator',
+    grants: [],
+  },
+  {
+    role: 'support_readonly',
+    tier: 'platform',
+    unitTypes: [],
+    scopeRule: 'self_subtree',
+    isSingleton: false,
+    label: 'Support (read-only)',
+    grants: [],
+  },
+];
+
+export async function seedAccessVocabulary(db: PrismaClient): Promise<void> {
+  for (const r of RESOURCES) {
+    await db.resourceCatalog.upsert({
+      where: { resource: r.resource },
+      create: r,
+      update: r,
+    });
+  }
+
+  for (const t of ROLE_TEMPLATES) {
+    await db.roleTemplate.upsert({
+      where: { role: t.role },
+      create: {
+        role: t.role,
+        tier: t.tier,
+        unitTypes: t.unitTypes as never,
+        scopeRule: t.scopeRule,
+        isSingleton: t.isSingleton,
+        isSystem: true,
+        label: t.label,
+      },
+      update: {
+        tier: t.tier,
+        unitTypes: t.unitTypes as never,
+        scopeRule: t.scopeRule,
+        isSingleton: t.isSingleton,
+        label: t.label,
+      },
+    });
+
+    for (const g of t.grants) {
+      const condition = g.condition ?? 'any';
+      await db.roleTemplateGrant.upsert({
+        where: {
+          role_resource_action_condition: {
+            role: t.role,
+            resource: g.resource,
+            action: g.action,
+            condition,
+          },
+        },
+        create: {
+          role: t.role,
+          resource: g.resource,
+          action: g.action,
+          condition,
+          effect: 'allow',
+        },
+        update: { effect: 'allow' },
+      });
+    }
+  }
+}

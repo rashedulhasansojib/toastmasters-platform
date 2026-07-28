@@ -183,3 +183,86 @@ model ProgramYear {
 
   @@map("program_year")
 }
+
+enum ResourceSensitivity {
+  normal
+  sensitive
+  restricted
+}
+
+enum PermissionAction {
+  read
+  create
+  update
+  delete
+  approve
+  export
+}
+
+enum PermissionCondition {
+  any
+  own
+  assigned
+  party
+  published
+}
+
+enum PermissionEffect {
+  allow
+  deny
+}
+
+model ResourceCatalog {
+  resource       String              @id
+  context        String
+  label          String
+  description    String?
+  allowedActions PermissionAction[]  @map("allowed_actions")
+  clubScoped     Boolean             @default(true) @map("club_scoped")
+  sensitivity    ResourceSensitivity @default(normal)
+
+  grants RoleTemplateGrant[]
+
+  @@map("resource_catalog")
+}
+
+enum RoleTemplateTier {
+  club
+  area
+  division
+  district
+  platform
+}
+
+enum RoleTemplateScopeRule {
+  self_unit
+  self_subtree
+}
+
+model RoleTemplate {
+  role        String                @id
+  tier        RoleTemplateTier
+  unitTypes   OrgUnitType[]         @map("unit_types")
+  scopeRule   RoleTemplateScopeRule @default(self_unit) @map("scope_rule")
+  isSingleton Boolean               @default(true) @map("is_singleton")
+  isSystem    Boolean               @default(false) @map("is_system")
+  label       String
+
+  grants RoleTemplateGrant[]
+
+  @@map("role_template")
+}
+
+model RoleTemplateGrant {
+  role         String
+  roleTemplate RoleTemplate        @relation(fields: [role], references: [role], onDelete: Cascade)
+  resource     String
+  resourceRef  ResourceCatalog     @relation(fields: [resource], references: [resource])
+  action       PermissionAction
+  condition    PermissionCondition @default(any)
+  effect       PermissionEffect    @default(allow)
+  fields       String[]            @default([])
+
+  @@id([role, resource, action, condition])
+  @@map("role_template_grant")
+}

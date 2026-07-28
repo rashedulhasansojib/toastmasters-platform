@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import { NestFactory } from '@nestjs/core';
 import { VersioningType } from '@nestjs/common';
 import { Logger } from 'nestjs-pino';
@@ -14,6 +15,7 @@ async function bootstrap(): Promise<void> {
 
   app.useLogger(app.get(Logger));
   app.use(helmet());
+  app.use(cookieParser());
   app.enableCors({ origin: env.CORS_ORIGINS, credentials: true });
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
   app.useGlobalFilters(new ProblemJsonFilter());

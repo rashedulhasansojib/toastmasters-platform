@@ -47,6 +47,14 @@ export interface Principal {
   roles: string[];
   /** ltree scope paths the principal is assigned within. */
   scopes: string[];
+  /**
+   * Session claims (Slice 8) — UI convenience only, never read by authorize()
+   * or scopeCovers(). Absent for hand-built test fixtures.
+   */
+  activeUnitId?: string | null;
+  programYearId?: string | null;
+  /** permissionVersion at the session's issuance — never used for authz decisions. */
+  v?: number;
 }
 
 /** A single access question, assembled by the ResourceGuard. */

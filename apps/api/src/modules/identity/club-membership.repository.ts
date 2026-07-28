@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { getPrisma, type PrismaClient } from '@toastmasters/db';
 import type { ClubMembership, ClubMemberType } from '@toastmasters/contracts';
+import { PRISMA_CLIENT } from '../../common/db/prisma-client.token';
 
 type ClubMembershipRow = Awaited<ReturnType<PrismaClient['clubMembership']['create']>>;
 
@@ -22,7 +23,7 @@ function toClubMembership(row: ClubMembershipRow): ClubMembership {
 
 @Injectable()
 export class ClubMembershipRepository {
-  constructor(private readonly db: PrismaClient = getPrisma()) {}
+  constructor(@Inject(PRISMA_CLIENT) private readonly db: PrismaClient = getPrisma()) {}
 
   async create(input: {
     personId: string;

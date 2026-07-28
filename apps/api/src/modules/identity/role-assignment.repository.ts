@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { getPrisma, type PrismaClient } from '@toastmasters/db';
 import type { RoleAssignment, RoleAssignmentEndedReason } from '@toastmasters/contracts';
+import { PRISMA_CLIENT } from '../../common/db/prisma-client.token';
 
 type RoleAssignmentRow = Awaited<ReturnType<PrismaClient['roleAssignment']['create']>>;
 
@@ -23,7 +24,7 @@ function toRoleAssignment(row: RoleAssignmentRow): RoleAssignment {
 
 @Injectable()
 export class RoleAssignmentRepository {
-  constructor(private readonly db: PrismaClient = getPrisma()) {}
+  constructor(@Inject(PRISMA_CLIENT) private readonly db: PrismaClient = getPrisma()) {}
 
   /** Always creates status: 'active' — M1 has no pending-approval workflow. */
   async assign(input: {

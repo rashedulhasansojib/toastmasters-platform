@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { getPrisma, type PrismaClient } from '@toastmasters/db';
 import type { Action, Grant, GrantSource } from '../../common/authz/authz.types';
 import { GrantCacheService } from './grant-cache.service';
-import { PRISMA_CLIENT } from './prisma-client.token';
+import { PRISMA_CLIENT } from '../../common/db/prisma-client.token';
 
 interface PathRow {
   path: string;

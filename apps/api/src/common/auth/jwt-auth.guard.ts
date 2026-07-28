@@ -20,12 +20,11 @@ interface RequestLike {
 
 /**
  * Authenticates the caller from a jose-signed session token (httpOnly `session`
- * cookie, or `Authorization: Bearer`). On success attaches the Principal to the
- * request; otherwise rejects. Skips routes marked @Public().
- *
- * Cookie parsing (cookie-parser) is wired with the login flow in M1; until then
- * the Bearer path is exercised. This is the authentication gate — authorization
- * is the ResourceGuard.
+ * cookie, set by Slice 8's login, or `Authorization: Bearer`). On success
+ * attaches the Principal — including the session claims `activeUnitId`,
+ * `programYearId`, `v` (SessionClaims) — to the request; otherwise rejects.
+ * Skips routes marked @Public(). This is the authentication gate —
+ * authorization is the ResourceGuard.
  */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -55,6 +54,9 @@ export class JwtAuthGuard implements CanActivate {
         userId: String(payload.sub ?? ''),
         roles: Array.isArray(payload.roles) ? (payload.roles as string[]) : [],
         scopes: Array.isArray(payload.scopes) ? (payload.scopes as string[]) : [],
+        activeUnitId: typeof payload.activeUnitId === 'string' ? payload.activeUnitId : null,
+        programYearId: typeof payload.programYearId === 'string' ? payload.programYearId : null,
+        v: typeof payload.v === 'number' ? payload.v : undefined,
       };
       return true;
     } catch {

@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { getPrisma, type PrismaClient } from '@toastmasters/db';
 import type { ProgramYear } from '@toastmasters/contracts';
+import { PRISMA_CLIENT } from '../../common/db/prisma-client.token';
 
 type ProgramYearRow = Awaited<ReturnType<PrismaClient['programYear']['create']>>;
 
@@ -15,7 +16,7 @@ function toProgramYear(row: ProgramYearRow): ProgramYear {
 
 @Injectable()
 export class ProgramYearRepository {
-  constructor(private readonly db: PrismaClient = getPrisma()) {}
+  constructor(@Inject(PRISMA_CLIENT) private readonly db: PrismaClient = getPrisma()) {}
 
   async create(input: { id: string; startsOn: Date; endsOn: Date }): Promise<ProgramYear> {
     const row = await this.db.programYear.create({
@@ -26,6 +27,12 @@ export class ProgramYearRepository {
 
   async findById(id: string): Promise<ProgramYear | null> {
     const row = await this.db.programYear.findUnique({ where: { id } });
+    return row ? toProgramYear(row) : null;
+  }
+
+  /** Session claims resolve `programYearId` from whichever year is currently open. */
+  async findCurrent(): Promise<ProgramYear | null> {
+    const row = await this.db.programYear.findFirst({ where: { status: 'current' } });
     return row ? toProgramYear(row) : null;
   }
 }

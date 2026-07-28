@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { getPrisma, type PrismaClient } from '@toastmasters/db';
 import type { OrgUnit, OrgUnitType } from '@toastmasters/contracts';
+import { PRISMA_CLIENT } from '../../common/db/prisma-client.token';
 
 // Raw rows come back with snake_case columns and ltree path as text.
 interface OrgUnitRow {
@@ -31,7 +32,7 @@ function toOrgUnit(row: OrgUnitRow): OrgUnit {
 
 @Injectable()
 export class OrgUnitRepository {
-  constructor(private readonly db: PrismaClient = getPrisma()) {}
+  constructor(@Inject(PRISMA_CLIENT) private readonly db: PrismaClient = getPrisma()) {}
 
   async createRoot(input: {
     type: 'region';
@@ -77,6 +78,14 @@ export class OrgUnitRepository {
     const rows = await this.db.$queryRaw<OrgUnitRow[]>`
       SELECT id, type, parent_id, path::text AS path, depth, name, code, status, timezone
       FROM org_unit WHERE path = ${path}::ltree
+    `;
+    return rows[0] ? toOrgUnit(rows[0]) : null;
+  }
+
+  async findById(id: string): Promise<OrgUnit | null> {
+    const rows = await this.db.$queryRaw<OrgUnitRow[]>`
+      SELECT id, type, parent_id, path::text AS path, depth, name, code, status, timezone
+      FROM org_unit WHERE id = ${id}::uuid
     `;
     return rows[0] ? toOrgUnit(rows[0]) : null;
   }

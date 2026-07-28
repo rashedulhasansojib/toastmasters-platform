@@ -4,7 +4,7 @@ import { explain, renderExplain, type ExplainResult } from '../../common/authz/e
 import { evaluate } from '../../common/authz/evaluate';
 import type { Action, AccessRequest, Condition } from '../../common/authz/authz.types';
 import { AccessRepository } from './access.repository';
-import { PRISMA_CLIENT } from './prisma-client.token';
+import { PRISMA_CLIENT } from '../../common/db/prisma-client.token';
 
 function notExpired() {
   return { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] };

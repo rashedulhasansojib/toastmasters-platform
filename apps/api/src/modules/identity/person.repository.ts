@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { getPrisma, type PrismaClient } from '@toastmasters/db';
-import type { Person } from '@toastmasters/contracts';
+import type { Person, PersonStatus } from '@toastmasters/contracts';
+import { PRISMA_CLIENT } from '../../common/db/prisma-client.token';
 
 type PersonRow = Awaited<ReturnType<PrismaClient['person']['create']>>;
 
@@ -23,7 +24,7 @@ function toPerson(row: PersonRow): Person {
 
 @Injectable()
 export class PersonRepository {
-  constructor(private readonly db: PrismaClient = getPrisma()) {}
+  constructor(@Inject(PRISMA_CLIENT) private readonly db: PrismaClient = getPrisma()) {}
 
   async create(input: {
     email: string;
@@ -50,5 +51,27 @@ export class PersonRepository {
   async findByEmail(email: string): Promise<Person | null> {
     const row = await this.db.person.findUnique({ where: { email: email.toLowerCase() } });
     return row ? toPerson(row) : null;
+  }
+
+  /**
+   * The minimal seam a fixture (or, later, a self-service invite-acceptance
+   * flow — not built in M1) uses to give a person a password. Flips status to
+   * 'active': there is no separate activation step yet.
+   */
+  async setCredentials(personId: string, passwordHash: string): Promise<void> {
+    await this.db.person.update({
+      where: { id: personId },
+      data: { passwordHash, status: 'active' },
+    });
+  }
+
+  /** Narrow, login-only read — never exposes the hash outside this repository. */
+  async findCredentialsByEmail(
+    email: string,
+  ): Promise<{ id: string; passwordHash: string | null; status: PersonStatus } | null> {
+    return this.db.person.findUnique({
+      where: { email: email.toLowerCase() },
+      select: { id: true, passwordHash: true, status: true },
+    });
   }
 }

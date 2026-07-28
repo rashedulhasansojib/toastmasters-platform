@@ -9,7 +9,7 @@ import { GrantCacheService } from './grant-cache.service';
 import { AccessInspectorRepository } from './access-inspector.repository';
 import { AccessInspectorController } from './access-inspector.controller';
 import { REDIS_CLIENT } from './redis-client.token';
-import { PRISMA_CLIENT } from './prisma-client.token';
+import { PRISMA_CLIENT } from '../../common/db/prisma-client.token';
 
 @Module({
   providers: [

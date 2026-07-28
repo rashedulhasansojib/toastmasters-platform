@@ -84,3 +84,27 @@ export const programYear = z.object({
   status: programYearStatus,
 });
 export type ProgramYear = z.infer<typeof programYear>;
+
+/** Slice 8: login + session. Never carries the password hash or the raw JWT — the token lives only in the httpOnly cookie. */
+export const loginRequestSchema = z
+  .object({
+    email: z.email(),
+    password: z.string().min(1),
+  })
+  .strict();
+export type LoginRequest = z.infer<typeof loginRequestSchema>;
+
+export const switchUnitRequestSchema = z
+  .object({
+    orgUnitId: z.uuid(),
+  })
+  .strict();
+export type SwitchUnitRequest = z.infer<typeof switchUnitRequestSchema>;
+
+export const sessionResponseSchema = z.object({
+  personId: z.uuid(),
+  fullName: z.string(),
+  activeUnitId: z.uuid().nullable(),
+  programYearId: z.string().nullable(),
+});
+export type SessionResponse = z.infer<typeof sessionResponseSchema>;

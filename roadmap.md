@@ -83,6 +83,8 @@ M1 must not start until these are resolved, because each is **cheap now and expe
 | 8 | **Installment plans permitted, and who approves** | Before M4 | Affects Treasurer workflow (§12.3). |
 | 9 | **Minutes default visibility** — officers / members / public | Before M8 | Affects governance + library archive (§13.3). |
 
+**Resolved since this table was written** — decisions 1 and 6 during the M1 walking skeleton; decisions 4, 7 and 8 on 2026-07-29, ahead of M4. The choice and rationale for each live in `CLAUDE.md` §2, the up-to-date record — this table is left as the original pre-flight snapshot rather than edited in place.
+
 ### Platform skeleton (stand up with / just before M1)
 
 - Repository, package layout matching `system-design.md` §4.5, and CI enforcing **`/app` never imports `/platform/db`.**

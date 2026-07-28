@@ -78,14 +78,17 @@ Phase 0 (`roadmap.md` §3) and M1 (the walking skeleton — `docs/plans/m1-walki
 
 **Decided since the design docs were written** (reflected below): the database is **PostgreSQL on Neon** — this closes open decision 1 — and the ORM is **Prisma**. See §3. Decision 6 (region tier) is also closed: **the org tree always roots at `region`** — `org_unit_single_region_root` is a hard unique index, not the optional district-root `system-design.md` §5.1 and `prd.md` FR-ORG-2 describe as a general capability. Chosen in Slice 1 of the M1 walking skeleton for this single, always-region-rooted deployment; a future district-only mode would mean dropping that constraint.
 
+**Decided 2026-07-29** (owner: product, ahead of M4 — `prd.md` §13 / `system-design.md` §25):
+
+- **4. Prospect retention window — 180 days.** An unconverted `Prospect`'s PII (`fullName`, `email`, `phone`, `whatsapp`, `photoUrl`, `bio`) is deleted `deleteAfter` 180 days from creation, enforced by a scheduled job — not aspirational. Aligns with TI's own semiannual dues cadence: a guest who hasn't converted within two full dues periods is stale. (`FR-MEM-3`)
+- **7. Local dues model — flat semiannual.** One local dues amount per club, billed on the same semiannual cadence as TI dues (matching `DuesRecord.duesPeriod`, e.g. `"2026-OCT"`). No per-club-configurable cadence and no monthly proration in M4 — the simplest schema that matches the period members already expect. (`FR-FIN-3`)
+- **8. Installment plans — permitted; Treasurer approves alone.** `InstallmentPlan.approvedBy` is satisfied by any person holding the club's Treasurer role — no co-approval step. The TI portion of a `DuesRecord` is still front-loaded in the plan's schedule so international dues never lapse mid-plan (`system-design.md` §12.3). (`FR-FIN-8`)
+
 **Still open — do not cut a schema, or write code that presumes an answer to, any of these** (`prd.md` §13 / `system-design.md` §25):
 
 2. **Ballot anonymity** — anonymous or attributable. The two cannot coexist; it changes the vote schema. (Governance motion votes are attributable; meeting award ballots are anonymous — different activities, don't collapse them.)
 3. **Club-creation authority** — must a portal club map to a chartered TI club with a number?
-4. **Prospect retention window** — needed for `deleteAfter` in the first schema.
 5. **Audit retention period.**
-7. **Local dues model** — flat semiannual, monthly, or per-club configurable.
-8. **Installment plans** — permitted at all, and who approves them.
 9. **Minutes default visibility** — officers, members, or public.
 10. **Single district or many** — if many, row-level tenancy vs database-per-district (structurally free via the org tree; operationally expensive to retrofit).
 

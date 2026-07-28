@@ -191,3 +191,29 @@ enum ProspectPipelineStatus {
 - [x] `pnpm lint && pnpm typecheck && pnpm build` — green.
 - [ ] Tests / `test:int` — **skipped**, same autopilot note as Slices 2–4. Notably unverified this slice: that the `REVOKE` actually blocks an UPDATE/DELETE attempt end-to-end (the migration applied without error, which is as far as this pass went).
 - [x] Commit + push.
+
+---
+
+## Slice 6 — Dues records (flat semiannual, standing derived by handler)
+
+**Why:** decision 7 (flat semiannual local dues) plus `FR-FIN-3` — one `DuesRecord` per (membership, period), status computed by an explicit handler on payment, never a stored flag anyone can just set.
+
+**Schema:** `DuesRecord` per system-design.md §12.1 (ti/local amount-due/paid/currency/paidAt pairs, `status`, `ledgerEntryIds: uuid[]` — linking, not embedding, Slice 5's ledger). Club-level flat dues rates (decision 7) live as three new nullable columns directly on `org_unit` (`localDuesAmount`/`tiDuesAmount`/`duesCurrency`) rather than a new table — reading/writing them uses Prisma directly through a narrow `ClubDuesSettingsRepository`, bypassing `OrgUnitRepository`'s ltree-raw-SQL machinery entirely since none of that applies here. New resource `finance.dues` (restricted, same bracket as `finance.ledger`) — `club_treasurer` gets read/create/update, `club_member` gets read (`condition: 'own'`, mirroring the pre-existing `finance.ledger` grant of the same shape).
+
+**The "derived by an explicit handler" rule, concretely:** `deriveDuesStatus()` (in `dues-record.service.ts`) is a pure function of the four due/paid amounts; every write to `status` — at generation and at each payment — calls it and persists the result. No DB trigger, no computed column. `recordPayment()` also guards against double-linking the same `LedgerEntry` to a `DuesRecord` twice.
+
+**Scope cuts (both flagged, not silently dropped):** `lapsed` status is unreachable this slice — deriving it needs a Mountain-Time deadline-comparison job (CLAUDE.md's "never compute a deadline in the viewer's zone" rule) that doesn't exist yet. And the pre-existing `condition: 'own'` gap noted in Slice 5 applies identically here: `ResourceGuard` doesn't yet build an ownership `context`, so `club_member`'s `finance.dues:read own` grant can't actually resolve true yet — same known limitation, not newly introduced.
+
+**API:** `GET/PATCH /clubs/:clubUnitId/dues-settings`; `POST /clubs/:clubUnitId/dues-records/generate`, `GET /clubs/:clubUnitId/dues-records[?duesPeriod=]`, `GET .../dues-records/:id`, `POST .../dues-records/:id/payments`.
+
+**Steps:**
+
+- [x] Schema (`DuesRecord`, `OrgUnit` dues-rate columns) + migration.
+- [x] Seed: `finance.dues` resource + `club_treasurer`/`club_member` grants — ran `pnpm db:seed` against the live dev DB (idempotent upsert, same as every prior seed change).
+- [x] Contracts (`duesRecord`, `generateDuesRecordsRequestSchema`, `recordDuesPaymentRequestSchema`, `clubDuesSettings`/update schema).
+- [x] `ClubMembershipRepository.findActiveByClub` (new — dues generation's roster query).
+- [x] Repository + service (`deriveDuesStatus`) + two controllers, wired into `FinanceModule` (now imports `IdentityModule`).
+- [x] Updated the two pre-existing integration specs that assert exact resource counts/lists (`access.seed.int-spec.ts`: 18→19 resources, restricted list now includes `finance.dues`; `authorization-matrix.int-spec.ts`: added `finance.dues` to `RESOURCE_ACTIONS`) — cheap, done even while otherwise skipping test-writing this milestone, since leaving a _guaranteed_-failing existing assertion uncorrected is worse than not touching it.
+- [x] `pnpm lint && pnpm typecheck && pnpm build` — green.
+- [ ] New tests / `test:int` — **skipped**, same autopilot note as Slices 2–5.
+- [x] Commit + push.

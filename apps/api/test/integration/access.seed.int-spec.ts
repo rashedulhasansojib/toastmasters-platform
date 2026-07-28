@@ -19,7 +19,7 @@ describe('seedAccessVocabulary (integration)', () => {
     await seedAccessVocabulary(db);
 
     const resourceCount = await db.resourceCatalog.count();
-    expect(resourceCount).toBe(18);
+    expect(resourceCount).toBe(19);
   });
 
   it('marks exactly the four canonical resources as restricted', async () => {
@@ -29,6 +29,7 @@ describe('seedAccessVocabulary (integration)', () => {
     });
     expect(restricted.map((r) => r.resource)).toEqual([
       'education.evaluation',
+      'finance.dues',
       'finance.ledger',
       'membership.health_signal',
       'platform.audit',

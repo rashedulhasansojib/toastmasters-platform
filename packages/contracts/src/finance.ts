@@ -55,3 +55,72 @@ export const reverseLedgerEntryRequestSchema = z
   })
   .strict();
 export type ReverseLedgerEntryRequest = z.infer<typeof reverseLedgerEntryRequestSchema>;
+
+/**
+ * M4 Slice 6: system-design.md §12.1. One record per (membership, period) —
+ * CLAUDE.md §2 decision 7 (flat semiannual local dues). `status` is derived
+ * by an explicit handler on payment, not a stored flag anyone can set
+ * directly (`FR-FIN-3`) — there is deliberately no `updateStatus` request
+ * schema. Scope cut: `lapsed` is not yet reachable — see the schema comment
+ * on `DuesRecordStatus`.
+ */
+export const duesRecordStatus = z.enum(['due', 'partial', 'paid', 'waived', 'lapsed']);
+export type DuesRecordStatus = z.infer<typeof duesRecordStatus>;
+
+export const duesRecord = z.object({
+  id: z.uuid(),
+  orgUnitId: z.uuid(),
+  clubMembershipId: z.uuid(),
+  personId: z.uuid(),
+  duesPeriod: z.string(),
+  programYearId: z.string(),
+  tiAmountDue: z.number(),
+  tiAmountPaid: z.number(),
+  tiCurrency: z.string(),
+  tiPaidAt: z.iso.datetime().nullable(),
+  tiSubmittedToWhqAt: z.iso.datetime().nullable(),
+  localAmountDue: z.number(),
+  localAmountPaid: z.number(),
+  localCurrency: z.string(),
+  localPaidAt: z.iso.datetime().nullable(),
+  status: duesRecordStatus,
+  ledgerEntryIds: z.array(z.uuid()),
+  createdAt: z.iso.datetime(),
+});
+export type DuesRecord = z.infer<typeof duesRecord>;
+
+/** Generates one DuesRecord per active club membership without one yet for this period — amounts come from the club's configured dues settings, never client-supplied. */
+export const generateDuesRecordsRequestSchema = z
+  .object({
+    duesPeriod: z.string().min(1),
+    programYearId: z.string().min(1),
+  })
+  .strict();
+export type GenerateDuesRecordsRequest = z.infer<typeof generateDuesRecordsRequestSchema>;
+
+export const recordDuesPaymentRequestSchema = z
+  .object({
+    scope: z.enum(['ti', 'local']),
+    amount: z.number().positive(),
+    ledgerEntryId: z.uuid(),
+  })
+  .strict();
+export type RecordDuesPaymentRequest = z.infer<typeof recordDuesPaymentRequestSchema>;
+
+/** club-level flat dues rates (CLAUDE.md §2 decision 7) — set by the Treasurer, read at DuesRecord-generation time. */
+export const updateClubDuesSettingsRequestSchema = z
+  .object({
+    localDuesAmount: z.number().nonnegative().optional(),
+    tiDuesAmount: z.number().nonnegative().optional(),
+    currency: z.string().min(1).optional(),
+  })
+  .strict();
+export type UpdateClubDuesSettingsRequest = z.infer<typeof updateClubDuesSettingsRequestSchema>;
+
+export const clubDuesSettings = z.object({
+  orgUnitId: z.uuid(),
+  localDuesAmount: z.number().nullable(),
+  tiDuesAmount: z.number().nullable(),
+  currency: z.string().nullable(),
+});
+export type ClubDuesSettings = z.infer<typeof clubDuesSettings>;

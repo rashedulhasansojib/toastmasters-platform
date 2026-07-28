@@ -183,6 +183,16 @@ const RESOURCES: ResourceSeed[] = [
     clubScoped: true,
     sensitivity: 'normal',
   },
+  {
+    // M4 Slice 6: system-design.md §12.1. Restricted like finance.ledger — a
+    // member's dues amounts/status are as sensitive as a ledger line.
+    resource: 'finance.dues',
+    context: 'finance',
+    label: 'Member dues record',
+    allowedActions: ['read', 'create', 'update'],
+    clubScoped: true,
+    sensitivity: 'restricted',
+  },
 ];
 
 // Grants transcribed verbatim from system-design.md §7.5 for the resources
@@ -254,6 +264,9 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'finance.ledger', action: 'read' },
       { resource: 'finance.ledger', action: 'create' },
       { resource: 'finance.ledger', action: 'update' },
+      { resource: 'finance.dues', action: 'read' },
+      { resource: 'finance.dues', action: 'create' },
+      { resource: 'finance.dues', action: 'update' },
       { resource: 'meeting.meeting', action: 'read' },
       { resource: 'identity.role_assignment', action: 'read' },
     ],
@@ -295,6 +308,7 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'meeting.vote', action: 'create' },
       { resource: 'identity.role_assignment', action: 'read' },
       { resource: 'finance.ledger', action: 'read', condition: 'own' },
+      { resource: 'finance.dues', action: 'read', condition: 'own' },
     ],
   },
   // Platform roles: tier 'platform', not bound to a unit type. Zero grants —

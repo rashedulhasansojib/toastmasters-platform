@@ -49,4 +49,13 @@ export class ClubMembershipRepository {
     });
     return rows.map(toClubMembership);
   }
+
+  /** M4 Slice 6: dues generation's membership roster — active (not yet left) memberships only. */
+  async findActiveByClub(clubUnitId: string): Promise<ClubMembership[]> {
+    const rows = await this.db.clubMembership.findMany({
+      where: { clubUnitId, leftAt: null },
+      orderBy: { joinedAt: 'asc' },
+    });
+    return rows.map(toClubMembership);
+  }
 }

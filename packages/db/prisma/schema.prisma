@@ -50,6 +50,10 @@ model OrgUnit {
   timezone  String
   createdAt DateTime      @default(now()) @map("created_at")
   updatedAt DateTime      @updatedAt @map("updated_at")
+  /// M4 Slice 6 / CLAUDE.md §2 decision 7: flat semiannual local dues — one amount per club, not per-membership-configurable. Meaningful only for `type: club` rows.
+  localDuesAmount Decimal? @map("local_dues_amount") @db.Decimal(10, 2)
+  tiDuesAmount    Decimal? @map("ti_dues_amount") @db.Decimal(10, 2)
+  duesCurrency    String?  @map("dues_currency")
 
   clubMemberships ClubMembership[]
   roleAssignments RoleAssignment[]
@@ -65,6 +69,7 @@ model OrgUnit {
   agendaTemplates        AgendaTemplate[]
   prospects              Prospect[]
   ledgerEntries          LedgerEntry[]
+  duesRecords            DuesRecord[]
 
   @@map("org_unit")
 }
@@ -114,6 +119,7 @@ model Person {
   prospectVisitsLogged      ProspectVisit[]
   prospectCommunicationsLogged ProspectCommunication[]
   ledgerEntriesRecorded     LedgerEntry[]
+  duesRecords               DuesRecord[]
 
   @@map("person")
 }
@@ -160,6 +166,7 @@ model ClubMembership {
   localStatus      ClubMembershipLocalStatus @default(active) @map("local_status")
   provenance       ClubMembershipProvenance  @default(portal)
   lastReconciledAt DateTime?                 @map("last_reconciled_at")
+  duesRecords      DuesRecord[]
 
   @@map("club_membership")
 }
@@ -216,6 +223,7 @@ model ProgramYear {
   meetings        Meeting[]
   invitations     Invitation[]
   ledgerEntries   LedgerEntry[]
+  duesRecords     DuesRecord[]
 
   @@map("program_year")
 }
@@ -940,4 +948,52 @@ model LedgerEntry {
 
   @@unique([reversalOfEntryId])
   @@map("ledger_entry")
+}
+
+enum DuesRecordStatus {
+  due
+  partial
+  paid
+  waived
+  lapsed
+
+  @@map("dues_record_status")
+}
+
+/**
+ * M4 Slice 6: system-design.md §12.1. One row per (membership, period) — a
+ * payment dated mid-period is otherwise ambiguous between periods. `status`
+ * is a stored column but only ever written by `DuesRecordService`'s explicit
+ * `deriveStatus()` handler after a payment is recorded — never an implicit
+ * DB trigger/computed column (CLAUDE.md §6's "not by implicit database
+ * middleware" rule). Scope cut: `lapsed` is not yet derived — it needs a
+ * Mountain-Time deadline-comparison job this slice doesn't build; only
+ * due/partial/paid/waived are reachable for now.
+ */
+model DuesRecord {
+  id                 String           @id @default(uuid()) @db.Uuid
+  orgUnitId          String           @map("org_unit_id") @db.Uuid
+  orgUnit            OrgUnit          @relation(fields: [orgUnitId], references: [id])
+  clubMembershipId   String           @map("club_membership_id") @db.Uuid
+  clubMembership     ClubMembership   @relation(fields: [clubMembershipId], references: [id])
+  personId           String           @map("person_id") @db.Uuid
+  person             Person           @relation(fields: [personId], references: [id])
+  duesPeriod         String           @map("dues_period")
+  programYearId      String           @map("program_year_id")
+  programYear        ProgramYear      @relation(fields: [programYearId], references: [id])
+  tiAmountDue        Decimal          @map("ti_amount_due") @db.Decimal(10, 2)
+  tiAmountPaid       Decimal          @default(0) @map("ti_amount_paid") @db.Decimal(10, 2)
+  tiCurrency         String           @map("ti_currency")
+  tiPaidAt           DateTime?        @map("ti_paid_at")
+  tiSubmittedToWhqAt DateTime?        @map("ti_submitted_to_whq_at")
+  localAmountDue     Decimal          @map("local_amount_due") @db.Decimal(10, 2)
+  localAmountPaid    Decimal          @default(0) @map("local_amount_paid") @db.Decimal(10, 2)
+  localCurrency      String           @map("local_currency")
+  localPaidAt        DateTime?        @map("local_paid_at")
+  status             DuesRecordStatus @default(due)
+  ledgerEntryIds     String[]         @map("ledger_entry_ids") @db.Uuid
+  createdAt          DateTime         @default(now()) @map("created_at")
+
+  @@unique([clubMembershipId, duesPeriod])
+  @@map("dues_record")
 }

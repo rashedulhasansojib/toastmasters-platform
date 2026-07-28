@@ -10,14 +10,14 @@
 
 > **Scope note.** M1's plan sketched its full slice roadmap before detailing
 > any slice, because the whole milestone's shape was known up front. M2 is
-> being scoped incrementally instead: only **Slice 1** below is detailed and
+> being scoped incrementally instead: **Slices 1–2** below are detailed and
 > execution-ready. Later M2 slices (unit policies, permission versioning UX,
-> org tree editor, unit switcher, `ActivityEvent` emission, access-inspector
+> unit switcher, `ActivityEvent` emission beyond reparent, access-inspector
 > coverage of invitations) will each get their own detailed section, written
-> just before they're implemented, once Slice 1's shape has proven out —
-> mirroring M1's own governing principle: "if `authorize()` feels awkward
-> here, fix it before M2" applies equally to "if the invitation shape feels
-> awkward here, fix it before the next slice."
+> just before they're implemented, once each prior slice's shape has proven
+> out — mirroring M1's own governing principle: "if `authorize()` feels
+> awkward here, fix it before M2" applies equally to "if the invitation/org-
+> editor shape feels awkward here, fix it before the next slice."
 
 ---
 
@@ -377,6 +377,269 @@ accept(rawToken: string, input: { fullName: string; password: string }): Promise
 ```bash
 git add packages/db packages/contracts/src/identity.ts apps/api/src/modules/access/access.module.ts apps/api/src/modules/identity apps/api/test/integration/invitation.repository.int-spec.ts apps/api/test/integration/invitation-http.int-spec.ts apps/api/test/integration/authorization-matrix.int-spec.ts
 git commit -m "feat(identity): invitations with the delegation check — M2 slice 1"
+```
+
+---
+
+## Slice 2 — Org tree editor (create + transactional re-parent)
+
+**Why:** `roadmap.md` §5 names "org tree editor + transactional re-parenting" as M2 content, and `prd.md` FR-ORG-3 requires re-parenting to be "transactional and rewrites the subtree, and it invalidates affected permission caches." Slice 1 proved invitations can build a district top-down — but only into org units that already exist, all seeded directly through `OrgUnitRepository` in test fixtures. There is currently **no HTTP route of any kind for org units** (`apps/api/src/modules/org/` has a repository and a bare module, no controller). This slice closes that gap and, combined with Slice 1, lets the M2 ship gate run end to end over real HTTP with nothing seeded by hand except the one-time region root and the first `unit_admin`.
+
+**An open Phase-0 decision this slice deliberately does not touch:** `CLAUDE.md` §2 lists decision 3 — "Club-creation authority: must a portal club map to a chartered TI club with a number?" — as **still open**, with `roadmap.md` naming this exact slice ("org tree editor") as its deadline, and `CLAUDE.md`'s own rule: "If a task seems to require one of these to be settled, it is blocked. Ask; do not guess and build." Checked whether Slice 2 actually requires an answer: the decision only gates **validation** coupling `OrgUnit(type:'club')` creation to TI-membership data (`system-design.md`'s `ClubProfile`/`charteredAt`, neither of which exist in the schema yet) — it does not gate the org-tree **mechanics** (create a node, re-parent a subtree) this slice builds. So Slice 2 is scoped to carry zero TI-mapping fields and zero club-specific validation branches — the create route accepts the same shape for every `OrgUnitType`, `club` included, with no special-casing. This doesn't presume an answer to decision 3; it just doesn't ask the question yet. Whichever way decision 3 resolves, it becomes a validation addition to this route in a later slice, not a rework of it.
+
+**Scoping decisions:**
+
+- **No root-creation route.** `createRoot` stays a direct-repository, ops/bootstrap-only operation — a `region` root is created exactly once per deployment (the DB enforces a singleton via `org_unit_single_region_root`), never as part of routine "building a district." Only child creation (`POST /org-units/:parentId/children`) is exposed over HTTP.
+- **One route handles every tier.** `POST /org-units/:parentId/children` creates a district under a region, an area under a division, a club under a district — same shape, same guard (`org.unit:create` at the parent). Splitting by tier would just be the same code four times; the parent's own `type` plus the request body's `type` is enough for a later slice to add tier-transition validation if it turns out to be needed.
+- **Read/list routes are out of scope.** The roadmap phrase is "org tree editor + transactional re-parenting" — both are writes. `findById`/`findSubtree` already exist on the repository for internal use (`AuthzService.resolveScope`, test fixtures); exposing them over HTTP is a smaller, independent follow-up slice, not a reason to widen this one.
+- **Only `unit_admin` and `system_admin` get `org.unit:create`/`update`, not new domain roles.** `system-design.md` §7.6 names `area_director`/`division_director`/`district_director`/`club_growth_director` as the eventual holders of org-tree writes — but none of them are seeded yet (M1 only seeded the four club-tier domain roles plus the three platform roles). Inventing district/division/area domain roles is out of scope for an org-tree-editor slice; `unit_admin`'s existing `self_subtree` reach (system-design.md §7.7: "Org tree — W within subtree") is precedent-consistent and sufficient to prove the mechanism, matching how Slice 1 extended `unit_admin` rather than seeding new roles. `system_admin` needs no explicit grant — `AccessRepository`'s `systemAdminGrants()` already synthesises allow-everything on every non-restricted resource, and `org.unit` is normal-sensitivity.
+- **Re-parent needs a delegation check on the _destination_, not just the source — a real gap the design docs leave silent.** The outer `@ResourceScope('org.unit', 'update', {source:'param', key:'orgUnitId'})` guard only checks authority over the node **being moved**. Nothing in `system-design.md`/`rbac-design.md` says whether moving a unit into a subtree the actor has no authority over should be allowed. Left unchecked, a `unit_admin` scoped to one club (a leaf, so trivially "its own subtree") could re-parent that club underneath an unrelated district — jurisdiction moved without the destination's administrator's authority ever being checked. Closed the same way Slice 1 closed the identity/role-assignment case: an inner `canDelegate` check inside `OrgUnitService.reparent()`, requiring the actor to also hold `org.unit:create` at the **destination** parent's scope (re-parenting is, from the destination's point of view, "placing a new child" — the same right creation itself requires) — mirroring `InvitationService.create()`'s outer-guard-plus-inner-`canDelegate` shape exactly.
+- **The `permission_version` bump on re-parent is scoped to the moved subtree's own org units, not "everyone under the old or new path."** `rbac-design.md` §5 says "org unit reparented → bump everyone with a grant under either path" — read literally this sounds like two different sets to union. It isn't: a re-parent doesn't create or destroy any `org_unit` rows, it only rewrites the `path`/`depth`/`parent_id` of the moved node and its descendants — so "the old path's unit" and "the new path's unit" are always the _same_ row, described before and after the same transaction. The actual staleness risk is narrower still: `AccessRepository.pathOf()` (used both to resolve a request's target scope and to compute each cached `Grant`'s own `scope` field) is never itself cached — only the _list_ of a person's resolved grants is (`GrantCacheService`, 5 min TTL, keyed `personId:permissionVersion`). A grant's cached `scope` only goes stale if the org unit _that specific grant is scoped to_ had its own path rewritten — i.e., exactly the moved node and its descendants, nothing above them (an ancestor's own path is untouched by a descendant moving, so grants scoped at an ancestor are never stale; whether an ancestor-scoped grant still _covers_ the moved node is re-evaluated fresh on every `authorize()` call via a live, uncached `pathOf()` lookup, regardless of grant-list cache staleness). So the correct — not merely simpler — bump set is: every person holding a `RoleAssignment`, `PlatformRoleAssignment`, `PersonGrant`, or a person-subject `UnitPolicyGrant` whose `org_unit_id` is the moved node or one of its descendants. `OrgUnitRepository.reparent()` already computes exactly that id set (`WHERE path <@ node.path`) for the path-rewrite `UPDATE` — this slice adds `RETURNING id` and reuses it.
+- **"Emit `OrgUnitReparented`" is implemented as an `AuditEvent` row, not a new event bus.** No pub/sub or domain-event infrastructure exists anywhere in the codebase (`BullMQ` is for jobs, not domain events). `AuditEvent` (M1 Slice 6) is the existing "immutable record of something that happened" primitive, already used for break-glass mints and restricted reads — a new `org_unit_reparented` `AuditEventType`, written in the same transaction as the path rewrite, satisfies "emit" in spirit without inventing infrastructure a single call site doesn't justify. `reparent()`'s new `actorId` parameter is optional (existing 2-arg call sites in `org.repository.int-spec.ts` keep compiling unchanged) — the audit row is only written when an actor is known, i.e. from the HTTP path.
+
+**Files:**
+
+- Modify: `packages/db/prisma/schema.prisma` (`AuditEventType` gains `org_unit_reparented`), `packages/db/src/seed.ts` (`org.unit` resource; `unit_admin` grants `org.unit:create`/`update`); new migration
+- Modify: `apps/api/src/modules/org/org.repository.ts` (`reparent()` — `RETURNING id`, permission-version bump, optional audit event), `org.module.ts` (import `AccessModule`, register the new service/controller)
+- Create: `apps/api/src/modules/org/org.service.ts`, `org.controller.ts`, `org.service.spec.ts`
+- Modify: `packages/contracts/src/org.ts` (`createOrgUnitChildRequestSchema`, `reparentOrgUnitRequestSchema`)
+- Modify: `apps/api/test/integration/org.repository.int-spec.ts` (reparent's new bump/audit behavior); Create: `apps/api/test/integration/org-http.int-spec.ts`
+- Modify: `apps/api/test/integration/authorization-matrix.int-spec.ts` (add `org.unit` row)
+
+**Interfaces:**
+
+```prisma
+// schema.prisma — AuditEventType addition
+enum AuditEventType {
+  break_glass_mint
+  restricted_read
+  org_unit_reparented
+}
+```
+
+```ts
+// packages/contracts/src/org.ts additions
+export const createOrgUnitChildRequestSchema = z
+  .object({
+    type: orgUnitType,
+    name: z.string().min(1),
+    code: z.string().min(1),
+    timezone: z.string().min(1),
+  })
+  .strict();
+export type CreateOrgUnitChildRequest = z.infer<typeof createOrgUnitChildRequestSchema>;
+
+export const reparentOrgUnitRequestSchema = z.object({ newParentId: z.uuid() }).strict();
+export type ReparentOrgUnitRequest = z.infer<typeof reparentOrgUnitRequestSchema>;
+```
+
+```ts
+// org.repository.ts — reparent()'s new shape
+reparent(nodeId: string, newParentId: string, actorId?: string): Promise<void>;
+```
+
+```ts
+// org.service.ts — shape only
+createChild(input: {
+  parentId: string; type: OrgUnitType; name: string; code: string; timezone: string;
+}): Promise<OrgUnit>;
+/** canDelegate-checks org.unit:create at the *destination* before delegating to the repository. */
+reparent(input: { actorId: string; orgUnitId: string; newParentId: string }): Promise<void>;
+```
+
+**TDD steps:**
+
+- [ ] **Step 1: Schema, seed, migration**
+
+  Red — extend `access.seed.int-spec.ts`: `org.unit`'s `allowedActions` includes `create` and `update`; `unit_admin`'s grants include both.
+
+  Green — add `org_unit_reparented` to `AuditEventType`; in `seed.ts`, add to `RESOURCES`:
+
+  ```ts
+  {
+    resource: 'org.unit',
+    context: 'org',
+    label: 'Organisation unit',
+    allowedActions: ['create', 'update'],
+    clubScoped: false,
+    sensitivity: 'normal',
+  },
+  ```
+
+  and to `unit_admin.grants`: `{ resource: 'org.unit', action: 'create' }`, `{ resource: 'org.unit', action: 'update' }`. `prisma migrate dev --create-only --name org_unit_audit_type`, hand-review (strip any spurious ltree `DROP INDEX`), `prisma migrate deploy`.
+
+  Rerun — green. Also rerun `authorization-matrix.int-spec.ts` unchanged.
+
+- [ ] **Step 2: `OrgUnitRepository.reparent()` — permission-version bump + audit event**
+
+  Red (`org.repository.int-spec.ts` additions): a `club_member` holding a `RoleAssignment` at a club that gets re-parented has their `permissionVersion` incremented by exactly 1 after `reparent()`; a person with no grant anywhere in the moved subtree is untouched; calling `reparent(nodeId, newParentId)` **without** an `actorId` (the existing 2-arg call sites) still compiles and runs unchanged, and writes no `AuditEvent`; calling it **with** an `actorId` writes exactly one `AuditEvent` row with `type: 'org_unit_reparented'`, `orgUnitId` set to the moved node, and `metadata` carrying the old/new parent ids.
+
+  Green — add `RETURNING id` to the existing path-rewrite `UPDATE` (switch `$executeRaw` to `$queryRaw<Array<{ id: string }>>`), then inside the same `$transaction`:
+
+  ```ts
+  const affectedIds = affected.map((r) => r.id);
+  const [roleHolders, platformHolders, personGrantHolders, policySubjects] = await Promise.all([
+    tx.roleAssignment.findMany({
+      where: { orgUnitId: { in: affectedIds } },
+      select: { personId: true },
+    }),
+    tx.platformRoleAssignment.findMany({
+      where: { orgUnitId: { in: affectedIds } },
+      select: { personId: true },
+    }),
+    tx.personGrant.findMany({
+      where: { orgUnitId: { in: affectedIds } },
+      select: { personId: true },
+    }),
+    tx.unitPolicyGrant.findMany({
+      where: { orgUnitId: { in: affectedIds }, subjectKind: 'person' },
+      select: { subjectPersonId: true },
+    }),
+  ]);
+  const affectedPersonIds = [
+    ...new Set([
+      ...roleHolders.map((r) => r.personId),
+      ...platformHolders.map((r) => r.personId),
+      ...personGrantHolders.map((r) => r.personId),
+      ...policySubjects.map((r) => r.subjectPersonId).filter((id): id is string => id != null),
+    ]),
+  ];
+  if (affectedPersonIds.length > 0) {
+    await tx.person.updateMany({
+      where: { id: { in: affectedPersonIds } },
+      data: { permissionVersion: { increment: 1 } },
+    });
+  }
+  if (actorId) {
+    await tx.auditEvent.create({
+      data: {
+        actorPersonId: actorId,
+        type: 'org_unit_reparented',
+        orgUnitId: nodeId,
+        metadata: { oldParentId: node.parent_id, newParentId, oldPath: node.path, newPath },
+      },
+    });
+  }
+  ```
+
+  Rerun — green, including all four pre-existing tests in this file **unchanged**.
+
+- [ ] **Step 3: `OrgUnitService`**
+
+  Red (`org.service.spec.ts`, mocked `OrgUnitRepository`/`AccessRepository`): `createChild` passes straight through to the repository; `reparent` calls the repository when the actor holds `org.unit:create` at the destination's scope; `reparent` throws `ForbiddenException` — and never calls the repository — when the actor holds authority over the source but not the destination.
+
+  Green:
+
+  ```ts
+  @Injectable()
+  export class OrgUnitService {
+    constructor(
+      private readonly orgUnits: OrgUnitRepository,
+      private readonly accessRepository: AccessRepository,
+    ) {}
+
+    async createChild(input: {
+      parentId: string;
+      type: OrgUnitType;
+      name: string;
+      code: string;
+      timezone: string;
+    }): Promise<OrgUnit> {
+      return this.orgUnits.createChild(input);
+    }
+
+    async reparent(input: {
+      actorId: string;
+      orgUnitId: string;
+      newParentId: string;
+    }): Promise<void> {
+      const [actorGrants, destinationScope] = await Promise.all([
+        this.accessRepository.effectiveGrants(input.actorId),
+        this.accessRepository.pathOf(input.newParentId),
+      ]);
+      if (
+        !canDelegate(actorGrants, {
+          resource: 'org.unit',
+          action: 'create',
+          scope: destinationScope,
+        })
+      ) {
+        throw new ForbiddenException('Cannot reparent into a unit you do not hold authority over');
+      }
+      await this.orgUnits.reparent(input.orgUnitId, input.newParentId, input.actorId);
+    }
+  }
+  ```
+
+  Rerun — green.
+
+- [ ] **Step 4: `OrgUnitController` + module wiring**
+
+  Red — folded into Step 5's end-to-end tests (per M1 Slice 9 Step 4 / M2 Slice 1 Step 6 precedent — a controller-only test would just re-exercise Steps 2–3's already-green paths).
+
+  Green:
+
+  ```ts
+  @Controller()
+  export class OrgUnitController {
+    constructor(private readonly orgUnits: OrgUnitService) {}
+
+    @Post('org-units/:parentId/children')
+    @ResourceScope('org.unit', 'create', { source: 'param', key: 'parentId' })
+    async createChild(
+      @Param('parentId', uuidPipe) parentId: string,
+      @Body(new ZodValidationPipe(createOrgUnitChildRequestSchema)) body: CreateOrgUnitChildRequest,
+    ): Promise<OrgUnit> {
+      return this.orgUnits.createChild({ parentId, ...body });
+    }
+
+    @Post('org-units/:orgUnitId/reparent')
+    @ResourceScope('org.unit', 'update', { source: 'param', key: 'orgUnitId' })
+    @HttpCode(200)
+    async reparent(
+      @Param('orgUnitId', uuidPipe) orgUnitId: string,
+      @CurrentUser() principal: Principal,
+      @Body(new ZodValidationPipe(reparentOrgUnitRequestSchema)) body: ReparentOrgUnitRequest,
+    ): Promise<{ success: true }> {
+      await this.orgUnits.reparent({
+        actorId: principal.userId,
+        orgUnitId,
+        newParentId: body.newParentId,
+      });
+      return { success: true };
+    }
+  }
+  ```
+
+  `org.module.ts` gains `imports: [AccessModule]` and registers `OrgUnitService`, `OrgUnitController`.
+
+  Rerun — green. **Rerun `identity-module-boot.int-spec.ts`** (extend it to also boot `OrgModule` alongside `IdentityModule`, or confirm the existing combined-boot test still covers it — it already imports both `IdentityModule`/`OrgModule` together) to catch any DI-boot cycle the same way M2 Slice 1's `PasswordService` cycle was caught.
+
+- [ ] **Step 5: End-to-end HTTP tests**
+
+  Red (`org-http.int-spec.ts`, real Postgres + Redis, real `AppModule`, `jose`-minted JWTs):
+
+  1. **The M2 ship gate, fully over HTTP for the first time:** seed only a region root and a `unit_admin` platform-role holder at that region (self_subtree — the one-time bootstrap this deployment does once, matching Slice 1's own "bootstrapping the first officer isn't the thing under test" precedent). `POST /v1/org-units/:regionId/children` `{type:'district', ...}` → 201; `POST /v1/org-units/:districtId/children` `{type:'club', ...}` → 201; `POST /v1/org-units/:clubId/invitations` (Slice 1's route) `{email, role:'club_president', programYearId}` → 201; accept it (Slice 1's route) → 200; the accepted person holds an active `club_president` `RoleAssignment` at the newly created club. Nothing beyond the region root and the `unit_admin` grant was seeded directly — the whole district was built through HTTP.
+  2. **Destination-authority denial:** a second `unit_admin` scoped only to District A (not the region) attempts `POST /v1/org-units/:clubInDistrictA/reparent` `{newParentId: districtB}` where District B is outside their authority → 403; the club's path is unchanged afterward.
+  3. **Permission-version bump on reparent:** a `club_president` at a club about to be moved — capture `permissionVersion` before; a suitably-authorized `unit_admin` (scoped at the region) reparents that club to a different district → 200; the president's `permissionVersion` in the DB has incremented.
+
+  Green — nothing new to implement; this step verifies Steps 1–4, run for real.
+
+  Rerun — green. Then the full gate: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`, plus `pnpm test:int`.
+
+- [ ] **Step 6: Authorisation-matrix update**
+
+  Red — add `{ resource: 'org.unit', actions: ['create', 'update'] }` to `authorization-matrix.int-spec.ts`'s `RESOURCE_ACTIONS`.
+
+  Green — no production code change; generated from `role_template_grant`.
+
+  Rerun — green, full matrix suite.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add packages/db packages/contracts/src/org.ts apps/api/src/modules/org apps/api/test/integration/org.repository.int-spec.ts apps/api/test/integration/org-http.int-spec.ts apps/api/test/integration/authorization-matrix.int-spec.ts apps/api/test/integration/access.seed.int-spec.ts
+git commit -m "feat(org): org tree editor — create + transactional reparent with destination delegation check"
 ```
 
 ---

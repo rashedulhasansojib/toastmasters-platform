@@ -9,7 +9,7 @@
 **Tech Stack:** NestJS 11 (api), Prisma 7 + `@prisma/adapter-pg` (packages/db), Postgres + `ltree`, Redis/BullMQ (permission cache), Zod 4 (packages/contracts), Vitest 4 + Testcontainers 12, Argon2id + `jose` (sessions).
 
 > **Scope note.** This is the M1 milestone plan. It is delivered as ordered
-> **slices** (§ "Slice roadmap"). Slices 0–6 below are fully detailed and
+> **slices** (§ "Slice roadmap"). Slices 0–7 below are fully detailed and
 > execution-ready. Each later slice is expanded to the same bite-sized TDD depth
 > just before it is executed, so its code is written against a proven foundation
 > rather than guessed. This matches roadmap.md §7 ("plans are living documents;
@@ -3861,9 +3861,597 @@ git commit -m "feat(access): delegation guard, unit-policy overrides, and system
 
 ---
 
-## Slices 7–10
+## Slice 7 — Access inspector
 
-Each is expanded to Slice 0/1/2/3/4/5/6 depth (files, interfaces, bite-sized TDD steps with full code) immediately before it is executed, against the now-proven foundation. Their deliverables, dependencies, and ship criteria are fixed in the roadmap table above; the canonical schema and algorithms they implement are `rbac-design.md` §3–§9 and `system-design.md` §5–§7, and the design decisions specific to this deployment are in `docs/superpowers/specs/2026-07-28-platform-tier-super-admin-design.md`.
+**Why:** rbac-design.md §7.3: "Ship this in the same milestone as the permission engine. Retrofitting it means first building the thing that makes the engine debuggable, months after you needed it." Slices 4–6 built the engine; this slice makes it explainable — the forward trace ("why can Karim read the ledger?") and the two reverse queries ("what can Karim do at Club 1234?", "who can read `finance.ledger` anywhere?") — and ships the first real HTTP surface for it.
+
+**Bug found while scoping this slice (fixed here, not deferred):** `AccessRepository` and `GrantAdminRepository` have only ever been constructed manually in tests (`new AccessRepository(db)`), never through NestJS's actual DI container. Their `db: PrismaClient` constructor parameter is a **type-only** import (`packages/db` deliberately does not export `PrismaClient` as a value — CLAUDE.md: "Don't `new PrismaClient()` ad hoc across the codebase"), so TypeScript emits no runtime type for it and Nest cannot derive an injection token. Booting `AccessModule` for real — which this slice's controller requires — throws `Nest can't resolve dependencies of the AccessRepository (?, Object)`. Confirmed by actually running `pnpm test:e2e` against the real containers (previously never run: it needs env vars `test:e2e`'s own config doesn't supply, so the bug was latent since Slice 4). This would have broken `pnpm dev` and production boot the moment any module was wired in — which Slice 7 is the first to do. Fixed in Step 1 below with the same `PRISMA_CLIENT` Symbol-token pattern `redis-client.token.ts` already uses for `GrantCacheService`. **Callout for Slice 8/9:** `org`/`identity` repositories have the identical `PrismaClient` default-param shape and no `*.module.ts` yet — whoever gives them a controller must apply the same token, or hit the same boot failure.
+
+**Scoping decisions:**
+
+- The trace format in §7.3 groups by _source_ (platform roles / one line per domain-role assignment / unit policy / direct grants), not by individual grant row. `Grant` gets an optional `source` tag (`{kind:'platform'|'domain_role'|'unit_policy'|'direct', ...}`) stamped by `AccessRepository` when it resolves grants. This is additive only — `evaluate()`, `scopeCovers()`, `canDelegate()` never read it, so Slices 4–6's behaviour is untouched. Verified by rerunning their full test suites unchanged after this change.
+- The example's "@ Club 1234" is a friendly org-unit name; the resolver only has the `ltree` path at this layer (no name lookup exists below the inspector). Trace lines use the path instead (e.g. "@ d41.divA.a1.c1234") — a readable-enough approximation, not a byte-for-byte reproduction of the doc's illustration.
+- `whoCanAccess` enumerates people holding an **allow** grant for `resource:action` from any of the four sources — it does not re-run `evaluate()` per candidate to reconcile a `deny` override that might sit on top of one of them elsewhere. Full reconciliation would need evaluating every candidate at every scope they hold, which is disproportionate for M1's "who holds this, roughly, for an access review" use case (rbac-design.md §7.3's own framing: "what you want when someone asks an uncomfortable question", not a certified decision). Flagged here so it isn't mistaken for `authorize()`-equivalent precision.
+- All three inspector endpoints are gated identically via the existing `@ResourceScope('platform.audit', 'read')` + global `ResourceGuard` — no bespoke authorization code (CLAUDE.md: one gate, never scattered). For `who-can-access` ("anywhere"), the caller passes the **region root** path as `scope`; the ordinary prefix-match rule then only admits a caller whose `platform.audit:read` grant covers the whole tree (`system_admin`/`unit_admin` with `self_subtree`), which is exactly "anywhere" semantics, achieved with zero special-casing in the guard.
+- The inspector's own controller is the **first real HTTP route** in the app (only `/health` exists so far). Login (Slice 8) doesn't exist yet, so its HTTP-level test mints a `jose` session JWT directly with the test `SESSION_JWT_SECRET`, the same shape `JwtAuthGuard` verifies — not a workaround, just exercising the guard without the piece that issues its input.
+
+**Files:**
+
+- Modify: `apps/api/src/common/authz/authz.types.ts` (add `GrantSource`, `Grant.source`)
+- Modify: `apps/api/src/common/authz/evaluate.ts` (export `grantApplies`)
+- Create: `apps/api/src/common/authz/explain.ts`, `explain.spec.ts`
+- Create: `apps/api/src/modules/access/prisma-client.token.ts`
+- Modify: `apps/api/src/modules/access/access.repository.ts` (`@Inject(PRISMA_CLIENT)`; stamp `source` on every resolved grant)
+- Modify: `apps/api/src/modules/access/grant-admin.repository.ts` (`@Inject(PRISMA_CLIENT)`)
+- Create: `apps/api/src/modules/access/access-inspector.repository.ts`
+- Create: `apps/api/src/modules/access/access-inspector.controller.ts`
+- Modify: `apps/api/src/modules/access/access.module.ts` (register token, new repository, new controller)
+- Create: `apps/api/test/integration/access-inspector.int-spec.ts`, `access-inspector-http.int-spec.ts`
+
+**Interfaces:**
+
+```ts
+// authz.types.ts additions
+export type GrantSource =
+  | { kind: 'platform'; role: string }
+  | { kind: 'domain_role'; role: string; orgUnitId: string }
+  | { kind: 'unit_policy'; orgUnitId: string }
+  | { kind: 'direct'; reason: string };
+
+export interface Grant {
+  // ...existing fields unchanged...
+  source?: GrantSource;
+}
+```
+
+```ts
+// explain.ts
+export interface ExplainLine {
+  label: string;
+  detail: string;
+  matched: boolean;
+}
+export interface ExplainResult {
+  decision: AccessDecision;
+  matchedGrant: Grant | null;
+  lines: ExplainLine[];
+  scopeCheck: { grantScope: string; targetScope: string; passed: boolean } | null;
+  conditionCheck: { condition: string; passed: boolean } | null;
+}
+export function explain(grants: readonly Grant[], request: AccessRequest): ExplainResult;
+export function renderExplain(
+  personLabel: string,
+  request: AccessRequest,
+  result: ExplainResult,
+): string;
+```
+
+```ts
+// access-inspector.repository.ts
+export class AccessInspectorRepository {
+  async explainAccess(input: {
+    personId: string;
+    resource: string;
+    action: Action;
+    scope: string;
+  }): Promise<{ personLabel: string; result: ExplainResult; text: string }>;
+  async whatCanDoAt(
+    personId: string,
+    scope: string,
+  ): Promise<Array<{ resource: string; action: Action; condition: Condition }>>;
+  async whoCanAccess(
+    resource: string,
+    action: Action,
+  ): Promise<Array<{ personId: string; fullName: string; scope: string; via: string }>>;
+}
+```
+
+**TDD steps:**
+
+- [ ] **Step 1: Fix the DI-boot bug — `PRISMA_CLIENT` token**
+
+  Red — add a test that boots `AccessModule` for real and watch it fail with the dependency-resolution error:
+
+  ```ts
+  // apps/api/test/integration/access-inspector-http.int-spec.ts (first assertion, added early)
+  import { Test } from '@nestjs/testing';
+  import { AccessModule } from '../../src/modules/access/access.module';
+
+  it('boots AccessModule through real Nest DI', async () => {
+    await expect(
+      Test.createTestingModule({ imports: [AccessModule] }).compile(),
+    ).resolves.toBeDefined();
+  });
+  ```
+
+  Confirm it fails with `Nest can't resolve dependencies of the AccessRepository (?, Object)` (it does — this is the bug being fixed, not a new one).
+
+  Green:
+
+  ```ts
+  // prisma-client.token.ts
+  /** DI token for the shared PrismaClient — the type is imported type-only, so Nest can't derive a token from it directly. */
+  export const PRISMA_CLIENT = Symbol('PRISMA_CLIENT');
+  ```
+
+  ```ts
+  // access.module.ts
+  import { getPrisma } from '@toastmasters/db';
+  import { PRISMA_CLIENT } from './prisma-client.token';
+  // ...
+  providers: [
+    { provide: PRISMA_CLIENT, useFactory: () => getPrisma() },
+    { provide: REDIS_CLIENT, inject: [ENV], useFactory: (env: Env) => new Redis(redisConnectionOptions(env.REDIS_URL)) },
+    GrantCacheService,
+    AccessRepository,
+    GrantAdminRepository,
+    AccessInspectorRepository,
+  ],
+  controllers: [AccessInspectorController],
+  exports: [AccessRepository, GrantAdminRepository, AccessInspectorRepository],
+  ```
+
+  ```ts
+  // access.repository.ts — constructor only
+  constructor(
+    @Inject(PRISMA_CLIENT) private readonly db: PrismaClient = getPrisma(),
+    private readonly cache?: GrantCacheService,
+  ) {}
+  ```
+
+  ```ts
+  // grant-admin.repository.ts — constructor only
+  constructor(
+    @Inject(PRISMA_CLIENT) private readonly db: PrismaClient = getPrisma(),
+    private readonly accessRepository: AccessRepository = new AccessRepository(),
+  ) {}
+  ```
+
+  Rerun: the boot test passes, and every existing `access.repository.spec`/`*.int-spec.ts` still passes unchanged (they never went through Nest DI, so the manual-construction call sites are untouched).
+
+- [ ] **Step 2: `explain()` — the forward decision trace**
+
+  Red (`explain.spec.ts`):
+
+  ```ts
+  import { describe, it, expect } from 'vitest';
+  import { explain } from './explain';
+  import type { Grant, AccessRequest } from './authz.types';
+
+  const request: AccessRequest = {
+    principal: { userId: 'karim', roles: [], scopes: [] },
+    resource: 'finance.ledger',
+    action: 'read',
+    scope: 'd41.divA.a1.c1234',
+  };
+
+  describe('explain', () => {
+    it('names the matching grant and marks its line', () => {
+      const grants: Grant[] = [
+        {
+          role: 'club_treasurer',
+          scope: 'd41.divA.a1.c1234',
+          resource: 'finance.ledger',
+          action: 'read',
+          condition: 'any',
+          effect: 'allow',
+          source: { kind: 'domain_role', role: 'club_treasurer', orgUnitId: 'club-1234' },
+        },
+      ];
+      const result = explain(grants, request);
+      expect(result.decision.allowed).toBe(true);
+      expect(result.matchedGrant?.role).toBe('club_treasurer');
+      const line = result.lines.find((l) => l.matched);
+      expect(line?.detail).toContain('ALLOW');
+      expect(line?.detail).toContain('← matched');
+      expect(result.scopeCheck?.passed).toBe(true);
+      expect(result.conditionCheck?.passed).toBe(true);
+    });
+
+    it('shows "none" for a source with zero grants, and default-denies with no matched grant', () => {
+      const result = explain([], request);
+      expect(result.decision.allowed).toBe(false);
+      expect(result.decision.reason).toBe('default-deny');
+      expect(result.matchedGrant).toBeNull();
+      expect(result.lines.find((l) => l.label === 'platform roles')?.detail).toBe('none');
+      expect(result.lines.find((l) => l.label === 'direct grants')?.detail).toBe('none');
+    });
+
+    it('a role with grants for other resources shows "no grant for X:Y", not "none"', () => {
+      const grants: Grant[] = [
+        {
+          role: 'club_member',
+          scope: 'd41.divA.a1.c1234',
+          resource: 'meeting.meeting',
+          action: 'read',
+          condition: 'any',
+          effect: 'allow',
+          source: { kind: 'domain_role', role: 'club_member', orgUnitId: 'club-1234' },
+        },
+      ];
+      const result = explain(grants, request);
+      const line = result.lines.find((l) => l.label.startsWith('role:club_member'));
+      expect(line?.detail).toBe('no grant for finance.ledger:read');
+    });
+
+    it("deny beats allow — matches rbac-design.md §12 and Slice 6's unit-policy scenario", () => {
+      const grants: Grant[] = [
+        {
+          role: 'club_member',
+          scope: 'd41.divA.a1.c1234',
+          resource: 'finance.ledger',
+          action: 'read',
+          condition: 'any',
+          effect: 'allow',
+          source: { kind: 'domain_role', role: 'club_member', orgUnitId: 'club-1234' },
+        },
+        {
+          role: 'policy:club-1234',
+          scope: 'd41.divA.a1.c1234',
+          exactOnly: true,
+          resource: 'finance.ledger',
+          action: 'read',
+          condition: 'any',
+          effect: 'deny',
+          source: { kind: 'unit_policy', orgUnitId: 'club-1234' },
+        },
+      ];
+      const result = explain(grants, request);
+      expect(result.decision.allowed).toBe(false);
+      expect(result.decision.reason).toBe('explicit-deny');
+      expect(result.matchedGrant?.effect).toBe('deny');
+    });
+  });
+  ```
+
+  Green:
+
+  ```ts
+  // apps/api/src/common/authz/explain.ts
+  import type { AccessDecision, AccessRequest, Grant } from './authz.types';
+  import { evaluate, grantApplies } from './evaluate';
+
+  export interface ExplainLine {
+    label: string;
+    detail: string;
+    matched: boolean;
+  }
+
+  export interface ExplainResult {
+    decision: AccessDecision;
+    matchedGrant: Grant | null;
+    lines: ExplainLine[];
+    scopeCheck: { grantScope: string; targetScope: string; passed: boolean } | null;
+    conditionCheck: { condition: string; passed: boolean } | null;
+  }
+
+  interface Group {
+    label: string;
+    grants: Grant[];
+  }
+
+  /** Groups resolved grants by source the way rbac-design.md §7.3's trace does. */
+  function groupBySource(grants: readonly Grant[]): Group[] {
+    const platform: Grant[] = [];
+    const direct: Grant[] = [];
+    const domainRoles = new Map<string, Group>();
+    const unitPolicies = new Map<string, Group>();
+
+    for (const grant of grants) {
+      switch (grant.source?.kind) {
+        case 'platform':
+          platform.push(grant);
+          break;
+        case 'direct':
+          direct.push(grant);
+          break;
+        case 'domain_role': {
+          const key = `${grant.source.role}@${grant.source.orgUnitId}`;
+          const group = domainRoles.get(key) ?? {
+            label: `role:${grant.source.role} @ ${grant.scope}`,
+            grants: [],
+          };
+          group.grants.push(grant);
+          domainRoles.set(key, group);
+          break;
+        }
+        case 'unit_policy': {
+          const key = grant.source.orgUnitId;
+          const group = unitPolicies.get(key) ?? {
+            label: `unit policy ${grant.scope}`,
+            grants: [],
+          };
+          group.grants.push(grant);
+          unitPolicies.set(key, group);
+          break;
+        }
+        default:
+          // Untagged grant (e.g. hand-built in a unit test without `source`) —
+          // still evaluated for the decision, just not attributable to a group.
+          break;
+      }
+    }
+
+    return [
+      { label: 'platform roles', grants: platform },
+      ...domainRoles.values(),
+      ...unitPolicies.values(),
+      { label: 'direct grants', grants: direct },
+    ];
+  }
+
+  export function explain(grants: readonly Grant[], request: AccessRequest): ExplainResult {
+    const decision = evaluate(grants, request);
+    const applicable = grants.filter((g) => grantApplies(g, request));
+    const winner =
+      applicable.find((g) => g.effect === 'deny') ??
+      applicable.find((g) => g.effect === 'allow') ??
+      null;
+
+    const lines: ExplainLine[] = groupBySource(grants).map((group) => {
+      const matching = group.grants.filter((g) => grantApplies(g, request));
+      if (matching.length === 0) {
+        return {
+          label: group.label,
+          detail:
+            group.grants.length === 0
+              ? 'none'
+              : `no grant for ${request.resource}:${request.action}`,
+          matched: false,
+        };
+      }
+      const picked = matching.find((g) => g === winner) ?? matching[0];
+      const isWinner = picked === winner;
+      return {
+        label: group.label,
+        detail: `${picked.effect.toUpperCase()}  ${request.resource}:${request.action} (${picked.condition})${isWinner ? '  ← matched' : ''}`,
+        matched: isWinner,
+      };
+    });
+
+    return {
+      decision,
+      matchedGrant: winner,
+      lines,
+      scopeCheck: winner
+        ? { grantScope: winner.scope, targetScope: request.scope, passed: true }
+        : null,
+      conditionCheck: winner ? { condition: winner.condition, passed: true } : null,
+    };
+  }
+  ```
+
+  ```ts
+  // evaluate.ts — only the visibility change
+  export function grantApplies(grant: Grant, request: AccessRequest): boolean {
+    /* unchanged body */
+  }
+  ```
+
+  Rerun `explain.spec.ts` and `evaluate.spec.ts` — both green (the export change is additive).
+
+- [ ] **Step 3: `renderExplain()` — the §7.3 text block**
+
+  Red:
+
+  ```ts
+  it('renders the §7.3 shape for an allowed decision', () => {
+    const grants: Grant[] = [
+      {
+        role: 'club_treasurer',
+        scope: 'd41.divA.a1.c1234',
+        resource: 'finance.ledger',
+        action: 'read',
+        condition: 'any',
+        effect: 'allow',
+        source: { kind: 'domain_role', role: 'club_treasurer', orgUnitId: 'club-1234' },
+      },
+    ];
+    const result = explain(grants, request);
+    const text = renderExplain('Karim Hossain', request, result);
+    expect(text).toContain('Karim Hossain · finance.ledger · read · d41.divA.a1.c1234');
+    expect(text).toContain('✓ ALLOW');
+    expect(text).toContain('role:club_treasurer @ d41.divA.a1.c1234');
+    expect(text).toContain('← matched');
+    expect(text).toContain('Scope check:');
+    expect(text).toContain('Condition:');
+  });
+
+  it('renders a default-deny with no matched-grant header', () => {
+    const text = renderExplain('Nusrat', request, explain([], request));
+    expect(text).toContain('✗ DENY');
+    expect(text).not.toContain('Scope check:');
+  });
+  ```
+
+  Green:
+
+  ```ts
+  export function renderExplain(
+    personLabel: string,
+    request: AccessRequest,
+    result: ExplainResult,
+  ): string {
+    const header = `${personLabel} · ${request.resource} · ${request.action} · ${request.scope}`;
+    const rule = '─'.repeat(header.length);
+    const verdict = result.decision.allowed
+      ? `✓ ALLOW  —  ${result.matchedGrant ? `${result.matchedGrant.role} @ ${result.matchedGrant.scope}` : ''}`
+      : `✗ DENY  —  ${result.decision.reason}`;
+    const traceLines = result.lines.map((l) => `  ${l.label.padEnd(32)}  ${l.detail}`);
+    const parts = [header, rule, verdict, '', 'Evaluation trace:', ...traceLines];
+    if (result.scopeCheck) {
+      parts.push(
+        '',
+        `Scope check:  ${result.scopeCheck.grantScope}  within  ${result.scopeCheck.targetScope}   ✓`,
+      );
+    }
+    if (result.conditionCheck) {
+      parts.push(`Condition:    ${result.conditionCheck.condition}                            ✓`);
+    }
+    return parts.join('\n');
+  }
+  ```
+
+  Rerun — green.
+
+- [ ] **Step 4: Stamp `source` on every grant `AccessRepository` resolves**
+
+  Red — extend `access-resolution.int-spec.ts` (or a new assertion in this slice's own integration spec) to assert `source` is present:
+
+  ```ts
+  const grants = await access.effectiveGrants(treasurer.id);
+  const ledgerGrant = grants.find((g) => g.resource === 'finance.ledger' && g.action === 'read');
+  expect(ledgerGrant?.source).toEqual({
+    kind: 'domain_role',
+    role: 'club_treasurer',
+    orgUnitId: clubId,
+  });
+  ```
+
+  Confirm it fails (`source` is `undefined` today).
+
+  Green — thread a `source` through each private resolver and `grantsForRoleAtScope` (which gains a `source` parameter since it's shared between the platform and domain-role call sites):
+
+  ```ts
+  private async grantsForRoleAtScope(role: string, scope: string, source: GrantSource): Promise<Grant[]> {
+    const template = await this.db.roleTemplate.findUnique({ where: { role } });
+    if (!template) return [];
+    const exactOnly = template.scopeRule === 'self_unit';
+    const rows = await this.db.roleTemplateGrant.findMany({ where: { role } });
+    return rows.map((g) => ({
+      role, scope, exactOnly, resource: g.resource, action: g.action,
+      condition: g.condition, effect: g.effect, source,
+    }));
+  }
+  ```
+
+  Call sites: `platformRoleGrants` passes `{ kind: 'platform', role: pa.role }` (and `systemAdminGrants` stamps the same shape on its synthesized rows); `domainRoleGrants` passes `{ kind: 'domain_role', role: ra.role, orgUnitId: ra.orgUnitId }`; `unitPolicyOverrides` passes `{ kind: 'unit_policy', orgUnitId: ov.orgUnitId }`; `personGrants` passes `{ kind: 'direct', reason: pg.reason }`.
+
+  Rerun the new assertion and the full `access-resolution`/`access-cache`/`access-delegation`/`access-break-glass` suites — all green (source is additive; nothing reads it yet outside the new assertion).
+
+- [ ] **Step 5: `AccessInspectorRepository.explainAccess()`**
+
+  Red (`access-inspector.int-spec.ts`), reusing Slice 6's exact deny-beats-allow fixture:
+
+  ```ts
+  it('explains a deny-beats-allow decision, attributing the winning grant to unit policy', async () => {
+    // ...same club_member + createUnitPolicyGrant(deny) setup as access-delegation.int-spec.ts...
+    const { result, text } = await inspector.explainAccess({
+      personId: saa.id,
+      resource: 'meeting.meeting',
+      action: 'read',
+      scope: clubPath,
+    });
+    expect(result.decision.allowed).toBe(false);
+    expect(result.matchedGrant?.source).toEqual({ kind: 'unit_policy', orgUnitId: clubId });
+    expect(text).toContain('✗ DENY');
+  });
+  ```
+
+  Green:
+
+  ```ts
+  // access-inspector.repository.ts (relevant method only)
+  async explainAccess(input: { personId: string; resource: string; action: Action; scope: string }) {
+    const [person, grants] = await Promise.all([
+      this.db.person.findUniqueOrThrow({ where: { id: input.personId }, select: { fullName: true } }),
+      this.accessRepository.effectiveGrants(input.personId),
+    ]);
+    const request: AccessRequest = {
+      principal: { userId: input.personId, roles: [], scopes: [] },
+      resource: input.resource, action: input.action, scope: input.scope,
+    };
+    const result = explain(grants, request);
+    return { personLabel: person.fullName, result, text: renderExplain(person.fullName, request, result) };
+  }
+  ```
+
+  Rerun — green.
+
+- [ ] **Step 6: `AccessInspectorRepository.whatCanDoAt()`**
+
+  Red:
+
+  ```ts
+  it('lists only the resource:action pairs actually allowed at the target unit', async () => {
+    // treasurer at clubId
+    const grants = await inspector.whatCanDoAt(treasurer.id, clubPath);
+    expect(grants).toContainEqual({ resource: 'finance.ledger', action: 'read', condition: 'any' });
+    expect(
+      grants.find((g) => g.resource === 'identity.role_assignment' && g.action === 'create'),
+    ).toBeUndefined();
+  });
+  ```
+
+  Green:
+
+  ```ts
+  async whatCanDoAt(personId: string, scope: string) {
+    const grants = await this.accessRepository.effectiveGrants(personId);
+    const pairs = new Map<string, { resource: string; action: Action; condition: Condition }>();
+    for (const g of grants) pairs.set(`${g.resource}:${g.action}`, { resource: g.resource, action: g.action, condition: g.condition });
+    const out: Array<{ resource: string; action: Action; condition: Condition }> = [];
+    for (const pair of pairs.values()) {
+      const decision = evaluate(grants, {
+        principal: { userId: personId, roles: [], scopes: [] },
+        resource: pair.resource, action: pair.action, scope,
+        context: { isOwner: true, isAssigned: true, isParty: true, isPublished: true },
+      });
+      if (decision.allowed) out.push(pair);
+    }
+    return out;
+  }
+  ```
+
+  (The all-context-true probe is a deliberate simplification, noted inline: it answers "could this ever apply here", not "does it apply to a specific row" — condition-gated grants like `club_member`'s `finance.ledger:read (own)` surface as a capability, matching §7.3's "show everything Karim can do" framing.)
+
+  Rerun — green.
+
+- [ ] **Step 7: `AccessInspectorRepository.whoCanAccess()`**
+
+  Red — a scenario spanning all four sources: a `club_treasurer` (domain role), a `system_admin` (platform, non-restricted resource), a break-glass `person_grant` holder (direct), and a unit-policy allow override naming a role:
+
+  ```ts
+  it('enumerates holders from every grant source', async () => {
+    const holders = await inspector.whoCanAccess('finance.ledger', 'read');
+    const personIds = holders.map((h) => h.personId);
+    expect(personIds).toContain(treasurer.id);
+    expect(holders.find((h) => h.personId === treasurer.id)?.via).toBe('role:club_treasurer');
+  });
+  ```
+
+  Green — enumerate and merge the four sources (query shapes as sketched in "Scoping decisions" above); dedupe on `personId:scope:via`.
+
+  Rerun — green.
+
+- [ ] **Step 8: `AccessInspectorController` + wiring, and the HTTP-level test**
+
+  Red (`access-inspector-http.int-spec.ts`) — the DI-boot assertion from Step 1, plus:
+
+  ```ts
+  it('200s an actor holding platform.audit:read at the region root, 403s one who does not', async () => {
+    // mint a jose JWT for a system_admin (holds platform.audit read via broad synthesis)
+    // and a second for a plain club_member; hit GET /v1/access/inspector/who-can-access
+    // ?resource=finance.ledger&action=read&scope=<regionRootPath> with each.
+  });
+  ```
+
+  Green — the controller is thin, per CLAUDE.md (§4): parse query via Zod, call the repository, return JSON. `@ResourceScope('platform.audit', 'read')` on all three handlers; `scope` is a required query param read by the existing `ResourceGuard`.
+
+  Rerun — green. Then the full gate: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`, plus `pnpm test:int`.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add apps/api/src/common/authz apps/api/src/modules/access apps/api/test/integration/access-inspector.int-spec.ts apps/api/test/integration/access-inspector-http.int-spec.ts apps/api/test/integration/access-resolution.int-spec.ts
+git commit -m "feat(access): access inspector — decision trace, reverse queries, and its endpoint"
+```
+
+---
+
+## Slices 8–10
+
+Each is expanded to Slice 0–7 depth (files, interfaces, bite-sized TDD steps with full code) immediately before it is executed, against the now-proven foundation. Their deliverables, dependencies, and ship criteria are fixed in the roadmap table above; the canonical schema and algorithms they implement are `rbac-design.md` §3–§9 and `system-design.md` §5–§7, and the design decisions specific to this deployment are in `docs/superpowers/specs/2026-07-28-platform-tier-super-admin-design.md`.
 
 **Self-review (this plan vs the spec):**
 

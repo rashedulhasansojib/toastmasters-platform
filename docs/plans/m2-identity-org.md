@@ -896,35 +896,37 @@ git commit -m "feat(access): unit policy overrides over HTTP — canDelegate on 
 
 **TDD steps:**
 
-- [ ] **Step 1: `explainAccess` against `identity.invitation`**
+- [x] **Step 1: `explainAccess` against `identity.invitation`**
 
   A `unit_admin` at a club; `explainAccess({ personId, resource: 'identity.invitation', action: 'create', scope: clubPath })` returns `allowed: true`, attributes the decision to `{ kind: 'platform', role: 'unit_admin' }` (matching Slice 1's seeded grant), and the rendered `text` contains the role name — proving `explain()`'s source-grouping and text rendering both work unmodified for a platform-role grant on a resource that didn't exist when Slice 7 built this.
 
   Run it. Green on the first run — no implementation step, per the "Why" above.
 
-- [ ] **Step 2: `whatCanDoAt` against `org.unit` — the multi-action shape**
+- [x] **Step 2: `whatCanDoAt` against `org.unit` — the multi-action shape**
 
   A `unit_admin` at a club; `whatCanDoAt(personId, clubPath)` contains both `{ resource: 'org.unit', action: 'create', condition: 'any' }` and `{ resource: 'org.unit', action: 'update', condition: 'any' }` — proving a single role's multiple grants on the same resource both surface, not just the first match.
 
   Run it. Green on the first run.
 
-- [ ] **Step 3: `whoCanAccess` against `access.unit_policy`**
+- [x] **Step 3: `whoCanAccess` against `access.unit_policy`**
 
-  A `unit_admin` at a club, plus a `club_member` given an `access.unit_policy:create` override via `createUnitPolicyGrant` (the exact fixture shape Slice 3's own escalation test used); `whoCanAccess('access.unit_policy', 'create')` includes the `unit_admin` with `via: 'role:unit_admin'` **and** the `club_member` with `via: 'unit_policy'` — proving the reverse query enumerates across both a role-template source and a unit-policy-override source for a resource neither existed against before.
+  A `unit_admin` at a club, plus a `club_member` given an `access.unit_policy:create` override via `createUnitPolicyGrant` (the exact fixture shape Slice 3's own escalation test used); `whoCanAccess('access.unit_policy', 'create')` includes the `unit_admin` with `via: 'platform:unit_admin'` **and** the `club_member` with `via: 'unit_policy'` — proving the reverse query enumerates across both a platform-role source and a unit-policy-override source for a resource neither existed against before.
+
+  **A fixture bug, not a production one:** the first attempt reused `clubId`/`clubBId` for this test's `club_member` assignment and hit `role_assignment_singleton` — that partial unique index applies to _every_ role, not just singleton ones (M1's comment on the index says Slice 3 "may relax it," never did) — so a club already holding a `club_member` from an earlier test in this file can't take a second one. Fixed by giving this test its own fresh club (`orgUnits.createChild`, `districtId` promoted to outer scope) rather than touching the index.
+
+  Run it. Green on the first run once the fixture was fixed.
+
+- [x] **Step 4: HTTP coverage — `who-can-access` against `identity.invitation`**
+
+  Add one scenario to `access-inspector-http.int-spec.ts`, same shape as its existing `finance.ledger` case: a `system_admin` (holding `identity.invitation` via its non-restricted broad synthesis, no break-glass needed — `identity.invitation` is `sensitivity: 'normal'`) gets 200 from `GET /v1/access/inspector/who-can-access?resource=identity.invitation&action=create&scope=<region path>`; a plain member gets 403. (`org_unit_single_region_root` means this test reuses the first test's region root via `findByPath('r1')` rather than creating a second one.)
 
   Run it. Green on the first run.
 
-- [ ] **Step 4: HTTP coverage — `who-can-access` against `identity.invitation`**
-
-  Add one scenario to `access-inspector-http.int-spec.ts`, same shape as its existing `finance.ledger` case: a `system_admin` (holding `identity.invitation` via its non-restricted broad synthesis, no break-glass needed — `identity.invitation` is `sensitivity: 'normal'`) gets 200 from `GET /v1/access/inspector/who-can-access?resource=identity.invitation&action=create&scope=<region path>`; a plain member gets 403.
-
-  Run it. Green on the first run.
-
-- [ ] **Step 5: Full gate**
+- [x] **Step 5: Full gate**
 
   `pnpm lint && pnpm typecheck && pnpm test && pnpm build`, plus `pnpm test:int` — confirming the full 300+-test suite, including everything Slices 1–3 added, stays green with zero production-code diff in this slice.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/api/test/integration/access-inspector.int-spec.ts apps/api/test/integration/access-inspector-http.int-spec.ts

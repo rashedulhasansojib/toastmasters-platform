@@ -18,6 +18,8 @@ describe('Access inspector (integration)', () => {
   let grantAdmin: GrantAdminRepository;
   let inspector: AccessInspectorRepository;
 
+  let orgUnits: OrgUnitRepository;
+  let districtId: string;
   let clubId: string;
   let clubPath: string;
   let clubBId: string;
@@ -27,7 +29,7 @@ describe('Access inspector (integration)', () => {
     ({ db, stop } = await startTestDb());
     await seedAccessVocabulary(db);
 
-    const orgUnits = new OrgUnitRepository(db);
+    orgUnits = new OrgUnitRepository(db);
     const programYears = new ProgramYearRepository(db);
     people = new PersonRepository(db);
     roleAssignments = new RoleAssignmentRepository(db);
@@ -48,6 +50,7 @@ describe('Access inspector (integration)', () => {
       name: 'District 41',
       timezone: 'Asia/Dhaka',
     });
+    districtId = district.id;
     const club = await orgUnits.createChild({
       parentId: district.id,
       type: 'club',
@@ -229,5 +232,111 @@ describe('Access inspector (integration)', () => {
     // template grant — assert the unit-policy entry exists alongside it,
     // not that it's the only one.
     expect(holders.some((h) => h.personId === member.id && h.via === 'unit_policy')).toBe(true);
+  });
+
+  // M2 Slice 4: the inspector was built generic over (resource, action) in
+  // M1 Slice 7, before any of these three resources existed. These three
+  // tests prove that held, rather than build anything new — see the Slice 4
+  // plan's "Why" for the direct code-reading that established this.
+  it('explainAccess attributes an identity.invitation decision to the unit_admin platform-role grant', async () => {
+    const admin = await people.create({
+      email: 'inspector-unit-admin@example.com',
+      fullName: 'Inspector Unit Admin',
+    });
+    await grantAdmin.grantPlatformRole({
+      personId: admin.id,
+      role: 'unit_admin',
+      orgUnitId: clubId,
+      grantedBy: admin.id,
+    });
+
+    const { personLabel, result, text } = await inspector.explainAccess({
+      personId: admin.id,
+      resource: 'identity.invitation',
+      action: 'create',
+      scope: clubPath,
+    });
+
+    expect(personLabel).toBe('Inspector Unit Admin');
+    expect(result.decision.allowed).toBe(true);
+    expect(result.matchedGrant?.source).toEqual({ kind: 'platform', role: 'unit_admin' });
+    expect(text).toContain('unit_admin');
+  });
+
+  it('whatCanDoAt surfaces both org.unit actions a unit_admin holds — the one multi-action resource', async () => {
+    const admin = await people.create({
+      email: 'inspector-org-admin@example.com',
+      fullName: 'Inspector Org Admin',
+    });
+    await grantAdmin.grantPlatformRole({
+      personId: admin.id,
+      role: 'unit_admin',
+      orgUnitId: clubId,
+      grantedBy: admin.id,
+    });
+
+    const capabilities = await inspector.whatCanDoAt(admin.id, clubPath);
+    expect(capabilities).toContainEqual({
+      resource: 'org.unit',
+      action: 'create',
+      condition: 'any',
+    });
+    expect(capabilities).toContainEqual({
+      resource: 'org.unit',
+      action: 'update',
+      condition: 'any',
+    });
+  });
+
+  it('whoCanAccess enumerates access.unit_policy holders across a role-template source and a unit-policy-override source', async () => {
+    // A fresh club — role_assignment's singleton index applies to every
+    // role, including club_member, so this can't reuse clubId/clubBId
+    // without colliding with a club_member already assigned there above.
+    const clubC = await orgUnits.createChild({
+      parentId: districtId,
+      type: 'club',
+      code: 'c3',
+      name: 'Club 3',
+      timezone: 'Asia/Dhaka',
+    });
+
+    const admin = await people.create({
+      email: 'inspector-policy-admin@example.com',
+      fullName: 'Inspector Policy Admin',
+    });
+    await grantAdmin.grantPlatformRole({
+      personId: admin.id,
+      role: 'unit_admin',
+      orgUnitId: clubC.id,
+      grantedBy: admin.id,
+    });
+
+    const member = await people.create({
+      email: 'inspector-policy-member@example.com',
+      fullName: 'Inspector Policy Member',
+    });
+    await roleAssignments.assign({
+      personId: member.id,
+      orgUnitId: clubC.id,
+      role: 'club_member',
+      programYearId,
+      termStart: new Date('2026-07-01'),
+      termEnd: new Date('2027-06-30'),
+      appointedBy: member.id,
+    });
+    await grantAdmin.createUnitPolicyGrant({
+      orgUnitId: clubC.id,
+      subjectRole: 'club_member',
+      resource: 'access.unit_policy',
+      action: 'create',
+      effect: 'allow',
+      createdBy: member.id,
+      reason: 'test fixture: policy-create via override',
+    });
+
+    const holders = await inspector.whoCanAccess('access.unit_policy', 'create');
+    const byPerson = new Map(holders.map((h) => [h.personId, h]));
+    expect(byPerson.get(admin.id)?.via).toBe('platform:unit_admin');
+    expect(byPerson.get(member.id)?.via).toBe('unit_policy');
   });
 });

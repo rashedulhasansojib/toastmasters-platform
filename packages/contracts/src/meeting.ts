@@ -216,3 +216,31 @@ export const markChecklistRunItemRequestSchema = z
   })
   .strict();
 export type MarkChecklistRunItemRequest = z.infer<typeof markChecklistRunItemRequestSchema>;
+
+/** M3 Slice 6: the guest capability-token primitive. Raw `token` is present only on issue — never persisted, never returned again. */
+export const capabilityTokenIssued = z.object({
+  id: z.uuid(),
+  meetingId: z.uuid(),
+  purpose: z.string().min(1),
+  token: z.string().min(1),
+  expiresAt: z.iso.datetime(),
+});
+export type CapabilityTokenIssued = z.infer<typeof capabilityTokenIssued>;
+
+export const issueCapabilityTokenRequestSchema = z
+  .object({
+    purpose: z.string().min(1),
+    ttlMinutes: z.number().int().positive().max(720).optional(),
+  })
+  .strict();
+export type IssueCapabilityTokenRequest = z.infer<typeof issueCapabilityTokenRequestSchema>;
+
+export const verifyCapabilityTokenRequestSchema = z.object({ token: z.string().min(1) }).strict();
+export type VerifyCapabilityTokenRequest = z.infer<typeof verifyCapabilityTokenRequestSchema>;
+
+export const capabilityTokenVerification = z.object({
+  valid: z.boolean(),
+  meetingId: z.uuid().nullable(),
+  purpose: z.string().nullable(),
+});
+export type CapabilityTokenVerification = z.infer<typeof capabilityTokenVerification>;

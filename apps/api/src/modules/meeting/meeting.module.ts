@@ -13,6 +13,9 @@ import { ChecklistTemplateRepository } from './checklist-template.repository';
 import { ChecklistTemplateController } from './checklist-template.controller';
 import { ChecklistRunRepository } from './checklist-run.repository';
 import { ChecklistRunController } from './checklist-run.controller';
+import { CapabilityTokenRepository } from './capability-token.repository';
+import { CapabilityTokenService } from './capability-token.service';
+import { CapabilityTokenController } from './capability-token.controller';
 
 @Module({
   providers: [
@@ -23,6 +26,8 @@ import { ChecklistRunController } from './checklist-run.controller';
     SpeechSlotRepository,
     ChecklistTemplateRepository,
     ChecklistRunRepository,
+    CapabilityTokenRepository,
+    CapabilityTokenService,
   ],
   controllers: [
     MeetingController,
@@ -31,7 +36,8 @@ import { ChecklistRunController } from './checklist-run.controller';
     SpeechSlotController,
     ChecklistTemplateController,
     ChecklistRunController,
+    CapabilityTokenController,
   ],
-  exports: [MeetingRepository],
+  exports: [MeetingRepository, CapabilityTokenRepository],
 })
 export class MeetingModule {}

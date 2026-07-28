@@ -82,6 +82,14 @@ const RESOURCES: ResourceSeed[] = [
     sensitivity: 'normal',
   },
   {
+    resource: 'meeting.capability_token',
+    context: 'meeting',
+    label: 'Capability token',
+    allowedActions: ['create', 'update'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
+  {
     resource: 'finance.ledger',
     context: 'finance',
     label: 'Club ledger',
@@ -181,6 +189,8 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'meeting.checklist', action: 'create' },
       { resource: 'meeting.checklist', action: 'read' },
       { resource: 'meeting.checklist', action: 'update' },
+      { resource: 'meeting.capability_token', action: 'create' },
+      { resource: 'meeting.capability_token', action: 'update' },
       { resource: 'identity.role_assignment', action: 'read' },
     ],
   },

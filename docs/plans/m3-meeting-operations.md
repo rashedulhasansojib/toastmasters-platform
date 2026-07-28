@@ -120,3 +120,26 @@
 - [x] Bumped `access.seed.int-spec.ts`'s resource count (12→13) and `authorization-matrix.int-spec.ts`'s `RESOURCE_ACTIONS`.
 - [x] Full gate — green (443 integration, up from 405; 72 unit; lint/typecheck/build clean).
 - [x] Commit: `feat(meeting): checklists — reusable templates, per-meeting runs`
+
+---
+
+## Slice 6 — Capability tokens (the guest primitive)
+
+**Why:** roadmap.md's non-negotiable: "guests never authenticate; every guest interaction runs through the capability-token primitive, hashed, expiring, revocable, revoked at meeting close." Nothing guest-facing exists yet to consume it, but the primitive itself is a named M3 dependency — later slices (guest ballot voting) plug into `verify()`.
+
+**Scoping decisions:**
+
+- **`purpose` is a free string**, not an enum — concrete guest interactions are added by later slices with no migration.
+- **TTL capped at 12h server-side**, default 4h — a club meeting is a few hours; no caller-supplied unbounded expiry.
+- **`verify` is `@Public()`** and outside RBAC entirely (`CLAUDE.md` §5: "guest paths are not RBAC") — same split as `InvitationController`'s authenticated `create` / public `accept`.
+- **Revocation reuses the invitation module's hashing pattern** (`sha256` + `randomBytes(32)` base64url) rather than inventing a second one.
+
+**Files:** `packages/db/prisma/schema.prisma` (+`CapabilityToken`, +migration), `packages/db/src/seed.ts` (`meeting.capability_token` resource + grants), `packages/contracts/src/meeting.ts` (+capability-token schemas), `apps/api/src/modules/meeting/capability-token.{repository,service,controller}.ts` (new — this is the first sub-resource in this module with a real service layer, since it has actual crypto logic), `meeting.module.ts`.
+
+**Tests** (`capability-token-http.int-spec.ts`, new): (1) a VPE issues a token, a guest verifies it with no auth, revoking it invalidates it; (2) an unknown token verifies `valid:false` with no distinguishing detail; (3) sibling-club member 403's on issue.
+
+- [x] Schema + migration + seed.
+- [x] Repository + service + controller + module wiring.
+- [x] Bumped resource count (13→14) and `authorization-matrix.int-spec.ts`.
+- [x] Full gate — green (470 integration, up from 443; 72 unit; lint/typecheck/build clean).
+- [x] Commit: `feat(meeting): capability tokens — the guest primitive`

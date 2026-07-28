@@ -102,6 +102,7 @@ model Person {
   invitationsAccepted       Invitation[] @relation("InvitationAcceptedBy")
   meetingRoleAssignments    MeetingRoleAssignment[]
   speechSlotsRequested      SpeechSlot[]
+  capabilityTokensIssued    CapabilityToken[]
 
   @@map("person")
 }
@@ -227,8 +228,32 @@ model Meeting {
   roleAssignments MeetingRoleAssignment[]
   speechSlots     SpeechSlot[]
   checklistRuns   ChecklistRun[]
+  capabilityTokens CapabilityToken[]
 
   @@map("meeting")
+}
+
+/**
+ * M3 Slice 6: roadmap.md's single guest primitive — "guests never
+ * authenticate; every guest interaction runs through the capability-token
+ * primitive, hashed, expiring, revocable, revoked at meeting close." Only
+ * `tokenHash` is ever persisted; the raw token is returned once, on issue.
+ * `purpose` is a free string, not an enum — concrete guest interactions
+ * (ballot casting, etc.) are added by later slices without a migration.
+ */
+model CapabilityToken {
+  id                String    @id @default(uuid()) @db.Uuid
+  meetingId         String    @map("meeting_id") @db.Uuid
+  meeting           Meeting   @relation(fields: [meetingId], references: [id])
+  purpose           String
+  tokenHash         String    @unique @map("token_hash")
+  expiresAt         DateTime  @map("expires_at")
+  revokedAt         DateTime? @map("revoked_at")
+  createdBy         String    @map("created_by") @db.Uuid
+  createdByPerson   Person    @relation(fields: [createdBy], references: [id])
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  @@map("capability_token")
 }
 
 /** M3 Slice 1: system-design.md §9.1's agendaItem[] — server-assigned, append-only position. */

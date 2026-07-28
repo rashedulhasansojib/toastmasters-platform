@@ -110,6 +110,8 @@ model Person {
   votesReceived             Vote[]              @relation("VoteCandidate")
   prospectsCreated          Prospect[]          @relation("ProspectCreatedBy")
   convertedFromProspects    Prospect[]          @relation("ProspectConvertedToPerson")
+  prospectVisitsLogged      ProspectVisit[]
+  prospectCommunicationsLogged ProspectCommunication[]
 
   @@map("person")
 }
@@ -249,6 +251,7 @@ model Meeting {
   capabilityTokens CapabilityToken[]
   liveRecords     MeetingLiveRecord[]
   ballots         Ballot[]
+  prospectVisits  ProspectVisit[]
 
   @@map("meeting")
 }
@@ -823,6 +826,8 @@ model Prospect {
   createdBy           String                 @map("created_by") @db.Uuid
   createdByPerson     Person                 @relation("ProspectCreatedBy", fields: [createdBy], references: [id])
   createdAt           DateTime               @default(now()) @map("created_at")
+  visits              ProspectVisit[]
+  communications      ProspectCommunication[]
 
   @@map("prospect")
 }
@@ -835,4 +840,44 @@ enum ProspectPipelineStatus {
   joined
 
   @@map("prospect_pipeline_status")
+}
+
+enum ProspectCommunicationChannel {
+  call
+  message
+  email
+  in_person
+  other
+
+  @@map("prospect_communication_channel")
+}
+
+/** M4 Slice 2: system-design.md §11.1's `visits` array, modelled as its own append-only table (same reasoning as MeetingLiveRecord/Vote) rather than a Json array on Prospect. */
+model ProspectVisit {
+  id             String   @id @default(uuid()) @db.Uuid
+  prospectId     String   @map("prospect_id") @db.Uuid
+  prospect       Prospect @relation(fields: [prospectId], references: [id])
+  meetingId      String   @map("meeting_id") @db.Uuid
+  meeting        Meeting  @relation(fields: [meetingId], references: [id])
+  attendedAt     DateTime @map("attended_at")
+  loggedBy       String   @map("logged_by") @db.Uuid
+  loggedByPerson Person   @relation(fields: [loggedBy], references: [id])
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@unique([prospectId, meetingId])
+  @@map("prospect_visit")
+}
+
+/** M4 Slice 2: system-design.md §11.1's `communications` array — a VPM's dated note log, same reasoning as ProspectVisit. */
+model ProspectCommunication {
+  id             String                       @id @default(uuid()) @db.Uuid
+  prospectId     String                       @map("prospect_id") @db.Uuid
+  prospect       Prospect                     @relation(fields: [prospectId], references: [id])
+  channel        ProspectCommunicationChannel
+  note           String
+  loggedBy       String                       @map("logged_by") @db.Uuid
+  loggedByPerson Person                       @relation(fields: [loggedBy], references: [id])
+  loggedAt       DateTime                     @default(now()) @map("logged_at")
+
+  @@map("prospect_communication")
 }

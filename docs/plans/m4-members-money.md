@@ -107,3 +107,24 @@ enum ProspectPipelineStatus {
 - [x] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` — green (75 unit, up from 72; lint/typecheck/build clean).
 - [ ] `pnpm test:int` — **not run**. No Docker in this environment (same gap M3 hit); Testcontainers needs a local container runtime and there is no way around that for this specific suite. In its place: manually verified all three test scenarios by hand against a real Neon+Upstash dev deployment — created a prospect via `curl` (`deleteAfter` landed exactly ~180 days out), confirmed `pipelineStatus: 'interested'` succeeds and `pipelineStatus: 'joined'` is rejected (400, not 422 — corrected that assumption in both the test and this doc after seeing the real response). Sibling-club denial wasn't hand-verified (no second live club/person handy) but is structurally identical to every other `@ResourceScope`-gated route already proven — low risk, still worth a real `test:int` run before this slice is fully trusted.
 - [x] Commit: `feat(membership): prospect pipeline — create, list, read, pipeline status`
+
+---
+
+## Slice 2 — Prospect visits + communications log
+
+**Why:** system-design.md §11.1's `Prospect.visits[]`/`communications[]` — the VPM's record of a guest's attendance history and dated contact notes, feeding conversion (Slice 4) and lead-source reporting (§15.4).
+
+**Schema:** `ProspectVisit` (prospectId, meetingId, attendedAt, loggedBy; unique on `(prospectId, meetingId)` — a guest attends a given meeting once) and `ProspectCommunication` (prospectId, channel enum, note, loggedBy, loggedAt), each its own append-adjacent table rather than a Json array on `Prospect` — same reasoning as `MeetingLiveRecord`/`Vote`. No new resource — both reuse `membership.prospect` (already club-scoped, already granted to `club_vpm`).
+
+**API:** `POST/GET /clubs/:clubUnitId/prospects/:prospectId/visits` and `.../communications`, mirroring `AgendaItemController`'s club/parent-ownership-check shape.
+
+**Steps:**
+
+- [x] Schema + migration (`prisma migrate diff` schema-to-schema, no shadow DB needed — see note below).
+- [x] Contracts (`ProspectVisit`, `ProspectCommunication`, create-request schemas).
+- [x] Repository + controller + module wiring (no service layer — pure CRUD, matching `agenda-item` module's precedent).
+- [x] `pnpm lint && pnpm typecheck && pnpm build` — green.
+- [ ] Tests and `test:int` — **skipped this slice and all remaining M4 slices**, per explicit instruction to move autopilot-fast through the rest of the milestone. No unit or integration specs were written; the authorization-matrix suite was not extended for these two routes. This is a deliberate, acknowledged deviation from CLAUDE.md §7/§10's normal per-slice TDD gate — flagged here rather than silently skipped, so it's visible before this branch merges.
+- [x] Commit + push.
+
+**Migration-generation note (new since Slice 1):** rather than hand-writing `migration.sql`, used `prisma migrate diff --from-schema <previous-committed-schema.prisma> --to-schema <current-schema.prisma> --script` — a pure file-to-file diff that needs no database connection at all, so it sidesteps the shadow-DB slowness/lock issue Slice 1 hit entirely. Applied with the already-established `prisma migrate deploy` (direct connection, no shadow DB). Reuse this for every remaining slice.

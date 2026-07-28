@@ -65,3 +65,51 @@ export const updateProspectRequestSchema = z
   })
   .strict();
 export type UpdateProspectRequest = z.infer<typeof updateProspectRequestSchema>;
+
+/** M4 Slice 2: system-design.md §11.1's `visits`/`communications` arrays, as their own append-only tables. */
+export const prospectVisit = z.object({
+  id: z.uuid(),
+  prospectId: z.uuid(),
+  meetingId: z.uuid(),
+  attendedAt: z.iso.datetime(),
+  loggedBy: z.uuid(),
+  createdAt: z.iso.datetime(),
+});
+export type ProspectVisit = z.infer<typeof prospectVisit>;
+
+export const createProspectVisitRequestSchema = z
+  .object({
+    meetingId: z.uuid(),
+    attendedAt: z.iso.datetime(),
+  })
+  .strict();
+export type CreateProspectVisitRequest = z.infer<typeof createProspectVisitRequestSchema>;
+
+export const prospectCommunicationChannel = z.enum([
+  'call',
+  'message',
+  'email',
+  'in_person',
+  'other',
+]);
+export type ProspectCommunicationChannel = z.infer<typeof prospectCommunicationChannel>;
+
+export const prospectCommunication = z.object({
+  id: z.uuid(),
+  prospectId: z.uuid(),
+  channel: prospectCommunicationChannel,
+  note: z.string(),
+  loggedBy: z.uuid(),
+  loggedAt: z.iso.datetime(),
+});
+export type ProspectCommunication = z.infer<typeof prospectCommunication>;
+
+export const createProspectCommunicationRequestSchema = z
+  .object({
+    channel: prospectCommunicationChannel,
+    note: z.string().min(1),
+  })
+  .strict();
+export type CreateProspectCommunicationRequest = z.infer<
+  typeof createProspectCommunicationRequestSchema
+>;

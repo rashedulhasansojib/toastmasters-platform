@@ -51,6 +51,7 @@ describe('Authorisation matrix (generated from role_template × resource_catalog
     { resource: 'identity.role_assignment', actions: ['read', 'create', 'update'] },
     { resource: 'meeting.meeting', actions: ['read', 'create', 'update'] },
     { resource: 'meeting.role', actions: ['read', 'update'] },
+    { resource: 'meeting.agenda_item', actions: ['read', 'create'] },
     { resource: 'finance.ledger', actions: ['read', 'create', 'update'] },
     { resource: 'education.evaluation', actions: ['read', 'create', 'update'] },
     { resource: 'membership.health_signal', actions: ['read'] },

@@ -218,8 +218,24 @@ model Meeting {
   createdBy       String      @map("created_by") @db.Uuid
   createdByPerson Person      @relation(fields: [createdBy], references: [id])
   createdAt       DateTime    @default(now()) @map("created_at")
+  agendaItems     AgendaItem[]
 
   @@map("meeting")
+}
+
+/** M3 Slice 1: system-design.md §9.1's agendaItem[] — server-assigned, append-only position. */
+model AgendaItem {
+  id                     String   @id @default(uuid()) @db.Uuid
+  meetingId              String   @map("meeting_id") @db.Uuid
+  meeting                Meeting  @relation(fields: [meetingId], references: [id])
+  position               Int
+  title                  String
+  plannedDurationSeconds Int      @map("planned_duration_seconds")
+  roleKey                String?  @map("role_key")
+  createdAt              DateTime @default(now()) @map("created_at")
+
+  @@unique([meetingId, position])
+  @@map("agenda_item")
 }
 
 enum InvitationStatus {

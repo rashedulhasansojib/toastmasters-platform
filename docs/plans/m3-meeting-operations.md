@@ -23,7 +23,7 @@
 
 **Tests** (`apps/api/test/integration/agenda-item-http.int-spec.ts`, new): (1) a `club_vpe` creates three items, positions auto-increment 1/2/3, `GET` returns them in order; (2) a member of a **different** club is 403'd (the outer `@ResourceScope` guard — sibling-club isolation, the one non-negotiable case); (3) a valid `clubUnitId` with a `meetingId` belonging to **another** club 404s (the inner ownership check, not just the outer scope guard).
 
-- [ ] Schema + migration + seed, one commit.
-- [ ] Repository + controller + module wiring, TDD against the 3 tests above.
-- [ ] Full gate once at the end.
-- [ ] Commit: `feat(meeting): agenda builder — ordered agenda items on a meeting`
+- [x] Schema + migration + seed.
+- [x] Repository + controller + module wiring, TDD against the 3 tests above. Two build-vs-source gotchas hit again (`packages/db` needs rebuilding after both the migration _and_ the later `seed.ts` edit — two separate rebuilds, not one) — same class of issue as M2 Slices 5/6/7, now four times in this project. Also bumped `access.seed.int-spec.ts`'s hardcoded resource count (10→11) and added `meeting.agenda_item` to `authorization-matrix.int-spec.ts`'s `RESOURCE_ACTIONS`, per that suite's own per-slice-extension convention.
+- [x] Full gate once at the end — green (352 integration, up from 328; 72 unit; lint/typecheck/build clean).
+- [x] Commit: `feat(meeting): agenda builder — ordered agenda items on a meeting`

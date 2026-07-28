@@ -58,6 +58,14 @@ const RESOURCES: ResourceSeed[] = [
     sensitivity: 'normal',
   },
   {
+    resource: 'meeting.agenda_item',
+    context: 'meeting',
+    label: 'Agenda item',
+    allowedActions: ['read', 'create'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
+  {
     resource: 'finance.ledger',
     context: 'finance',
     label: 'Club ledger',
@@ -128,6 +136,7 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
     grants: [
       { resource: 'meeting.meeting', action: 'read' },
       { resource: 'meeting.role', action: 'read' },
+      { resource: 'meeting.agenda_item', action: 'read' },
       { resource: 'finance.ledger', action: 'read' },
       { resource: 'identity.role_assignment', action: 'create' },
       { resource: 'identity.role_assignment', action: 'update' },
@@ -145,6 +154,8 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'meeting.meeting', action: 'read' },
       { resource: 'meeting.meeting', action: 'update' },
       { resource: 'meeting.role', action: 'update' },
+      { resource: 'meeting.agenda_item', action: 'create' },
+      { resource: 'meeting.agenda_item', action: 'read' },
       { resource: 'identity.role_assignment', action: 'read' },
     ],
   },
@@ -173,6 +184,7 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
     grants: [
       { resource: 'meeting.meeting', action: 'read' },
       { resource: 'meeting.role', action: 'read' },
+      { resource: 'meeting.agenda_item', action: 'read' },
       { resource: 'identity.role_assignment', action: 'read' },
       { resource: 'finance.ledger', action: 'read', condition: 'own' },
     ],

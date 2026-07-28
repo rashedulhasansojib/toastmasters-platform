@@ -23,3 +23,24 @@ export const createMeetingRequestSchema = z
   })
   .strict();
 export type CreateMeetingRequest = z.infer<typeof createMeetingRequestSchema>;
+
+/** M3 Slice 1: system-design.md §9.1's agendaItem[] — position is server-assigned, never client-supplied. */
+export const agendaItem = z.object({
+  id: z.uuid(),
+  meetingId: z.uuid(),
+  position: z.number().int().positive(),
+  title: z.string().min(1),
+  plannedDurationSeconds: z.number().int().positive(),
+  roleKey: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+});
+export type AgendaItem = z.infer<typeof agendaItem>;
+
+export const createAgendaItemRequestSchema = z
+  .object({
+    title: z.string().min(1),
+    plannedDurationSeconds: z.number().int().positive(),
+    roleKey: z.string().min(1).optional(),
+  })
+  .strict();
+export type CreateAgendaItemRequest = z.infer<typeof createAgendaItemRequestSchema>;

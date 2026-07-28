@@ -30,3 +30,40 @@ code {
   padding: 0.1rem 0.35rem;
   border-radius: 0.25rem;
 }
+
+.shell-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.25);
+}
+
+.shell-header a {
+  color: var(--brand);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.shell-header-session {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 20rem;
+}
+
+.login-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.login-form .error {
+  color: #b3261e;
+}

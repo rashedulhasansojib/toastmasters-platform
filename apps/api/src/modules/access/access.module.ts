@@ -8,6 +8,8 @@ import { GrantAdminRepository } from './grant-admin.repository';
 import { GrantCacheService } from './grant-cache.service';
 import { AccessInspectorRepository } from './access-inspector.repository';
 import { AccessInspectorController } from './access-inspector.controller';
+import { UnitPolicyService } from './unit-policy.service';
+import { UnitPolicyController } from './unit-policy.controller';
 import { REDIS_CLIENT } from './redis-client.token';
 import { PRISMA_CLIENT } from '../../common/db/prisma-client.token';
 
@@ -23,8 +25,11 @@ import { PRISMA_CLIENT } from '../../common/db/prisma-client.token';
     AccessRepository,
     GrantAdminRepository,
     AccessInspectorRepository,
+    UnitPolicyService,
   ],
-  controllers: [AccessInspectorController],
-  exports: [AccessRepository, GrantAdminRepository, AccessInspectorRepository],
+  controllers: [AccessInspectorController, UnitPolicyController],
+  // REDIS_CLIENT is exported so other modules (e.g. identity's invitation
+  // rate limiter) reuse this one connection instead of opening a second.
+  exports: [AccessRepository, GrantAdminRepository, AccessInspectorRepository, REDIS_CLIENT],
 })
 export class AccessModule {}

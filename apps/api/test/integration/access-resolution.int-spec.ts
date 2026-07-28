@@ -133,7 +133,7 @@ describe('Access resolution (integration)', () => {
       termEnd: new Date('2027-06-30'),
       appointedBy: treasurer.id,
     });
-    await roleAssignments.end(assignment.id, 'resigned');
+    await roleAssignments.end(assignment.id, 'resigned', treasurer.id);
 
     const decision = await authz.authorize({
       principal: { userId: treasurer.id, roles: [], scopes: [] },

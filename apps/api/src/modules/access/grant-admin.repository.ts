@@ -1,5 +1,6 @@
 import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { getPrisma, type PrismaClient } from '@toastmasters/db';
+import type { UnitPolicyGrant } from '@toastmasters/contracts';
 import { canDelegate } from '../../common/authz/can-delegate';
 import type { Action, Condition } from '../../common/authz/authz.types';
 import { AccessRepository } from './access.repository';
@@ -12,6 +13,22 @@ type UnitPolicyGrantRow = Awaited<ReturnType<PrismaClient['unitPolicyGrant']['cr
 type PlatformRoleAssignmentRow = Awaited<
   ReturnType<PrismaClient['platformRoleAssignment']['create']>
 >;
+
+function toUnitPolicyGrant(row: UnitPolicyGrantRow): UnitPolicyGrant {
+  return {
+    id: row.id,
+    orgUnitId: row.orgUnitId,
+    subjectRole: row.subjectRole ?? '',
+    resource: row.resource,
+    action: row.action,
+    condition: row.condition,
+    effect: row.effect,
+    createdBy: row.createdBy,
+    createdAt: row.createdAt.toISOString(),
+    reason: row.reason,
+    expiresAt: row.expiresAt?.toISOString() ?? null,
+  };
+}
 
 @Injectable()
 export class GrantAdminRepository {
@@ -40,18 +57,32 @@ export class GrantAdminRepository {
         `${input.actorId} cannot delegate ${input.resource}:${input.action} — does not hold it at this scope`,
       );
     }
-    return this.db.personGrant.create({
-      data: {
-        personId: input.personId,
-        orgUnitId: input.orgUnitId,
-        resource: input.resource,
-        action: input.action,
-        condition: input.condition ?? 'any',
-        effect: 'allow',
-        grantedBy: input.actorId,
-        reason: input.reason,
-        expiresAt: input.expiresAt ?? null,
-      },
+    return this.db.$transaction(async (tx) => {
+      const grant = await tx.personGrant.create({
+        data: {
+          personId: input.personId,
+          orgUnitId: input.orgUnitId,
+          resource: input.resource,
+          action: input.action,
+          condition: input.condition ?? 'any',
+          effect: 'allow',
+          grantedBy: input.actorId,
+          reason: input.reason,
+          expiresAt: input.expiresAt ?? null,
+        },
+      });
+      await tx.auditEvent.create({
+        data: {
+          actorPersonId: input.actorId,
+          type: 'person_grant_created',
+          resource: input.resource,
+          action: input.action,
+          orgUnitId: input.orgUnitId,
+          reason: input.reason,
+          metadata: { personId: input.personId, personGrantId: grant.id },
+        },
+      });
+      return grant;
     });
   }
 
@@ -106,7 +137,12 @@ export class GrantAdminRepository {
     });
   }
 
-  /** Test-fixture-level creation — see the Slice 6 plan's scoping note: not canDelegate-gated. */
+  /**
+   * Prisma-only — no canDelegate check here. M2 Slice 3's UnitPolicyService
+   * gates callers (allow overrides require canDelegate; deny overrides are
+   * exempt; a last-unit_admin guard applies to self-deny), mirroring the
+   * service-layer placement InvitationService/OrgUnitService already use.
+   */
   async createUnitPolicyGrant(input: {
     orgUnitId: string;
     subjectRole: string;
@@ -115,20 +151,41 @@ export class GrantAdminRepository {
     effect: 'allow' | 'deny';
     createdBy: string;
     reason: string;
-  }): Promise<UnitPolicyGrantRow> {
-    return this.db.unitPolicyGrant.create({
-      data: {
-        orgUnitId: input.orgUnitId,
-        subjectKind: 'role',
-        subjectRole: input.subjectRole,
-        resource: input.resource,
-        action: input.action,
-        condition: 'any',
-        effect: input.effect,
-        createdBy: input.createdBy,
-        reason: input.reason,
-      },
+    expiresAt?: Date | null;
+  }): Promise<UnitPolicyGrant> {
+    const row = await this.db.$transaction(async (tx) => {
+      const created = await tx.unitPolicyGrant.create({
+        data: {
+          orgUnitId: input.orgUnitId,
+          subjectKind: 'role',
+          subjectRole: input.subjectRole,
+          resource: input.resource,
+          action: input.action,
+          condition: 'any',
+          effect: input.effect,
+          createdBy: input.createdBy,
+          reason: input.reason,
+          expiresAt: input.expiresAt ?? null,
+        },
+      });
+      await tx.auditEvent.create({
+        data: {
+          actorPersonId: input.createdBy,
+          type: 'unit_policy_grant_created',
+          resource: input.resource,
+          action: input.action,
+          orgUnitId: input.orgUnitId,
+          reason: input.reason,
+          metadata: {
+            subjectRole: input.subjectRole,
+            effect: input.effect,
+            unitPolicyGrantId: created.id,
+          },
+        },
+      });
+      return created;
     });
+    return toUnitPolicyGrant(row);
   }
 
   async grantPlatformRole(input: {
@@ -138,14 +195,29 @@ export class GrantAdminRepository {
     grantedBy: string;
     expiresAt?: Date | null;
   }): Promise<PlatformRoleAssignmentRow> {
-    return this.db.platformRoleAssignment.create({
-      data: {
-        personId: input.personId,
-        role: input.role,
-        orgUnitId: input.orgUnitId,
-        grantedBy: input.grantedBy,
-        expiresAt: input.expiresAt ?? null,
-      },
+    return this.db.$transaction(async (tx) => {
+      const created = await tx.platformRoleAssignment.create({
+        data: {
+          personId: input.personId,
+          role: input.role,
+          orgUnitId: input.orgUnitId,
+          grantedBy: input.grantedBy,
+          expiresAt: input.expiresAt ?? null,
+        },
+      });
+      await tx.auditEvent.create({
+        data: {
+          actorPersonId: input.grantedBy,
+          type: 'platform_role_granted',
+          orgUnitId: input.orgUnitId,
+          metadata: {
+            personId: input.personId,
+            role: input.role,
+            platformRoleAssignmentId: created.id,
+          },
+        },
+      });
+      return created;
     });
   }
 
@@ -155,7 +227,7 @@ export class GrantAdminRepository {
    * role_assignment), so "revoke" is a hard delete here; that's acceptable
    * given how rare platform-role changes are meant to be (§6 table).
    */
-  async revokePlatformRole(id: string): Promise<void> {
+  async revokePlatformRole(id: string, actorId: string): Promise<void> {
     const target = await this.db.platformRoleAssignment.findUnique({ where: { id } });
     if (!target) return;
 
@@ -173,6 +245,37 @@ export class GrantAdminRepository {
       }
     }
 
-    await this.db.platformRoleAssignment.delete({ where: { id } });
+    await this.db.$transaction(async (tx) => {
+      await tx.platformRoleAssignment.delete({ where: { id } });
+      await tx.auditEvent.create({
+        data: {
+          actorPersonId: actorId,
+          type: 'platform_role_revoked',
+          orgUnitId: target.orgUnitId,
+          metadata: { personId: target.personId, role: target.role, platformRoleAssignmentId: id },
+        },
+      });
+    });
+  }
+
+  /** The unit switcher's candidate list (Slice 6) — org-unit-less platform roles (e.g. system_admin) contribute nothing here. */
+  async findPlatformRoleOrgUnitIdsForPerson(personId: string): Promise<string[]> {
+    const rows = await this.db.platformRoleAssignment.findMany({
+      where: { personId, orgUnitId: { not: null } },
+      select: { orgUnitId: true },
+      distinct: ['orgUnitId'],
+    });
+    return rows.map((r) => r.orgUnitId).filter((id): id is string => id != null);
+  }
+
+  /** Same row-count invariant as revokePlatformRole's guard — reused by UnitPolicyService's last-admin check on self-deny. */
+  async countActiveUnitAdmins(orgUnitId: string): Promise<number> {
+    return this.db.platformRoleAssignment.count({
+      where: {
+        role: 'unit_admin',
+        orgUnitId,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+      },
+    });
   }
 }

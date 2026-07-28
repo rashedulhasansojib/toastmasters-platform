@@ -143,7 +143,7 @@ describe('Access resolution cache (integration)', () => {
     const stillCached = await authz.authorize(request);
     expect(stillCached.allowed).toBe(true); // same permissionVersion key -> stale cache hit
 
-    await roleAssignments.end(assignment.id, 'resigned');
+    await roleAssignments.end(assignment.id, 'resigned', treasurer.id);
 
     const afterRealEnd = await authz.authorize(request);
     expect(afterRealEnd.allowed).toBe(false); // new version -> fresh resolution

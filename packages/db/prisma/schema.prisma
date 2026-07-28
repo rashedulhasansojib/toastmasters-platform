@@ -58,6 +58,7 @@ model OrgUnit {
   personGrants     PersonGrant[]
   auditEvents      AuditEvent[]
   meetings         Meeting[]
+  invitations      Invitation[]
 
   @@map("org_unit")
 }
@@ -94,6 +95,8 @@ model Person {
   personGrantsIssued        PersonGrant[]     @relation("PersonGrantGrantedBy")
   auditEvents               AuditEvent[]
   meetingsCreated           Meeting[]
+  invitationsSent           Invitation[] @relation("InvitationInvitedBy")
+  invitationsAccepted       Invitation[] @relation("InvitationAcceptedBy")
 
   @@map("person")
 }
@@ -194,6 +197,7 @@ model ProgramYear {
 
   roleAssignments RoleAssignment[]
   meetings        Meeting[]
+  invitations     Invitation[]
 
   @@map("program_year")
 }
@@ -216,6 +220,39 @@ model Meeting {
   createdAt       DateTime    @default(now()) @map("created_at")
 
   @@map("meeting")
+}
+
+enum InvitationStatus {
+  pending
+  accepted
+  expired
+  revoked
+}
+
+/**
+ * M2 Slice 1: system-design.md §6.4. Carries a single-role intent (not the
+ * full roles: Array<...> the design doc sketches) — enough to prove the
+ * mechanism and the delegation check; see the Slice 1 plan's scoping note.
+ */
+model Invitation {
+  id               String           @id @default(uuid()) @db.Uuid
+  email            String
+  tokenHash        String           @unique @map("token_hash")
+  orgUnitId        String           @map("org_unit_id") @db.Uuid
+  orgUnit          OrgUnit          @relation(fields: [orgUnitId], references: [id])
+  role             String
+  programYearId    String           @map("program_year_id")
+  programYear      ProgramYear      @relation(fields: [programYearId], references: [id])
+  invitedBy        String           @map("invited_by") @db.Uuid
+  invitedByPerson  Person           @relation("InvitationInvitedBy", fields: [invitedBy], references: [id])
+  status           InvitationStatus @default(pending)
+  expiresAt        DateTime         @map("expires_at")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  acceptedAt       DateTime?        @map("accepted_at")
+  acceptedPersonId String?          @map("accepted_person_id") @db.Uuid
+  acceptedPerson   Person?          @relation("InvitationAcceptedBy", fields: [acceptedPersonId], references: [id])
+
+  @@map("invitation")
 }
 
 enum ResourceSensitivity {
@@ -375,6 +412,13 @@ model PersonGrant {
 enum AuditEventType {
   break_glass_mint
   restricted_read
+  org_unit_reparented
+  role_assignment_created
+  role_assignment_ended
+  person_grant_created
+  unit_policy_grant_created
+  platform_role_granted
+  platform_role_revoked
 }
 
 model AuditEvent {

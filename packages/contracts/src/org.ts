@@ -22,3 +22,17 @@ export const orgUnit = z.object({
   timezone: z.string().min(1),
 });
 export type OrgUnit = z.infer<typeof orgUnit>;
+
+/** Slice 2 (M2): the org tree editor. One shape for every tier — a district under a region, a club under a district. */
+export const createOrgUnitChildRequestSchema = z
+  .object({
+    type: orgUnitType,
+    name: z.string().min(1),
+    code: z.string().min(1),
+    timezone: z.string().min(1),
+  })
+  .strict();
+export type CreateOrgUnitChildRequest = z.infer<typeof createOrgUnitChildRequestSchema>;
+
+export const reparentOrgUnitRequestSchema = z.object({ newParentId: z.uuid() }).strict();
+export type ReparentOrgUnitRequest = z.infer<typeof reparentOrgUnitRequestSchema>;

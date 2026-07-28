@@ -119,4 +119,70 @@ describe('Access inspector HTTP surface (integration)', () => {
 
     await app.close();
   });
+
+  // M2 Slice 4: identity.invitation didn't exist when the assertion above was
+  // written — same guard chain, a resource added a milestone later, no
+  // change needed. system_admin holds it via its non-restricted broad
+  // synthesis (identity.invitation is sensitivity: 'normal') with no
+  // break-glass mint required, unlike the platform.audit case above.
+  it('200s an actor holding platform.audit:read, querying who-can-access for identity.invitation', async () => {
+    const orgUnits = new OrgUnitRepository();
+    const people = new PersonRepository();
+    const access = new AccessRepository();
+    const grantAdmin = new GrantAdminRepository(undefined, access);
+
+    // Only one region root ever exists (org_unit_single_region_root) — reuse
+    // the one the first test in this file already created.
+    const region = await orgUnits.findByPath('r1');
+    if (!region) throw new Error('Expected the region root created by the prior test');
+
+    const sysAdmin = await people.create({
+      email: 'http-sysadmin-invite@example.com',
+      fullName: 'HTTP Sys Admin Invite',
+    });
+    await grantAdmin.grantPlatformRole({
+      personId: sysAdmin.id,
+      role: 'system_admin',
+      orgUnitId: null,
+      grantedBy: sysAdmin.id,
+    });
+    await grantAdmin.mintBreakGlass({
+      systemAdminPersonId: sysAdmin.id,
+      orgUnitId: region.id,
+      resource: 'platform.audit',
+      action: 'read',
+      reason: 'HTTP inspector test',
+    });
+
+    const plainMember = await people.create({
+      email: 'http-member-invite@example.com',
+      fullName: 'HTTP Member Invite',
+    });
+
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const app: INestApplication = moduleRef.createNestApplication();
+    app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
+    await app.init();
+
+    const jwtFor = (personId: string) =>
+      new SignJWT({ roles: [], scopes: [] })
+        .setProtectedHeader({ alg: 'HS256' })
+        .setSubject(personId)
+        .setExpirationTime('5m')
+        .sign(new TextEncoder().encode(secret));
+
+    const query = `resource=identity.invitation&action=create&scope=${encodeURIComponent(region.path)}`;
+
+    await request(app.getHttpServer())
+      .get(`/v1/access/inspector/who-can-access?${query}`)
+      .set('Authorization', `Bearer ${await jwtFor(sysAdmin.id)}`)
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .get(`/v1/access/inspector/who-can-access?${query}`)
+      .set('Authorization', `Bearer ${await jwtFor(plainMember.id)}`)
+      .expect(403);
+
+    await app.close();
+  });
 });

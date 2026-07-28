@@ -89,6 +89,30 @@ const RESOURCES: ResourceSeed[] = [
     clubScoped: false,
     sensitivity: 'restricted',
   },
+  {
+    resource: 'identity.invitation',
+    context: 'identity',
+    label: 'Invitation',
+    allowedActions: ['create'],
+    clubScoped: false, // can target any org-unit tier, not just clubs
+    sensitivity: 'normal',
+  },
+  {
+    resource: 'org.unit',
+    context: 'org',
+    label: 'Organisation unit',
+    allowedActions: ['create', 'update'],
+    clubScoped: false, // spans every tier: region, district, division, area, club
+    sensitivity: 'normal',
+  },
+  {
+    resource: 'access.unit_policy',
+    context: 'access',
+    label: 'Unit policy override',
+    allowedActions: ['create'],
+    clubScoped: false,
+    sensitivity: 'normal',
+  },
 ];
 
 // Grants transcribed verbatim from system-design.md §7.5 for the resources
@@ -168,10 +192,18 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
     role: 'unit_admin',
     tier: 'platform',
     unitTypes: [],
-    scopeRule: 'self_unit',
+    // system-design.md §7.7: "Scope: One subtree" — was 'self_unit' (M1
+    // Slice 3 placeholder, unexercised until M2 Slice 1's invitation flow).
+    scopeRule: 'self_subtree',
     isSingleton: false,
     label: 'Unit Administrator',
-    grants: [],
+    grants: [
+      { resource: 'identity.invitation', action: 'create' },
+      { resource: 'identity.role_assignment', action: 'create' },
+      { resource: 'org.unit', action: 'create' },
+      { resource: 'org.unit', action: 'update' },
+      { resource: 'access.unit_policy', action: 'create' },
+    ],
   },
   {
     role: 'support_readonly',

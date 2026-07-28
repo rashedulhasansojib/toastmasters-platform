@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { orgUnitType } from './org';
 
 export const personStatus = z.enum(['invited', 'active', 'disabled']);
 export type PersonStatus = z.infer<typeof personStatus>;
@@ -113,6 +114,42 @@ export const switchUnitRequestSchema = z
   .strict();
 export type SwitchUnitRequest = z.infer<typeof switchUnitRequestSchema>;
 
+export const invitationStatus = z.enum(['pending', 'accepted', 'expired', 'revoked']);
+export type InvitationStatus = z.infer<typeof invitationStatus>;
+
+/** Slice 1 (M2): system-design.md §6.4. tokenHash — and the raw token — never appear here; the raw token is only ever emailed. */
+export const invitation = z.object({
+  id: z.uuid(),
+  email: z.email(),
+  orgUnitId: z.uuid(),
+  role: z.string().min(1),
+  programYearId: z.string().min(1),
+  invitedBy: z.uuid(),
+  status: invitationStatus,
+  expiresAt: z.iso.datetime(),
+  createdAt: z.iso.datetime(),
+  acceptedAt: z.iso.datetime().nullable(),
+  acceptedPersonId: z.uuid().nullable(),
+});
+export type Invitation = z.infer<typeof invitation>;
+
+export const createInvitationRequestSchema = z
+  .object({
+    email: z.email(),
+    role: z.string().min(1),
+    programYearId: z.string().min(1),
+  })
+  .strict();
+export type CreateInvitationRequest = z.infer<typeof createInvitationRequestSchema>;
+
+export const acceptInvitationRequestSchema = z
+  .object({
+    fullName: z.string().min(1),
+    password: z.string().min(8),
+  })
+  .strict();
+export type AcceptInvitationRequest = z.infer<typeof acceptInvitationRequestSchema>;
+
 export const sessionResponseSchema = z.object({
   personId: z.uuid(),
   fullName: z.string(),
@@ -120,3 +157,12 @@ export const sessionResponseSchema = z.object({
   programYearId: z.string().nullable(),
 });
 export type SessionResponse = z.infer<typeof sessionResponseSchema>;
+
+/** Slice 6 (M2): the unit switcher's candidate list — a lean subset of `orgUnit`, not the full shape. */
+export const switchableUnit = z.object({
+  id: z.uuid(),
+  name: z.string().min(1),
+  type: orgUnitType,
+  path: z.string().min(1),
+});
+export type SwitchableUnit = z.infer<typeof switchableUnit>;

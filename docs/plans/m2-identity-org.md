@@ -10,14 +10,14 @@
 
 > **Scope note.** M1's plan sketched its full slice roadmap before detailing
 > any slice, because the whole milestone's shape was known up front. M2 is
-> being scoped incrementally instead: **Slices 1–5** below are detailed and
-> execution-ready. Later M2 slices (permission-versioning UX i.e. mid-session
-> JWT reissue, the unit switcher's dashboard UI) will each get their own
-> detailed section, written just before they're implemented, once each prior
-> slice's shape has proven out — mirroring M1's own governing principle: "if
-> `authorize()` feels awkward here, fix it before M2" applies equally to "if
-> the invitation/org-editor/unit-policy shape feels awkward here, fix it
-> before the next slice."
+> being scoped incrementally instead: **Slices 1–6** below are detailed and
+> execution-ready. Slice 7 (the unit switcher's dashboard UI, consuming
+> Slice 6's two endpoints) and permission-versioning UX (mid-session JWT
+> reissue) will each get their own detailed section, written just before
+> they're implemented, once each prior slice's shape has proven out —
+> mirroring M1's own governing principle: "if `authorize()` feels awkward
+> here, fix it before M2" applies equally to "if the invitation/org-editor/
+> unit-policy shape feels awkward here, fix it before the next slice."
 
 ---
 
@@ -1001,6 +1001,61 @@ git commit -m "test(access): inspector coverage for identity.invitation, org.uni
 ```bash
 git add packages/db apps/api/src/modules/identity apps/api/src/modules/access apps/api/test
 git commit -m "feat(access): audit every grant-mutating write path, not just break-glass and reparent"
+```
+
+---
+
+## Slice 6 — Session query endpoints (`GET /me`, `GET /switchable-units`)
+
+**Why:** `roadmap.md` §5 names the **unit switcher** as M2 content; `system-design.md` §22 specifies the dashboard shell renders "**unit switcher** (District / Division / Area / Club)." The switching _mechanism_ itself is already correct (M1 Slice 8 — `POST /v1/auth/switch-unit` reissues the session cookie with only `activeUnitId` changed, never trusts anything else from the client). What's missing is the two reads any switcher UI needs before it can render anything: **who is currently logged in** (the session cookie is httpOnly by design — no JS, including a Server Component's own fetch layer, can read its claims directly) and **which units to offer as switch targets** (no query enumerates a person's units today; `system-design.md` §20.2's aspirational `GET /me` was never built — only `/auth/login` and `/auth/switch-unit` exist). This slice is backend-only; the dashboard UI that consumes these two endpoints is Slice 7.
+
+**Scoping decisions:**
+
+- **Switchable units = org units where the person holds an active `RoleAssignment`, or a `PlatformRoleAssignment` with a non-null `orgUnitId`** — not a full scope-prefix walk over everything `effectiveGrants` would cover. `system-design.md` §21 is explicit that `activeUnitId` is "a UI convenience" — the switcher should offer places the person was actually appointed to, not every descendant a district-wide `unit_admin`'s scope prefix technically reaches (which could be dozens of clubs). A tree/search picker for wide subtrees is a later concern if it turns out to be needed, not assumed here.
+- **`system_admin`'s platform-wide grant (`orgUnitId: null`) contributes no switchable unit.** There's no specific unit that grant is "at" — nothing to add to the list.
+- **`GET /me` returns the same `SessionResponse` shape `/auth/login` and `/auth/switch-unit` already return** (`personId`, `fullName`, `activeUnitId`, `programYearId`) — no new contract type, and no cookie is reissued (a pure read).
+- **No N+1 for switchable-unit resolution.** `OrgUnitRepository` gains one batch method (`findByIds`), not one `findById` call per unit.
+- **Both routes live on the existing `AuthController`/`AuthService`**, not a new module — `AuthService` already composes `PersonRepository`/`OrgUnitRepository`; it gains `RoleAssignmentRepository` and `GrantAdminRepository` as two more collaborators, and `AuthModule` gains `AccessModule` to its imports (mirroring `IdentityModule`'s own precedent) to reach `GrantAdminRepository`.
+
+**Files:**
+
+- Modify: `packages/contracts/src/identity.ts` (`switchableUnit` schema, reusing `orgUnitType` from `org.ts`).
+- Modify: `apps/api/src/modules/identity/role-assignment.repository.ts` (`findActiveOrgUnitIdsForPerson`).
+- Modify: `apps/api/src/modules/access/grant-admin.repository.ts` (`findPlatformRoleOrgUnitIdsForPerson`).
+- Modify: `apps/api/src/modules/org/org.repository.ts` (`findByIds`, batch).
+- Modify: `apps/api/src/common/auth/auth.service.ts` (`me()`, `switchableUnits()`), `auth.controller.ts` (`GET /me`, `GET /switchable-units`), `auth.module.ts` (import `AccessModule`).
+
+**TDD steps:**
+
+- [ ] **Step 1: `RoleAssignmentRepository.findActiveOrgUnitIdsForPerson`**
+
+  Failing test in `identity.repository.int-spec.ts`: a person with two active assignments at two different clubs, plus one ended assignment at a third — the method returns exactly the two active clubs' ids, deduplicated. Implement as a `distinct: ['orgUnitId']` query filtered on `status: 'active'`.
+
+- [ ] **Step 2: `GrantAdminRepository.findPlatformRoleOrgUnitIdsForPerson`**
+
+  Failing test in `access-delegation.int-spec.ts`: a `unit_admin` at a club and a `system_admin` (org-unit-less) for the same person — returns only the club id, `system_admin`'s `null` excluded.
+
+- [ ] **Step 3: `OrgUnitRepository.findByIds`**
+
+  Failing test in `org.repository.int-spec.ts`: three known ids return three units in one query; an unknown id among them is silently omitted, not an error (matches `findById`'s existing null-not-throw convention).
+
+- [ ] **Step 4: `AuthService.me()` and `GET /v1/auth/me`**
+
+  Failing integration test in `auth-http.int-spec.ts`: logged-in request returns 200 with the session's current `personId`/`fullName`/`activeUnitId`/`programYearId`; no cookie header on the response (a pure read, unlike login/switch-unit); an unauthenticated request gets 401 from the existing global `JwtAuthGuard` — no new guard logic needed.
+
+- [ ] **Step 5: `AuthService.switchableUnits()` and `GET /v1/auth/switchable-units`**
+
+  Failing integration test in `auth-http.int-spec.ts`: a person with an active role at club A and a `unit_admin` platform role at club B gets both back (`{id, name, type, path}` each); a person with neither gets `[]`, not a 404.
+
+- [ ] **Step 6: Full gate**
+
+  `pnpm lint && pnpm typecheck && pnpm test && pnpm build`, plus `pnpm test:int`.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add packages/contracts apps/api/src/modules/identity apps/api/src/modules/access apps/api/src/modules/org apps/api/src/common/auth apps/api/test
+git commit -m "feat(access): session query endpoints — GET /me and GET /switchable-units"
 ```
 
 ---

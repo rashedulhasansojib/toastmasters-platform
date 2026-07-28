@@ -19,7 +19,7 @@ describe('seedAccessVocabulary (integration)', () => {
     await seedAccessVocabulary(db);
 
     const resourceCount = await db.resourceCatalog.count();
-    expect(resourceCount).toBe(7);
+    expect(resourceCount).toBe(8);
   });
 
   it('marks exactly the four canonical resources as restricted', async () => {
@@ -100,5 +100,39 @@ describe('seedAccessVocabulary (integration)', () => {
       where: { role: 'club_president', resource: 'meeting.meeting', action: 'create' },
     });
     expect(presidentCreate).toHaveLength(0);
+  });
+
+  it("gives unit_admin self_subtree reach and its first real grants — system-design.md §7.7's platform role table", async () => {
+    const unitAdmin = await db.roleTemplate.findUnique({ where: { role: 'unit_admin' } });
+    expect(unitAdmin?.scopeRule).toBe('self_subtree');
+
+    const invitationResource = await db.resourceCatalog.findUnique({
+      where: { resource: 'identity.invitation' },
+    });
+    expect(invitationResource?.allowedActions).toContain('create');
+
+    const canInvite = await db.roleTemplateGrant.findUnique({
+      where: {
+        role_resource_action_condition: {
+          role: 'unit_admin',
+          resource: 'identity.invitation',
+          action: 'create',
+          condition: 'any',
+        },
+      },
+    });
+    expect(canInvite?.effect).toBe('allow');
+
+    const canAssign = await db.roleTemplateGrant.findUnique({
+      where: {
+        role_resource_action_condition: {
+          role: 'unit_admin',
+          resource: 'identity.role_assignment',
+          action: 'create',
+          condition: 'any',
+        },
+      },
+    });
+    expect(canAssign?.effect).toBe('allow');
   });
 });

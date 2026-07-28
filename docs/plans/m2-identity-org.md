@@ -155,7 +155,7 @@ accept(rawToken: string, input: { fullName: string; password: string }): Promise
 
 **TDD steps:**
 
-- [ ] **Step 1: Schema, seed, migration**
+- [x] **Step 1: Schema, seed, migration**
 
   Red — extend `access.seed.int-spec.ts`: `identity.invitation`'s `allowedActions` includes `create`; `unit_admin`'s grants include `{resource:'identity.invitation', action:'create'}` and `{resource:'identity.role_assignment', action:'create'}`; `unit_admin`'s `role_template.scope_rule` is `'self_subtree'`.
 
@@ -193,7 +193,7 @@ accept(rawToken: string, input: { fullName: string; password: string }): Promise
 
   Rerun — green. Also rerun `authorization-matrix.int-spec.ts` unchanged to confirm the `unit_admin` scope-rule fix doesn't flip any existing case (see the divergence note above for why it shouldn't).
 
-- [ ] **Step 2: `InvitationRepository`**
+- [x] **Step 2: `InvitationRepository`**
 
   Red (`invitation.repository.int-spec.ts`): `create` persists a row with the given `tokenHash` and returns the public shape (no `tokenHash` field); `findByTokenHash` round-trips it and returns `null` for an unknown hash; `accept` — given a pending, unexpired invitation — creates a new `Person` when the email is unknown, sets `passwordHash`+`status:'active'`, creates an `active` `RoleAssignment` with the given term dates, bumps `permission_version`, and flips the invitation to `status:'accepted'` with `acceptedPersonId` set; called again with an email that already has a `Person` with a `passwordHash` set, it does **not** overwrite the existing hash (attach, not overwrite) and still creates the `RoleAssignment`; called with an expired or non-`pending` invitation, it throws (`UnauthorizedException`) and writes nothing.
 
@@ -201,7 +201,7 @@ accept(rawToken: string, input: { fullName: string; password: string }): Promise
 
   Rerun — green.
 
-- [ ] **Step 3: `InvitationRateLimiter`**
+- [x] **Step 3: `InvitationRateLimiter`**
 
   Red (`invitation.service.spec.ts`, mocked `Redis`): the first 20 calls for a given inviter in a day resolve; the 21st throws `HttpException` with status 429; a call for a different inviter, or on a different day, is unaffected.
 
@@ -228,7 +228,7 @@ accept(rawToken: string, input: { fullName: string; password: string }): Promise
 
   Rerun — green.
 
-- [ ] **Step 4: `InvitationService.create()` — the delegation check**
+- [x] **Step 4: `InvitationService.create()` — the delegation check**
 
   Red (`invitation.service.spec.ts`, mocked `AccessRepository`/`InvitationRepository`/`EmailPort`/`InvitationRateLimiter`): an actor whose `effectiveGrants` include `identity.role_assignment:create` at a scope covering the target unit succeeds — a `create()` call reaches the repository and the email port; an actor without that grant at that scope is rejected with `ForbiddenException`, and neither the repository's `create` nor the email port's `send` is called (the delegation check runs **before** any side effect).
 
@@ -276,7 +276,7 @@ accept(rawToken: string, input: { fullName: string; password: string }): Promise
 
   Rerun — green.
 
-- [ ] **Step 5: `InvitationService.accept()`**
+- [x] **Step 5: `InvitationService.accept()`**
 
   Red (`invitation.service.spec.ts` addition, mocked repositories): an unknown/expired/non-pending token throws a **generic** `UnauthorizedException` (same message for all three causes — no enumeration, mirroring `AuthService.login`'s existing pattern); a valid token resolves the target `ProgramYear`'s `startsOn`/`endsOn` as `termStart`/`termEnd`, hashes the submitted password, and calls `invitations.accept()` with them.
 
@@ -308,7 +308,7 @@ accept(rawToken: string, input: { fullName: string; password: string }): Promise
 
   Rerun — green.
 
-- [ ] **Step 6: `InvitationController` + module wiring**
+- [x] **Step 6: `InvitationController` + module wiring**
 
   Red — folded into Step 7's end-to-end tests (a controller-only test would just re-exercise Steps 3–5's already-green paths, per M1 Slice 9's Step 4 precedent).
 
@@ -345,7 +345,9 @@ accept(rawToken: string, input: { fullName: string; password: string }): Promise
 
   Rerun — green. **Rerun `identity-module-boot.int-spec.ts` unchanged** — it boots `IdentityModule` through real Nest DI with no mocks; this is the exact test that caught the two DI-boot bugs in M1 Slice 7 (an `import type`-only constructor param resolving to `Object` in Nest's reflected metadata), so it must still pass byte-for-byte with the new `AccessModule`/`EmailModule` imports and the four new providers.
 
-- [ ] **Step 7: End-to-end HTTP tests**
+  **A third DI-boot issue this same test caught live:** `InvitationService` depends on `PasswordService`, which lives in `AuthModule` — but `AuthModule` itself imports `IdentityModule`, so importing `AuthModule` back from `IdentityModule` would cycle. `PasswordService` has no injected dependencies of its own (a thin Argon2id wrapper), so the fix is registering it a second time directly in `IdentityModule`'s own `providers` — a harmless second instance, not a shared one. Confirmed by rerunning `identity-module-boot.int-spec.ts`, which failed with Nest's dependency-resolution error before this fix and passed after.
+
+- [x] **Step 7: End-to-end HTTP tests**
 
   Red (`invitation-http.int-spec.ts`, real Postgres + Redis, real `AppModule`, `jose`-minted JWTs — same harness shape as `ship-gate.int-spec.ts`):
 
@@ -362,7 +364,7 @@ accept(rawToken: string, input: { fullName: string; password: string }): Promise
 
   Rerun — green. Then the full gate: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`, plus `pnpm test:int`.
 
-- [ ] **Step 8: Authorisation-matrix update**
+- [x] **Step 8: Authorisation-matrix update**
 
   Red — add `{ resource: 'identity.invitation', actions: ['create'] }` to `authorization-matrix.int-spec.ts`'s `RESOURCE_ACTIONS`, and add `'unit_admin'` coverage (it's already in `ROLES`/`CLUB_SCOPED_ROLES` from M1 Slice 10 — no list change needed, just the new resource row it now has a real grant for).
 
@@ -370,7 +372,7 @@ accept(rawToken: string, input: { fullName: string; password: string }): Promise
 
   Rerun — green, full matrix suite.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add packages/db packages/contracts/src/identity.ts apps/api/src/modules/access/access.module.ts apps/api/src/modules/identity apps/api/test/integration/invitation.repository.int-spec.ts apps/api/test/integration/invitation-http.int-spec.ts apps/api/test/integration/authorization-matrix.int-spec.ts

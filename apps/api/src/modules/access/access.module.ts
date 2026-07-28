@@ -25,6 +25,8 @@ import { PRISMA_CLIENT } from '../../common/db/prisma-client.token';
     AccessInspectorRepository,
   ],
   controllers: [AccessInspectorController],
-  exports: [AccessRepository, GrantAdminRepository, AccessInspectorRepository],
+  // REDIS_CLIENT is exported so other modules (e.g. identity's invitation
+  // rate limiter) reuse this one connection instead of opening a second.
+  exports: [AccessRepository, GrantAdminRepository, AccessInspectorRepository, REDIS_CLIENT],
 })
 export class AccessModule {}

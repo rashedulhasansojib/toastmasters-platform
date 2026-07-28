@@ -56,11 +56,19 @@ export default async function MeetingPage({
           <h1>{new Date(meeting.scheduledAt).toLocaleString()}</h1>
           <p className="text-sm text-muted-foreground">Status: {meeting.status}</p>
         </div>
-        <MeetingStatusActions
-          clubUnitId={clubUnitId}
-          meetingId={meetingId}
-          status={meeting.status}
-        />
+        <div className="flex items-center gap-3">
+          <Link
+            href={`/clubs/${clubUnitId}/meetings/${meetingId}/live`}
+            className="text-sm text-muted-foreground underline underline-offset-2"
+          >
+            Live tools
+          </Link>
+          <MeetingStatusActions
+            clubUnitId={clubUnitId}
+            meetingId={meetingId}
+            status={meeting.status}
+          />
+        </div>
       </div>
 
       <section className="flex flex-col gap-3">

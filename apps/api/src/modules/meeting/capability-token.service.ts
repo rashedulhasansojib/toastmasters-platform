@@ -53,4 +53,19 @@ export class CapabilityTokenService {
     }
     return { valid: true, meetingId: row.meetingId, purpose: row.purpose };
   }
+
+  /**
+   * M4 Slice 10: same validity check as `verify()`, but returns the full row
+   * (notably `createdBy`, the issuing officer) for callers that need more
+   * than the narrow public `CapabilityTokenVerification` contract shape —
+   * e.g. attributing a publicly-submitted `Prospect.createdBy` to the
+   * officer who opened that guest-registration channel.
+   */
+  async findValid(
+    rawToken: string,
+  ): Promise<{ id: string; meetingId: string; purpose: string; createdBy: string } | null> {
+    const row = await this.tokens.findByHash(hashToken(rawToken));
+    if (!row || row.revokedAt || row.expiresAt < new Date()) return null;
+    return { id: row.id, meetingId: row.meetingId, purpose: row.purpose, createdBy: row.createdBy };
+  }
 }

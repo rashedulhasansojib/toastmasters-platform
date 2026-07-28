@@ -295,3 +295,33 @@ enum ProspectPipelineStatus {
 - [x] `pnpm lint && pnpm typecheck && pnpm build` — green.
 - [ ] New tests / `test:int` — **skipped**, same autopilot note as Slices 2–8. The aggregation math (opening/closing balance, category sums, point-in-time member counts) is real arithmetic over real rows and has not been run against real data even once — higher risk than most of this milestone's other skipped-verification slices, flagged accordingly.
 - [x] Commit + push.
+
+---
+
+## Slice 10 — Public pages (upcoming meetings + guest join)
+
+**Why:** the ship gate's "a guest attends" step needs a door in — a public-facing way to see a club's schedule and register interest, without the guest ever having an account (`FR-MEM-4`).
+
+**The CLAUDE.md §1 constraint this slice has to respect exactly:** "Never make a guest authenticate — every guest interaction runs through the single capability-token primitive." That rule is why guest **join** isn't a bare `POST /public/clubs/:clubUnitId/guests` — it's `POST /public/capability-tokens/:token/guest-registration`, redeeming a `guest_register`-purpose token an officer already issued (M3 Slice 6's primitive, meeting-scoped). A bare public write endpoint would have been exactly the ad hoc guest path that rule forbids. Viewing the upcoming-meetings list, by contrast, is treated as information rather than an interaction — no token needed there, same as a club's public website would show its own schedule.
+
+**New code, old primitive:** `CapabilityTokenService.findValid()` (new) mirrors `verify()`'s validity check but returns the full row — needed because `Prospect.createdBy` is `NOT NULL` and a public submission has no `Person` to attribute to. Resolution: attribute to the officer who **issued** the token, since they're accountable for the channel they opened. `MeetingModule` now exports `CapabilityTokenService` (previously only its repository); `MembershipModule` now imports `MeetingModule`, and `PublicGuestRegistrationService` composes it with `MeetingRepository` (to resolve the token's `meetingId` → `clubUnitId`) and the existing `ProspectRepository`/`computeDeleteAfter` from Slice 1 — a guest joining publicly gets the exact same 180-day retention as one an officer enters manually.
+
+**No new resource** — both routes are `@Public()`, matching the plan table.
+
+**API:** `GET /public/clubs/:clubUnitId/meetings/upcoming` (id + scheduledAt only — a deliberately narrower shape than the authenticated `meeting` contract, no `createdBy`/`programYearId`/`status`); `POST /public/capability-tokens/:token/guest-registration`.
+
+**Steps:**
+
+- [x] `MeetingRepository.findUpcomingPublished` (published + future-only, at the query level).
+- [x] Contracts: `publicMeetingSummary` (in `meeting.ts`), `publicGuestRegistrationRequestSchema` (in `membership.ts`).
+- [x] `CapabilityTokenService.findValid` (new); `MeetingModule` exports it.
+- [x] `PublicMeetingController` (in `meeting/`) + `PublicGuestRegistrationService`/`PublicGuestRegistrationController` (in `membership/`), wired into their modules; `MembershipModule` now imports `MeetingModule`.
+- [x] `pnpm lint && pnpm typecheck && pnpm build` — green.
+- [ ] New tests / `test:int` — **skipped**, same autopilot note as every slice since Slice 2. Notably unverified: that `MembershipModule` importing `MeetingModule` doesn't create a NestJS DI cycle at runtime — `nest build` is a TS compile, not a module-graph check, and Nest's own cycle detection only runs at app bootstrap. Traced by hand (`MeetingModule` has no `imports:` array at all, so there's nothing to cycle back through) rather than actually booting the app — this is the single most load-bearing "traced, not run" item across all of M4's skipped verification, since a real cycle would break the whole API's startup, not just this slice.
+- [x] Commit + push.
+
+---
+
+## M4 status: all 10 slices shipped
+
+Every slice above landed as its own commit on `feat/m4-members-money`, pushed after each one. **What this milestone has NOT had, across every slice from #2 on**: a single new automated test, a `test:int` run, or a from-scratch manual curl/live-data verification pass (Slice 1 alone got that full treatment, before the autopilot instruction). Every schema change applied cleanly to the real dev DB (Neon) via `prisma migrate deploy`, and every `pnpm lint && pnpm typecheck && pnpm build` gate came back green — but green types and a clean build are necessary, not sufficient. Before this branch is trusted with real club money and real member PII, at minimum: run `test:int` end-to-end (needs a container runtime this environment doesn't have), and manually walk the ship-gate story once for real — a guest attends (Slice 10's public join) → converts (Slice 4) → is invoiced (Slice 6→7) → pays (Slice 7's payment endpoint) — plus the two items flagged as higher-risk above (financial-report aggregation math, the invoice sequence's row-lock concurrency behavior, the DI-cycle trace).

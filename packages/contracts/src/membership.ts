@@ -87,6 +87,24 @@ export const createProspectVisitRequestSchema = z
   .strict();
 export type CreateProspectVisitRequest = z.infer<typeof createProspectVisitRequestSchema>;
 
+/**
+ * M4 Slice 10: the public guest-join form. CLAUDE.md §1: "Never make a
+ * guest authenticate — every guest interaction runs through the single
+ * capability-token primitive." This is why this endpoint takes a token
+ * (issued by an officer with purpose `guest_register`, meeting-scoped) and
+ * not a bare `clubUnitId` — a fully open, unauthenticated write endpoint
+ * would be exactly the ad hoc guest path that rule forbids.
+ */
+export const publicGuestRegistrationRequestSchema = z
+  .object({
+    fullName: z.string().min(1),
+    email: z.email().optional(),
+    phone: z.string().min(1).optional(),
+    whatsapp: z.string().min(1).optional(),
+  })
+  .strict();
+export type PublicGuestRegistrationRequest = z.infer<typeof publicGuestRegistrationRequestSchema>;
+
 export const prospectCommunicationChannel = z.enum([
   'call',
   'message',

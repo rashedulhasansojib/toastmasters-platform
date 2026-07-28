@@ -25,6 +25,7 @@ import { BallotRepository } from './ballot.repository';
 import { BallotController } from './ballot.controller';
 import { MeetingLifecycleRepository } from './meeting-lifecycle.repository';
 import { AgendaPrintController } from './agenda-print.controller';
+import { PublicMeetingController } from './public-meeting.controller';
 
 @Module({
   providers: [
@@ -55,7 +56,8 @@ import { AgendaPrintController } from './agenda-print.controller';
     AgendaTemplateController,
     BallotController,
     AgendaPrintController,
+    PublicMeetingController,
   ],
-  exports: [MeetingRepository, CapabilityTokenRepository],
+  exports: [MeetingRepository, CapabilityTokenRepository, CapabilityTokenService],
 })
 export class MeetingModule {}

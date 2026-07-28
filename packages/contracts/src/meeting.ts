@@ -19,6 +19,13 @@ export const meeting = z.object({
 });
 export type Meeting = z.infer<typeof meeting>;
 
+/** M4 Slice 10: the public page's shape — deliberately narrower than `meeting`, no `createdBy`/`programYearId`/`status` (status is always 'published' by construction of the query that produces this). */
+export const publicMeetingSummary = z.object({
+  id: z.uuid(),
+  scheduledAt: z.iso.datetime(),
+});
+export type PublicMeetingSummary = z.infer<typeof publicMeetingSummary>;
+
 export const createMeetingRequestSchema = z
   .object({
     programYearId: z.string().min(1),

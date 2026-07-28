@@ -51,4 +51,13 @@ export class MeetingRepository {
     });
     return rows.map(toMeeting);
   }
+
+  /** M4 Slice 10: the public page's feed — published and still in the future only, never draft/in_progress/closed/cancelled internals. */
+  async findUpcomingPublished(clubUnitId: string): Promise<Meeting[]> {
+    const rows = await this.db.meeting.findMany({
+      where: { clubUnitId, status: 'published', scheduledAt: { gte: new Date() } },
+      orderBy: { scheduledAt: 'asc' },
+    });
+    return rows.map(toMeeting);
+  }
 }

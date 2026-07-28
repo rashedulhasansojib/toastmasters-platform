@@ -9,11 +9,26 @@
 **Tech Stack:** NestJS 11 (api), Prisma 7 + `@prisma/adapter-pg` (packages/db), Postgres + `ltree`, Redis/BullMQ (permission cache), Zod 4 (packages/contracts), Vitest 4 + Testcontainers 12, Argon2id + `jose` (sessions).
 
 > **Scope note.** This is the M1 milestone plan. It is delivered as ordered
-> **slices** (§ "Slice roadmap"). Slices 0–2 below are fully detailed and
+> **slices** (§ "Slice roadmap"). Slices 0–3 below are fully detailed and
 > execution-ready. Each later slice is expanded to the same bite-sized TDD depth
 > just before it is executed, so its code is written against a proven foundation
 > rather than guessed. This matches roadmap.md §7 ("plans are living documents;
 > each is a checklist of slices").
+>
+> **Migration-apply correction (learned during Slice 2).** Steps that say
+> "apply the migration" in Slices 0–2 use `prisma migrate dev --name <x>`
+> (without `--create-only`) for the apply step. That is unsafe from Slice 2
+> onward: `OrgUnit.path` is `Unsupported("ltree")`, so Prisma's schema-diff
+> engine cannot see the hand-written ltree indexes (§ Slice 1 Step 3) and
+> treats them as drift — a second, unreviewed `migrate dev` invocation will
+> silently generate and apply a migration that **drops them**. This happened
+> once already and was recovered with `migrate reset` (destructive, dev-only,
+> required explicit user consent under Prisma's own AI-agent guard). From
+> Slice 3 onward, apply with **`prisma migrate deploy`** instead — it replays
+> committed migration files verbatim with no diffing, so it cannot generate a
+> corrective migration. Sequence: `migrate dev --create-only --name <x>` →
+> hand-review the generated SQL (strip any spurious `DROP INDEX` on
+> ltree-adjacent objects) → `migrate deploy` to apply.
 
 ---
 
@@ -1311,9 +1326,531 @@ git commit -m "feat(identity): person, club membership and role assignment"
 
 ---
 
-## Slices 3–10
+## Slice 3 — RBAC vocabulary + templates (seed)
 
-Each is expanded to Slice 0/1/2 depth (files, interfaces, bite-sized TDD steps with full code) immediately before it is executed, against the now-proven foundation. Their deliverables, dependencies, and ship criteria are fixed in the roadmap table above; the canonical schema and algorithms they implement are `rbac-design.md` §3–§9 and `system-design.md` §5–§7, and the design decisions specific to this deployment are in `docs/superpowers/specs/2026-07-28-platform-tier-super-admin-design.md`.
+**Why:** `authorize()` (already built and unit-tested in `common/authz`) evaluates `Grant[]`, but `AuthzService.effectiveGrants()` deliberately returns `[]` today because no vocabulary or templates exist to resolve against. Slice 4 wires real resolution; before it can, the vocabulary itself — what resources/actions/conditions exist, and what each role template grants — has to exist as seeded, editable-without-a-deploy data (`rbac-design.md` §2–§3, §6 table row 1: "Resource catalogue — Engineering — Per release — Migration + seed").
+
+**Scoping decision.** `system-design.md` §7.5–§7.6 specifies the _full_ production permission matrix (~13 domain roles × ~30 resources). Seeding all of it now would be guessing ahead of the code that uses it — CLAUDE.md's placement rule is that a resource's seed lands "in the same commit" as the code that first needs it. This slice seeds only what Slices 2 (already built), 4, and 9 actually exercise: a **starter** set of 7 resources and 4 club-tier role templates, matching the relevant rows of the §7.5 matrix exactly (not invented), plus the three platform-role templates the ship criteria name. More resources/roles arrive incrementally, same-commit-as-first-use, in later slices — this is not the Slice 10 matrix.
+
+**Open question for Slice 9, flagged not resolved here.** The roadmap's Slice 9 one-liner ("President assigns a VPE") could plausibly hit either `meeting.role` (the §7.5 "Meeting role assignment" row — which the matrix actually gives to the **VPE**, not the President) or `identity.role_assignment` (the "Officer roster" row, which the matrix gives to the **President**, matching the ship-gate narrative). This slice seeds both resources with matrix-accurate grants and does not privilege one reading over the other — Slice 9 decides which route it builds.
+
+**Files:**
+
+- Modify: `packages/db/prisma/schema.prisma` (add `ResourceCatalog`, `RoleTemplate`, `RoleTemplateGrant` models + `ResourceSensitivity`, `PermissionAction`, `PermissionCondition`, `PermissionEffect`, `RoleTemplateTier`, `RoleTemplateScopeRule` enums)
+- Create: `packages/db/prisma/migrations/<ts>_access_vocabulary/migration.sql` (generated via `--create-only`; no ltree-adjacent objects touched, so no hand-edit is expected — review anyway)
+- Create: `packages/db/src/seed.ts` (`seedAccessVocabulary(db)` — the idempotent upsert logic, fully typechecked/linted as part of the package's normal `src/`)
+- Create: `packages/db/prisma/seed.ts` (thin CLI entrypoint `prisma db seed` invokes; deliberately trivial — see the typecheck-coverage note in Step 5)
+- Modify: `packages/db/src/index.ts` (export `seedAccessVocabulary`)
+- Modify: `packages/db/prisma.config.ts` (add `migrations.seed`)
+- Modify: `packages/db/package.json` (add `"seed": "prisma db seed"`)
+- Modify: root `package.json` (add `"db:seed": "pnpm --filter @toastmasters/db seed"`, per the CLAUDE.md §9 command list)
+- Create: `apps/api/test/integration/access.seed.int-spec.ts`
+
+**Interfaces:**
+
+- Consumes: `startTestDb()` (Slice 0). No dependency on the Slice 1/2 repositories — this slice touches no `org_unit`/`person` rows, only the vocabulary tables.
+- Produces: `seedAccessVocabulary(db: PrismaClient): Promise<void>` (`@toastmasters/db`) — upserts (never inserts blindly), safe to run any number of times. No HTTP endpoint and no `packages/contracts` DTOs yet — there is no route serving this data until Slice 7 (access inspector) or an admin UI; adding Zod contracts now would be modelling a boundary that doesn't exist.
+- Seeded resources (`resource_catalog`): `identity.role_assignment`, `meeting.meeting`, `meeting.role` (`sensitivity: normal`); `finance.ledger`, `education.evaluation`, `membership.health_signal`, `platform.audit` (`sensitivity: restricted` — the four named in `rbac-design.md` §2.1 and this slice's own ship criteria).
+- Seeded role templates (`role_template` + `role_template_grant`), grants transcribed verbatim from `system-design.md` §7.5:
+  - `club_president` (`tier: club`, `scope_rule: self_unit`, singleton): `meeting.meeting:read`, `meeting.role:read`, `finance.ledger:read`, `identity.role_assignment:create`, `identity.role_assignment:update` — all `condition: any`.
+  - `club_vpe` (`tier: club`, singleton): `meeting.meeting:update`, `meeting.role:update`, `identity.role_assignment:read` — `any`. No `finance.ledger` grant — the matrix gives VPE `—` on ledger.
+  - `club_treasurer` (`tier: club`, singleton): `finance.ledger:read/create/update`, `meeting.meeting:read`, `identity.role_assignment:read` — `any`.
+  - `club_member` (`tier: club`, not singleton): `meeting.meeting:read`, `meeting.role:read`, `identity.role_assignment:read` (`any`); `finance.ledger:read` (`condition: own` — matrix: "R (own only)").
+  - `system_admin`, `unit_admin`, `support_readonly` (`tier: platform`, `unit_types: []`): templates only, **zero grants** — what a platform role actually grants is Slice 4's resolution algorithm plus Slice 6's break-glass divergence, not seed data guessed at now.
+
+- [ ] **Step 1: Add the Prisma models**
+
+In `packages/db/prisma/schema.prisma`, append:
+
+```prisma
+enum ResourceSensitivity {
+  normal
+  sensitive
+  restricted
+}
+
+enum PermissionAction {
+  read
+  create
+  update
+  delete
+  approve
+  export
+}
+
+enum PermissionCondition {
+  any
+  own
+  assigned
+  party
+  published
+}
+
+enum PermissionEffect {
+  allow
+  deny
+}
+
+model ResourceCatalog {
+  resource       String              @id
+  context        String
+  label          String
+  description    String?
+  allowedActions PermissionAction[]  @map("allowed_actions")
+  clubScoped     Boolean             @default(true) @map("club_scoped")
+  sensitivity    ResourceSensitivity @default(normal)
+
+  grants RoleTemplateGrant[]
+
+  @@map("resource_catalog")
+}
+
+enum RoleTemplateTier {
+  club
+  area
+  division
+  district
+  platform
+}
+
+enum RoleTemplateScopeRule {
+  self_unit
+  self_subtree
+}
+
+model RoleTemplate {
+  role        String                @id
+  tier        RoleTemplateTier
+  unitTypes   OrgUnitType[]         @map("unit_types")
+  scopeRule   RoleTemplateScopeRule @default(self_unit) @map("scope_rule")
+  isSingleton Boolean               @default(true) @map("is_singleton")
+  isSystem    Boolean               @default(false) @map("is_system")
+  label       String
+
+  grants RoleTemplateGrant[]
+
+  @@map("role_template")
+}
+
+model RoleTemplateGrant {
+  role         String
+  roleTemplate RoleTemplate        @relation(fields: [role], references: [role], onDelete: Cascade)
+  resource     String
+  resourceRef  ResourceCatalog     @relation(fields: [resource], references: [resource])
+  action       PermissionAction
+  condition    PermissionCondition @default(any)
+  effect       PermissionEffect    @default(allow)
+  fields       String[]            @default([])
+
+  @@id([role, resource, action, condition])
+  @@map("role_template_grant")
+}
+```
+
+- [ ] **Step 2: Generate the migration, review, apply with `migrate deploy`**
+
+Run: `pnpm --filter @toastmasters/db exec prisma migrate dev --create-only --name access_vocabulary`
+Review the generated SQL — this migration adds new tables/enums only and touches nothing ltree-adjacent, so no `DROP INDEX` should appear. If one does, remove it (see the migration-apply correction note above) before applying.
+
+Then run: `pnpm --filter @toastmasters/db exec prisma migrate deploy`
+Expected: applies cleanly; run `pnpm --filter @toastmasters/db exec prisma generate` afterward to regenerate the client.
+
+- [ ] **Step 3: Write the failing integration test**
+
+Create `apps/api/test/integration/access.seed.int-spec.ts`:
+
+```ts
+import { describe, it, beforeAll, afterAll, expect } from 'vitest';
+import type { PrismaClient } from '@toastmasters/db';
+import { seedAccessVocabulary } from '@toastmasters/db';
+import { startTestDb } from '../support/test-db';
+
+describe('seedAccessVocabulary (integration)', () => {
+  let db: PrismaClient;
+  let stop: () => Promise<void>;
+
+  beforeAll(async () => {
+    ({ db, stop } = await startTestDb());
+  });
+  afterAll(async () => {
+    await stop();
+  });
+
+  it('is idempotent — running it twice produces no duplicates and no errors', async () => {
+    await seedAccessVocabulary(db);
+    await seedAccessVocabulary(db);
+
+    const resourceCount = await db.resourceCatalog.count();
+    expect(resourceCount).toBe(7);
+  });
+
+  it('marks exactly the four canonical resources as restricted', async () => {
+    const restricted = await db.resourceCatalog.findMany({
+      where: { sensitivity: 'restricted' },
+      orderBy: { resource: 'asc' },
+    });
+    expect(restricted.map((r) => r.resource)).toEqual([
+      'education.evaluation',
+      'finance.ledger',
+      'membership.health_signal',
+      'platform.audit',
+    ]);
+  });
+
+  it('seeds the three platform roles', async () => {
+    const platformRoles = await db.roleTemplate.findMany({
+      where: { tier: 'platform' },
+      orderBy: { role: 'asc' },
+    });
+    expect(platformRoles.map((r) => r.role)).toEqual([
+      'support_readonly',
+      'system_admin',
+      'unit_admin',
+    ]);
+  });
+
+  it('grants club_treasurer read access to finance.ledger, and gives club_vpe none', async () => {
+    const treasurerGrant = await db.roleTemplateGrant.findUnique({
+      where: {
+        role_resource_action_condition: {
+          role: 'club_treasurer',
+          resource: 'finance.ledger',
+          action: 'read',
+          condition: 'any',
+        },
+      },
+    });
+    expect(treasurerGrant?.effect).toBe('allow');
+
+    const vpeGrants = await db.roleTemplateGrant.findMany({
+      where: { role: 'club_vpe', resource: 'finance.ledger' },
+    });
+    expect(vpeGrants).toHaveLength(0);
+  });
+});
+```
+
+- [ ] **Step 4: Run it to verify it fails**
+
+Run: `pnpm --filter @toastmasters/api test:int -- access.seed`
+Expected: FAIL — `seedAccessVocabulary` is not exported from `@toastmasters/db`.
+
+- [ ] **Step 5: Implement `seedAccessVocabulary`**
+
+Create `packages/db/src/seed.ts`. This is the only file with real logic — `prisma/seed.ts` (Step 6) is a thin, deliberately trivial wrapper, because it lives outside `src/` (`tsconfig.json`'s `rootDir: "src"` excludes `prisma/`, so nothing there is covered by `pnpm typecheck`) and is executed directly by `tsx`, not compiled.
+
+```ts
+import type {
+  PermissionAction,
+  PermissionCondition,
+  PrismaClient,
+  ResourceSensitivity,
+  RoleTemplateScopeRule,
+  RoleTemplateTier,
+} from './generated/prisma/client';
+
+interface ResourceSeed {
+  resource: string;
+  context: string;
+  label: string;
+  allowedActions: PermissionAction[];
+  clubScoped: boolean;
+  sensitivity: ResourceSensitivity;
+}
+
+interface GrantSeed {
+  resource: string;
+  action: PermissionAction;
+  condition?: PermissionCondition;
+}
+
+interface RoleTemplateSeed {
+  role: string;
+  tier: RoleTemplateTier;
+  unitTypes: string[];
+  scopeRule: RoleTemplateScopeRule;
+  isSingleton: boolean;
+  label: string;
+  grants: GrantSeed[];
+}
+
+const RESOURCES: ResourceSeed[] = [
+  {
+    resource: 'identity.role_assignment',
+    context: 'identity',
+    label: 'Officer role assignment',
+    allowedActions: ['read', 'create', 'update'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
+  {
+    resource: 'meeting.meeting',
+    context: 'meeting',
+    label: 'Meeting',
+    allowedActions: ['read', 'update'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
+  {
+    resource: 'meeting.role',
+    context: 'meeting',
+    label: 'Meeting role assignment',
+    allowedActions: ['read', 'update'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
+  {
+    resource: 'finance.ledger',
+    context: 'finance',
+    label: 'Club ledger',
+    allowedActions: ['read', 'create', 'update'],
+    clubScoped: true,
+    sensitivity: 'restricted',
+  },
+  {
+    resource: 'education.evaluation',
+    context: 'education',
+    label: 'Speech evaluation',
+    allowedActions: ['read', 'create', 'update'],
+    clubScoped: true,
+    sensitivity: 'restricted',
+  },
+  {
+    resource: 'membership.health_signal',
+    context: 'membership',
+    label: 'Member health signal',
+    allowedActions: ['read'],
+    clubScoped: true,
+    sensitivity: 'restricted',
+  },
+  {
+    resource: 'platform.audit',
+    context: 'platform',
+    label: 'Audit trail',
+    allowedActions: ['read'],
+    clubScoped: false,
+    sensitivity: 'restricted',
+  },
+];
+
+// Grants transcribed verbatim from system-design.md §7.5 for the resources
+// seeded above. Not the full matrix — see the Slice 3 plan's scoping note.
+const ROLE_TEMPLATES: RoleTemplateSeed[] = [
+  {
+    role: 'club_president',
+    tier: 'club',
+    unitTypes: ['club'],
+    scopeRule: 'self_unit',
+    isSingleton: true,
+    label: 'Club President',
+    grants: [
+      { resource: 'meeting.meeting', action: 'read' },
+      { resource: 'meeting.role', action: 'read' },
+      { resource: 'finance.ledger', action: 'read' },
+      { resource: 'identity.role_assignment', action: 'create' },
+      { resource: 'identity.role_assignment', action: 'update' },
+    ],
+  },
+  {
+    role: 'club_vpe',
+    tier: 'club',
+    unitTypes: ['club'],
+    scopeRule: 'self_unit',
+    isSingleton: true,
+    label: 'Vice President Education',
+    grants: [
+      { resource: 'meeting.meeting', action: 'update' },
+      { resource: 'meeting.role', action: 'update' },
+      { resource: 'identity.role_assignment', action: 'read' },
+    ],
+  },
+  {
+    role: 'club_treasurer',
+    tier: 'club',
+    unitTypes: ['club'],
+    scopeRule: 'self_unit',
+    isSingleton: true,
+    label: 'Treasurer',
+    grants: [
+      { resource: 'finance.ledger', action: 'read' },
+      { resource: 'finance.ledger', action: 'create' },
+      { resource: 'finance.ledger', action: 'update' },
+      { resource: 'meeting.meeting', action: 'read' },
+      { resource: 'identity.role_assignment', action: 'read' },
+    ],
+  },
+  {
+    role: 'club_member',
+    tier: 'club',
+    unitTypes: ['club'],
+    scopeRule: 'self_unit',
+    isSingleton: false,
+    label: 'Member',
+    grants: [
+      { resource: 'meeting.meeting', action: 'read' },
+      { resource: 'meeting.role', action: 'read' },
+      { resource: 'identity.role_assignment', action: 'read' },
+      { resource: 'finance.ledger', action: 'read', condition: 'own' },
+    ],
+  },
+  // Platform roles: tier 'platform', not bound to a unit type. Zero grants —
+  // see the Slice 3 plan's note on why these are deferred to Slices 4/6.
+  {
+    role: 'system_admin',
+    tier: 'platform',
+    unitTypes: [],
+    scopeRule: 'self_subtree',
+    isSingleton: false,
+    label: 'System Administrator',
+    grants: [],
+  },
+  {
+    role: 'unit_admin',
+    tier: 'platform',
+    unitTypes: [],
+    scopeRule: 'self_unit',
+    isSingleton: false,
+    label: 'Unit Administrator',
+    grants: [],
+  },
+  {
+    role: 'support_readonly',
+    tier: 'platform',
+    unitTypes: [],
+    scopeRule: 'self_subtree',
+    isSingleton: false,
+    label: 'Support (read-only)',
+    grants: [],
+  },
+];
+
+export async function seedAccessVocabulary(db: PrismaClient): Promise<void> {
+  for (const r of RESOURCES) {
+    await db.resourceCatalog.upsert({
+      where: { resource: r.resource },
+      create: r,
+      update: r,
+    });
+  }
+
+  for (const t of ROLE_TEMPLATES) {
+    await db.roleTemplate.upsert({
+      where: { role: t.role },
+      create: {
+        role: t.role,
+        tier: t.tier,
+        unitTypes: t.unitTypes as never,
+        scopeRule: t.scopeRule,
+        isSingleton: t.isSingleton,
+        isSystem: true,
+        label: t.label,
+      },
+      update: {
+        tier: t.tier,
+        unitTypes: t.unitTypes as never,
+        scopeRule: t.scopeRule,
+        isSingleton: t.isSingleton,
+        label: t.label,
+      },
+    });
+
+    for (const g of t.grants) {
+      const condition = g.condition ?? 'any';
+      await db.roleTemplateGrant.upsert({
+        where: {
+          role_resource_action_condition: {
+            role: t.role,
+            resource: g.resource,
+            action: g.action,
+            condition,
+          },
+        },
+        create: {
+          role: t.role,
+          resource: g.resource,
+          action: g.action,
+          condition,
+          effect: 'allow',
+        },
+        update: { effect: 'allow' },
+      });
+    }
+  }
+}
+```
+
+Add to `packages/db/src/index.ts`:
+
+```ts
+export { seedAccessVocabulary } from './seed';
+```
+
+- [ ] **Step 6: Add the thin seed CLI entrypoint and wire it up**
+
+Create `packages/db/prisma/seed.ts`:
+
+```ts
+import { createPrismaClient } from '../src/client';
+import { seedAccessVocabulary } from '../src/seed';
+
+async function main(): Promise<void> {
+  const db = createPrismaClient();
+  await seedAccessVocabulary(db);
+  await db.$disconnect();
+}
+
+void main();
+```
+
+In `packages/db/prisma.config.ts`, add a `seed` command to the `migrations` block:
+
+```ts
+export default defineConfig({
+  schema: 'prisma/schema.prisma',
+  migrations: {
+    path: 'prisma/migrations',
+    seed: 'tsx prisma/seed.ts',
+  },
+  // ...unchanged datasource block
+});
+```
+
+In `packages/db/package.json`, add to `scripts`:
+
+```json
+"seed": "prisma db seed",
+```
+
+In the root `package.json`, add to `scripts` (next to the other `db:*` entries):
+
+```json
+"db:seed": "pnpm --filter @toastmasters/db seed",
+```
+
+- [ ] **Step 7: Run it to verify it passes**
+
+Run: `pnpm --filter @toastmasters/api test:int -- access.seed`
+Expected: PASS (all four tests).
+
+Then confirm the CLI path independently: `pnpm db:seed` against a real dev database, run twice in a row, both times exiting 0.
+
+- [ ] **Step 8: Verify the wider gate is still green**
+
+Run: `pnpm --filter @toastmasters/db build && pnpm --filter @toastmasters/db lint && pnpm --filter @toastmasters/api test:int`
+Expected: no errors; all integration tests (harness, org, identity, access) pass.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add packages/db/prisma/schema.prisma packages/db/prisma/migrations packages/db/prisma/seed.ts packages/db/prisma.config.ts packages/db/src/seed.ts packages/db/src/index.ts packages/db/package.json package.json apps/api/test/integration/access.seed.int-spec.ts
+git commit -m "feat(access): seed rbac vocabulary and starter role templates"
+```
+
+---
+
+## Slices 4–10
+
+Each is expanded to Slice 0/1/2/3 depth (files, interfaces, bite-sized TDD steps with full code) immediately before it is executed, against the now-proven foundation. Their deliverables, dependencies, and ship criteria are fixed in the roadmap table above; the canonical schema and algorithms they implement are `rbac-design.md` §3–§9 and `system-design.md` §5–§7, and the design decisions specific to this deployment are in `docs/superpowers/specs/2026-07-28-platform-tier-super-admin-design.md`.
 
 **Self-review (this plan vs the spec):**
 

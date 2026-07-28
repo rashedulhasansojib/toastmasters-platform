@@ -719,7 +719,7 @@ create(input: {
 
 **TDD steps:**
 
-- [ ] **Step 1: Seed — `access.unit_policy` resource + `unit_admin` grant**
+- [x] **Step 1: Seed — `access.unit_policy` resource + `unit_admin` grant**
 
   Red — extend `access.seed.int-spec.ts`: `access.unit_policy`'s `allowedActions` includes `create`; `unit_admin`'s grants include it.
 
@@ -740,7 +740,7 @@ create(input: {
 
   Rerun — green. Also rerun `authorization-matrix.int-spec.ts` unchanged.
 
-- [ ] **Step 2: `GrantAdminRepository.createUnitPolicyGrant` — `expiresAt` + mapped return**
+- [x] **Step 2: `GrantAdminRepository.createUnitPolicyGrant` — `expiresAt` + mapped return**
 
   Red (`access-delegation.int-spec.ts` addition): `createUnitPolicyGrant` accepts `expiresAt`; the returned shape carries no raw Prisma internals and its `expiresAt` round-trips as an ISO string; omitting `expiresAt` yields `null`.
 
@@ -748,7 +748,7 @@ create(input: {
 
   Rerun — green, including the pre-existing "a unit-policy deny beats a role-template allow" test unchanged (it never asserted on the return shape).
 
-- [ ] **Step 3: `UnitPolicyService` — the delegation check + the last-admin guard**
+- [x] **Step 3: `UnitPolicyService` — the delegation check + the last-admin guard**
 
   Red (`unit-policy.service.spec.ts`, mocked `GrantAdminRepository`/`AccessRepository`): an `allow` override succeeds when the actor holds that `resource:action` at the target scope; an `allow` override is rejected with `ForbiddenException`, and the repository is never called, when the actor does not; a `deny` override succeeds **even when the actor holds nothing on that resource at all** (the exemption this slice decided); a `deny` override whose `subjectRole` is `unit_admin` targeting `access.unit_policy:create` is rejected when it would leave zero other `unit_admin` platform-role holders at that exact unit, and succeeds when at least one other remains; a `deny` override with any other `subjectRole`/`resource`/`action` combination is never subject to the last-admin check at all.
 
@@ -760,7 +760,6 @@ create(input: {
     constructor(
       private readonly grantAdmin: GrantAdminRepository,
       private readonly accessRepository: AccessRepository,
-      @Inject(PRISMA_CLIENT) private readonly db: PrismaClient = getPrisma(),
     ) {}
 
     async create(input: {
@@ -791,26 +790,31 @@ create(input: {
         input.resource === 'access.unit_policy' &&
         input.action === 'create'
       ) {
-        const remaining = await this.db.platformRoleAssignment.count({
-          where: {
-            role: 'unit_admin',
-            orgUnitId: input.orgUnitId,
-            OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-          },
-        });
+        const remaining = await this.grantAdmin.countActiveUnitAdmins(input.orgUnitId);
         if (remaining <= 1) {
           throw new ForbiddenException('Cannot remove the last unit_admin for this unit');
         }
       }
 
-      return this.grantAdmin.createUnitPolicyGrant(input);
+      return this.grantAdmin.createUnitPolicyGrant({
+        orgUnitId: input.orgUnitId,
+        subjectRole: input.subjectRole,
+        resource: input.resource,
+        action: input.action,
+        effect: input.effect,
+        createdBy: input.actorId,
+        reason: input.reason,
+        expiresAt: input.expiresAt,
+      });
     }
   }
   ```
 
+  **Caught by the lint gate, not the red/green cycle:** the first draft injected `PRISMA_CLIENT` directly into the service to run the last-admin count query — `pnpm lint`'s `no-restricted-imports` rule ("PrismaClient belongs in `*.repository.ts`") failed it immediately. Fixed by adding `GrantAdminRepository.countActiveUnitAdmins(orgUnitId)` — the same row-count query `revokePlatformRole` already runs, extracted so both call sites share it — and having the service call that instead of touching Prisma itself. A reminder that `pnpm lint` is as load-bearing a check as the tests themselves for this codebase's module boundaries.
+
   Rerun — green.
 
-- [ ] **Step 4: `UnitPolicyController` + module wiring**
+- [x] **Step 4: `UnitPolicyController` + module wiring**
 
   Red — folded into Step 5's end-to-end tests, per the established precedent.
 
@@ -843,7 +847,7 @@ create(input: {
 
   Rerun — green. Rerun `identity-module-boot.int-spec.ts` (unaffected, but cheap insurance against a DI surprise, per the pattern that's twice caught a real cycle already).
 
-- [ ] **Step 5: End-to-end HTTP tests**
+- [x] **Step 5: End-to-end HTTP tests**
 
   Red (`unit-policy-http.int-spec.ts`, real Postgres + Redis, real `AppModule`, `jose`-minted JWTs):
 
@@ -857,7 +861,7 @@ create(input: {
 
   Rerun — green. Then the full gate: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`, plus `pnpm test:int`.
 
-- [ ] **Step 6: Authorisation-matrix update**
+- [x] **Step 6: Authorisation-matrix update**
 
   Red — add `{ resource: 'access.unit_policy', actions: ['create'] }` to `authorization-matrix.int-spec.ts`'s `RESOURCE_ACTIONS`.
 
@@ -865,7 +869,7 @@ create(input: {
 
   Rerun — green, full matrix suite.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/db/src/seed.ts packages/contracts/src/access.ts apps/api/src/modules/access apps/api/test/integration/access-delegation.int-spec.ts apps/api/test/integration/unit-policy-http.int-spec.ts apps/api/test/integration/authorization-matrix.int-spec.ts apps/api/test/integration/access.seed.int-spec.ts

@@ -19,7 +19,7 @@ describe('seedAccessVocabulary (integration)', () => {
     await seedAccessVocabulary(db);
 
     const resourceCount = await db.resourceCatalog.count();
-    expect(resourceCount).toBe(9);
+    expect(resourceCount).toBe(10);
   });
 
   it('marks exactly the four canonical resources as restricted', async () => {
@@ -156,5 +156,24 @@ describe('seedAccessVocabulary (integration)', () => {
       });
       expect(grant?.effect).toBe('allow');
     }
+  });
+
+  it('gives unit_admin access.unit_policy create — the unit policy override surface (FR-AUTHZ-9)', async () => {
+    const policyResource = await db.resourceCatalog.findUnique({
+      where: { resource: 'access.unit_policy' },
+    });
+    expect(policyResource?.allowedActions).toContain('create');
+
+    const grant = await db.roleTemplateGrant.findUnique({
+      where: {
+        role_resource_action_condition: {
+          role: 'unit_admin',
+          resource: 'access.unit_policy',
+          action: 'create',
+          condition: 'any',
+        },
+      },
+    });
+    expect(grant?.effect).toBe('allow');
   });
 });

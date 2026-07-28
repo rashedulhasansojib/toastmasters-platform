@@ -105,6 +105,14 @@ const RESOURCES: ResourceSeed[] = [
     clubScoped: false, // spans every tier: region, district, division, area, club
     sensitivity: 'normal',
   },
+  {
+    resource: 'access.unit_policy',
+    context: 'access',
+    label: 'Unit policy override',
+    allowedActions: ['create'],
+    clubScoped: false,
+    sensitivity: 'normal',
+  },
 ];
 
 // Grants transcribed verbatim from system-design.md §7.5 for the resources
@@ -194,6 +202,7 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'identity.role_assignment', action: 'create' },
       { resource: 'org.unit', action: 'create' },
       { resource: 'org.unit', action: 'update' },
+      { resource: 'access.unit_policy', action: 'create' },
     ],
   },
   {

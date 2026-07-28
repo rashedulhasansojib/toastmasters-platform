@@ -49,6 +49,34 @@ export const whoCanAccessQuerySchema = z.object({
 });
 export type WhoCanAccessQuery = z.infer<typeof whoCanAccessQuerySchema>;
 
+/** M2 Slice 3: a per-unit permission override (FR-AUTHZ-9/10). Role-subject only — see the Slice 3 plan's scoping note. */
+export const unitPolicyGrant = z.object({
+  id: z.uuid(),
+  orgUnitId: z.uuid(),
+  subjectRole: z.string().min(1),
+  resource: z.string().min(1),
+  action: permissionAction,
+  condition: permissionCondition,
+  effect: z.enum(['allow', 'deny']),
+  createdBy: z.uuid(),
+  createdAt: z.iso.datetime(),
+  reason: z.string().min(1),
+  expiresAt: z.iso.datetime().nullable(),
+});
+export type UnitPolicyGrant = z.infer<typeof unitPolicyGrant>;
+
+export const createUnitPolicyGrantRequestSchema = z
+  .object({
+    subjectRole: z.string().min(1),
+    resource: z.string().min(1),
+    action: permissionAction,
+    effect: z.enum(['allow', 'deny']),
+    reason: z.string().min(1),
+    expiresAt: z.iso.datetime().optional(),
+  })
+  .strict();
+export type CreateUnitPolicyGrantRequest = z.infer<typeof createUnitPolicyGrantRequestSchema>;
+
 export const accessHolderSchema = z.object({
   personId: z.uuid(),
   fullName: z.string(),

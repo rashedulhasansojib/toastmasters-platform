@@ -158,4 +158,38 @@ describe('Delegation and unit-policy overrides (integration)', () => {
     const after = await authz.authorize(request);
     expect(after.allowed).toBe(false);
   });
+
+  it('createUnitPolicyGrant accepts an expiresAt and returns a mapped shape with no raw Prisma internals', async () => {
+    const creator = await people.create({
+      email: 'policy-creator@example.com',
+      fullName: 'Creator',
+    });
+    const expiresAt = new Date('2026-12-31T00:00:00.000Z');
+
+    const withExpiry = await grantAdmin.createUnitPolicyGrant({
+      orgUnitId: clubId,
+      subjectRole: 'club_member',
+      resource: 'meeting.role',
+      action: 'update',
+      effect: 'allow',
+      createdBy: creator.id,
+      reason: 'temporary agenda-editing access',
+      expiresAt,
+    });
+    expect(withExpiry.expiresAt).toBe(expiresAt.toISOString());
+    expect(withExpiry.orgUnitId).toBe(clubId);
+    expect(withExpiry.createdAt).toEqual(expect.any(String));
+    expect((withExpiry as unknown as { org_unit_id?: string }).org_unit_id).toBeUndefined();
+
+    const withoutExpiry = await grantAdmin.createUnitPolicyGrant({
+      orgUnitId: clubId,
+      subjectRole: 'club_member',
+      resource: 'meeting.role',
+      action: 'update',
+      effect: 'allow',
+      createdBy: creator.id,
+      reason: 'standing agenda-editing access',
+    });
+    expect(withoutExpiry.expiresAt).toBeNull();
+  });
 });

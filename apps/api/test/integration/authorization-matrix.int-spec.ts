@@ -57,6 +57,7 @@ describe('Authorisation matrix (generated from role_template × resource_catalog
     { resource: 'platform.audit', actions: ['read'] },
     { resource: 'identity.invitation', actions: ['create'] },
     { resource: 'org.unit', actions: ['create', 'update'] },
+    { resource: 'access.unit_policy', actions: ['create'] },
   ];
 
   /**

@@ -1,5 +1,6 @@
 import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { getPrisma, type PrismaClient } from '@toastmasters/db';
+import type { UnitPolicyGrant } from '@toastmasters/contracts';
 import { canDelegate } from '../../common/authz/can-delegate';
 import type { Action, Condition } from '../../common/authz/authz.types';
 import { AccessRepository } from './access.repository';
@@ -12,6 +13,22 @@ type UnitPolicyGrantRow = Awaited<ReturnType<PrismaClient['unitPolicyGrant']['cr
 type PlatformRoleAssignmentRow = Awaited<
   ReturnType<PrismaClient['platformRoleAssignment']['create']>
 >;
+
+function toUnitPolicyGrant(row: UnitPolicyGrantRow): UnitPolicyGrant {
+  return {
+    id: row.id,
+    orgUnitId: row.orgUnitId,
+    subjectRole: row.subjectRole ?? '',
+    resource: row.resource,
+    action: row.action,
+    condition: row.condition,
+    effect: row.effect,
+    createdBy: row.createdBy,
+    createdAt: row.createdAt.toISOString(),
+    reason: row.reason,
+    expiresAt: row.expiresAt?.toISOString() ?? null,
+  };
+}
 
 @Injectable()
 export class GrantAdminRepository {
@@ -106,7 +123,12 @@ export class GrantAdminRepository {
     });
   }
 
-  /** Test-fixture-level creation — see the Slice 6 plan's scoping note: not canDelegate-gated. */
+  /**
+   * Prisma-only — no canDelegate check here. M2 Slice 3's UnitPolicyService
+   * gates callers (allow overrides require canDelegate; deny overrides are
+   * exempt; a last-unit_admin guard applies to self-deny), mirroring the
+   * service-layer placement InvitationService/OrgUnitService already use.
+   */
   async createUnitPolicyGrant(input: {
     orgUnitId: string;
     subjectRole: string;
@@ -115,8 +137,9 @@ export class GrantAdminRepository {
     effect: 'allow' | 'deny';
     createdBy: string;
     reason: string;
-  }): Promise<UnitPolicyGrantRow> {
-    return this.db.unitPolicyGrant.create({
+    expiresAt?: Date | null;
+  }): Promise<UnitPolicyGrant> {
+    const row = await this.db.unitPolicyGrant.create({
       data: {
         orgUnitId: input.orgUnitId,
         subjectKind: 'role',
@@ -127,8 +150,10 @@ export class GrantAdminRepository {
         effect: input.effect,
         createdBy: input.createdBy,
         reason: input.reason,
+        expiresAt: input.expiresAt ?? null,
       },
     });
+    return toUnitPolicyGrant(row);
   }
 
   async grantPlatformRole(input: {
@@ -174,5 +199,16 @@ export class GrantAdminRepository {
     }
 
     await this.db.platformRoleAssignment.delete({ where: { id } });
+  }
+
+  /** Same row-count invariant as revokePlatformRole's guard — reused by UnitPolicyService's last-admin check on self-deny. */
+  async countActiveUnitAdmins(orgUnitId: string): Promise<number> {
+    return this.db.platformRoleAssignment.count({
+      where: {
+        role: 'unit_admin',
+        orgUnitId,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+      },
+    });
   }
 }

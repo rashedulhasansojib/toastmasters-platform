@@ -1,12 +1,20 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getAgendaItems, getAgendaTemplates, getMeeting, getRoleAssignments } from '@/lib/meetings';
+import {
+  getAgendaItems,
+  getAgendaTemplates,
+  getMeeting,
+  getRoleAssignments,
+  getSpeechSlots,
+} from '@/lib/meetings';
 import { AgendaItemsList } from '@/components/agenda/AgendaItemsList';
 import { AddAgendaItemForm } from '@/components/agenda/AddAgendaItemForm';
 import { ApplyAgendaTemplateButton } from '@/components/agenda/ApplyAgendaTemplateButton';
 import { MeetingStatusActions } from '@/components/meetings/MeetingStatusActions';
 import { AssignRoleForm } from '@/components/roles/AssignRoleForm';
 import { RoleAssignmentsList } from '@/components/roles/RoleAssignmentsList';
+import { RequestSpeechSlotForm } from '@/components/speechslots/RequestSpeechSlotForm';
+import { SpeechSlotsList } from '@/components/speechslots/SpeechSlotsList';
 
 export default async function MeetingPage({
   params,
@@ -14,11 +22,12 @@ export default async function MeetingPage({
   params: Promise<{ clubUnitId: string; meetingId: string }>;
 }) {
   const { clubUnitId, meetingId } = await params;
-  const [meeting, items, templates, roleAssignments] = await Promise.all([
+  const [meeting, items, templates, roleAssignments, speechSlots] = await Promise.all([
     getMeeting(clubUnitId, meetingId),
     getAgendaItems(clubUnitId, meetingId),
     getAgendaTemplates(clubUnitId),
     getRoleAssignments(clubUnitId, meetingId),
+    getSpeechSlots(clubUnitId, meetingId),
   ]);
   if (!meeting) notFound();
 
@@ -68,6 +77,12 @@ export default async function MeetingPage({
           meetingId={meetingId}
           assignments={roleAssignments}
         />
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2>Speech slots</h2>
+        <RequestSpeechSlotForm clubUnitId={clubUnitId} meetingId={meetingId} />
+        <SpeechSlotsList clubUnitId={clubUnitId} meetingId={meetingId} slots={speechSlots} />
       </section>
     </main>
   );

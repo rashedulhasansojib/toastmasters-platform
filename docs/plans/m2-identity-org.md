@@ -10,11 +10,11 @@
 
 > **Scope note.** M1's plan sketched its full slice roadmap before detailing
 > any slice, because the whole milestone's shape was known up front. M2 is
-> being scoped incrementally instead: **Slices 1–4** below are detailed and
-> execution-ready. Later M2 slices (permission versioning UX, unit switcher,
-> `ActivityEvent` emission beyond reparent) will each get their own detailed
-> section, written just before they're implemented, once each prior slice's
-> shape has proven out — mirroring M1's own governing principle: "if
+> being scoped incrementally instead: **Slices 1–5** below are detailed and
+> execution-ready. Later M2 slices (permission-versioning UX i.e. mid-session
+> JWT reissue, the unit switcher's dashboard UI) will each get their own
+> detailed section, written just before they're implemented, once each prior
+> slice's shape has proven out — mirroring M1's own governing principle: "if
 > `authorize()` feels awkward here, fix it before M2" applies equally to "if
 > the invitation/org-editor/unit-policy shape feels awkward here, fix it
 > before the next slice."
@@ -931,6 +931,74 @@ git commit -m "feat(access): unit policy overrides over HTTP — canDelegate on 
 ```bash
 git add apps/api/test/integration/access-inspector.int-spec.ts apps/api/test/integration/access-inspector-http.int-spec.ts
 git commit -m "test(access): inspector coverage for identity.invitation, org.unit, access.unit_policy"
+```
+
+---
+
+## Slice 5 — Audit trail for grant mutations
+
+**Why:** `CLAUDE.md` §1 states a non-negotiable in the same breath as "never scatter an authorisation check": **"Never hand-edit a grant. Every grant change goes through the audited surface."** `roadmap.md` §6 makes the mechanism explicit: "an **immutable audit event** with actor/target/before-after diff on every state change and every break-glass access." Today that's true for exactly one kind of state change — `mintBreakGlass` (M1 Slice 6) and `reparent` (M2 Slice 2) both write an `AuditEvent` inside their transaction. Every other grant-mutating write path writes **nothing**: `RoleAssignmentRepository.assign()` (M1's direct officer-appointment route, `IdentityController`), `RoleAssignmentRepository.end()` (unused by any route yet, but exported for one), `InvitationRepository.accept()`'s inline `RoleAssignment` creation (M2 Slice 1 — the ship-gate mechanism itself), and three of `GrantAdminRepository`'s four methods — `grantPersonGrant`, `createUnitPolicyGrant` (M2 Slice 3), `grantPlatformRole`/`revokePlatformRole` — are all silent. "Grants are never hand-edited" is trivially true (there's no admin UI that writes rows directly), but the audited-surface half of that promise is not: a grant made through the one sanctioned path today leaves the same trace as one that wasn't made at all. This closes that gap across every path identified, rather than letting it compound further into whatever M2 slice comes after this one.
+
+**Scoping decisions:**
+
+- **Scope is exactly the grant/role-mutation write paths named above — six methods across two repositories — not a general "audit every DB write" pass.** `CLAUDE.md`'s rule is specifically about grants; extending it to, say, `Meeting` or `Invitation.create()` (which doesn't itself change anyone's access — only `accept()` does) would be scope creep past what the non-negotiable actually says.
+- **`AuditEvent`, not a new `ActivityEvent` model.** `system-design.md` §23.1 sketches a richer `ActivityEvent` shape (module, targetRef, diff, actorRoles, onBehalfOfPersonId, orgUnitPath, ip/userAgent) than the `AuditEvent` table M1 actually built (`type` enum + optional `resource`/`action`/`orgUnitId` + free-form `metadata` JSON). This plan already treats `AuditEvent` as M2's implementation of that design concept (see Slice 2's `org_unit_reparented` type). Reconciling the two shapes is a real, separate schema decision — flagged here as a known divergence, not fixed in this slice, matching the "tell the human, don't guess" protocol in `CLAUDE.md`'s header rather than silently picking a shape.
+- **Six new `AuditEventType` values, one per distinct state-change kind** — `role_assignment_created`, `role_assignment_ended`, `person_grant_created`, `unit_policy_grant_created`, `platform_role_granted`, `platform_role_revoked` — matching `org_unit_reparented`'s existing one-type-per-kind granularity. No generic before/after diff payload is computed for every field; `metadata` carries whatever's useful per type, the same free-form shape `mintBreakGlass` already uses.
+- **Every write happens inside the mutation's own transaction**, atomic with the state change — exactly the `mintBreakGlass`/`reparent` precedent. Three methods that don't currently use `$transaction` (`grantPersonGrant`, `createUnitPolicyGrant`, `grantPlatformRole`) gain one; `revokePlatformRole` already reads-then-writes and gains a transaction wrapping both.
+- **`RoleAssignmentRepository.end()` and `GrantAdminRepository.revokePlatformRole()` both gain a required `actorId` param.** Neither currently takes one — `end()` has no HTTP caller yet at all; `revokePlatformRole()` has none either (M2 Slice 1 explicitly deferred revoke endpoints). Since both are only ever called from tests today, this is a safe signature change, not a breaking one; the three `end()` test call sites and three `revokePlatformRole()` test call sites are updated to pass an actor already in scope (the assignee's own id for self-resignation, `admin1.id` for the platform-role revoke test).
+- **No new HTTP surface, no resource/action/matrix changes.** Writing an audit row isn't itself a gated capability — reading `AuditEvent` rows is already gated on `platform.audit:read`, seeded in M1 Slice 6, and unaffected by this slice.
+
+**Files:**
+
+- Modify: `packages/db/prisma/schema.prisma` (`AuditEventType` +6 values); new migration under `packages/db/prisma/migrations/`.
+- Modify: `apps/api/src/modules/identity/role-assignment.repository.ts` (`assign` audits inside its existing tx; `end` gains `actorId`, audits inside its existing tx).
+- Modify: `apps/api/src/modules/identity/invitation.repository.ts` (`accept` audits inside its existing tx, attributed to `invitation.invitedBy`).
+- Modify: `apps/api/src/modules/access/grant-admin.repository.ts` (`grantPersonGrant`, `createUnitPolicyGrant`, `grantPlatformRole` each gain a `$transaction` wrapper + audit write; `revokePlatformRole` gains `actorId` + a `$transaction` wrapper + audit write).
+- Modify: `apps/api/src/modules/identity/invitation.service.ts` — no change expected (it calls `this.invitations.accept(...)`, which already carries everything the audit write needs internally); confirm during implementation.
+- Modify: `apps/api/test/integration/access-resolution.int-spec.ts`, `identity.repository.int-spec.ts`, `access-cache.int-spec.ts` (the three existing `.end(id, reason)` call sites, updated for the new `actorId` param).
+- Modify: `apps/api/test/integration/access-delegation.int-spec.ts` (the three existing `revokePlatformRole(id)` call sites, updated for the new `actorId` param; new assertions for `grantPersonGrant`/`createUnitPolicyGrant`/`grantPlatformRole`/`revokePlatformRole` audit rows, including a no-row-written assertion on the rejected last-admin-guard case).
+- Modify: `apps/api/test/integration/identity.repository.int-spec.ts` (new assertion: `assign()` writes `role_assignment_created`).
+- Modify: `apps/api/test/integration/invitation.repository.int-spec.ts` (new assertion: `accept()` writes `role_assignment_created` attributed to the inviter).
+
+**TDD steps:**
+
+- [ ] **Step 1: Schema + migration**
+
+  Add the six `AuditEventType` values. `prisma migrate dev --create-only --name grant_mutation_audit_types` → hand-check for any spurious `ltree`-adjacent `DROP INDEX` (unlikely for an enum-only change, but confirm) → `prisma migrate deploy`.
+
+- [ ] **Step 2: `RoleAssignmentRepository.assign()` writes `role_assignment_created`**
+
+  Failing test first in `identity.repository.int-spec.ts`: after `assign()`, query `db.auditEvent.findFirst({ where: { type: 'role_assignment_created', orgUnitId: clubId } })` and assert it exists, `actorPersonId` equals `appointedBy`, and `metadata` names the assigned person/role. Implement inside `assign()`'s existing `$transaction`.
+
+- [ ] **Step 3: `RoleAssignmentRepository.end()` gains `actorId`, writes `role_assignment_ended`**
+
+  Add the param; update its 3 test call sites. New failing assertion (extend one of the existing `end()` tests): after `end(id, reason, actorId)`, a `role_assignment_ended` row exists with that `actorId` and `reason`. Implement inside `end()`'s existing `$transaction`.
+
+- [ ] **Step 4: `InvitationRepository.accept()` writes `role_assignment_created`**
+
+  Failing test in `invitation.repository.int-spec.ts`: after `accept()`, a `role_assignment_created` row exists attributed to `invitation.invitedBy` (not the accepting person — they didn't authorize their own role, the inviter did), with `metadata` naming the invitation's role. Implement inside `accept()`'s existing `$transaction`.
+
+- [ ] **Step 5: `GrantAdminRepository.grantPersonGrant()` writes `person_grant_created`**
+
+  Failing test in `access-delegation.int-spec.ts`: after a successful `grantPersonGrant`, a `person_grant_created` row exists with `actorPersonId: actorId`, `resource`, `action`, `reason` matching the call. Also assert the existing escalation-denial test (`rejects.toThrow()`) writes **no** audit row — the `canDelegate` check must still run before any write. Implement by wrapping the method body in `$transaction`.
+
+- [ ] **Step 6: `GrantAdminRepository.createUnitPolicyGrant()` writes `unit_policy_grant_created`**
+
+  Failing test in `access-delegation.int-spec.ts`: after a call, a `unit_policy_grant_created` row exists with `actorPersonId: createdBy`, `resource`, `action`, `metadata.subjectRole`/`metadata.effect` matching. (The `canDelegate`/last-admin gating in `UnitPolicyService` is unchanged — this only adds an audit write to the repository method both allow- and deny-path calls already reach once the service has approved them.) Implement by wrapping the method body in `$transaction`.
+
+- [ ] **Step 7: `GrantAdminRepository.grantPlatformRole()` writes `platform_role_granted`; `revokePlatformRole()` gains `actorId` and writes `platform_role_revoked`**
+
+  Add `actorId` to `revokePlatformRole`; update its 3 test call sites. Failing tests in `access-delegation.int-spec.ts`: a grant writes `platform_role_granted` (`actorPersonId: grantedBy`); a successful revoke writes `platform_role_revoked` (`actorPersonId: actorId`); the existing last-unit_admin-guard rejection (`rejects.toThrow()`) writes **no** audit row. Implement by wrapping both method bodies in `$transaction`.
+
+- [ ] **Step 8: Full gate**
+
+  `pnpm lint && pnpm typecheck && pnpm test && pnpm build`, plus `pnpm test:int` — confirm nothing among the pre-existing ~315 integration tests regressed from the two signature changes, and every new assertion is green.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add packages/db apps/api/src/modules/identity apps/api/src/modules/access apps/api/test
+git commit -m "feat(access): audit every grant-mutating write path, not just break-glass and reparent"
 ```
 
 ---

@@ -9,7 +9,7 @@
 **Tech Stack:** NestJS 11 (api), Prisma 7 + `@prisma/adapter-pg` (packages/db), Postgres + `ltree`, Redis/BullMQ (permission cache), Zod 4 (packages/contracts), Vitest 4 + Testcontainers 12, Argon2id + `jose` (sessions).
 
 > **Scope note.** This is the M1 milestone plan. It is delivered as ordered
-> **slices** (§ "Slice roadmap"). Slices 0–4 below are fully detailed and
+> **slices** (§ "Slice roadmap"). Slices 0–5 below are fully detailed and
 > execution-ready. Each later slice is expanded to the same bite-sized TDD depth
 > just before it is executed, so its code is written against a proven foundation
 > rather than guessed. This matches roadmap.md §7 ("plans are living documents;
@@ -2372,9 +2372,447 @@ git commit -m "feat(access): wire real grant resolution into authorize()"
 
 ---
 
-## Slices 5–10
+## Slice 5 — permission_version + cache
 
-Each is expanded to Slice 0/1/2/3/4 depth (files, interfaces, bite-sized TDD steps with full code) immediately before it is executed, against the now-proven foundation. Their deliverables, dependencies, and ship criteria are fixed in the roadmap table above; the canonical schema and algorithms they implement are `rbac-design.md` §3–§9 and `system-design.md` §5–§7, and the design decisions specific to this deployment are in `docs/superpowers/specs/2026-07-28-platform-tier-super-admin-design.md`.
+**Why:** Resolution (Slice 4) touches five tables per `authorize()` call — untenable per request. `rbac-design.md` §5 fixes this with a resolved-grant cache keyed `personId:permissionVersion`, invalidated by bumping the version rather than evicting — which is also what lets a role change take effect without the affected person re-logging in.
+
+**Scoping decision.** §5's full table names four cache layers and six version-bump triggers. Only one trigger exists yet: **role assignment created or ended** (Slice 2's `RoleAssignmentRepository`). Unit-policy changes, direct-grant changes, and role-template edits have no backing table until Slice 6; org-unit reparenting and program-year rollover are out of scope for M1 entirely (`roadmap.md` — reparent already ships in Slice 1 but nothing yet reads a cache keyed by path). So this slice wires exactly one layer (resolved grant set, 5 min TTL) and exactly one trigger (role assignment write). The other three cache layers and five remaining triggers are noted, not built, so Slice 6 extends rather than restructures.
+
+**The session half of the ship criteria doesn't exist yet, and isn't built here.** "Appoint a role mid-session... without re-login" and "stale `v` triggers rebuild" describe a live JWT session — Slice 8 (Login + session) is what mints a token carrying `v` and reissues it. Nothing about the cache mechanism depends on Slice 8 existing first, though: `personId:permissionVersion` is a plain cache key today, tested directly through `AuthzService.authorize()` without any HTTP/session machinery. When Slice 8 lands, `v` in the JWT literally _is_ `permissionVersion` — comparing it and rebuilding on mismatch is a small addition there, not a rework here.
+
+**Dependency added this slice:** `ioredis` as a direct `apps/api` dependency (approved by the human — BullMQ already pulls it in transitively, but pnpm's strict layout means `apps/api` can't import a transitive package). Pinned to `5.11.1`, the version already resolved in the lockfile via `bullmq`, to avoid a second copy.
+
+**Files:**
+
+- Modify: `apps/api/package.json` (add `ioredis`)
+- Modify: `apps/api/src/modules/identity/role-assignment.repository.ts` (`assign`/`end` bump `person.permission_version` in the same transaction)
+- Create: `apps/api/test/support/test-redis.ts` (Testcontainers Redis, mirrors `test-db.ts`)
+- Create: `apps/api/src/modules/access/redis-client.token.ts`
+- Create: `apps/api/src/modules/access/grant-cache.service.ts`
+- Modify: `apps/api/src/modules/access/access.repository.ts` (optional cache, transparently used when wired)
+- Modify: `apps/api/src/modules/access/access.module.ts` (provides `REDIS_CLIENT` + `GrantCacheService`)
+- Create: `apps/api/test/integration/access-cache.int-spec.ts`
+
+**Interfaces:**
+
+- Consumes: `RoleAssignmentRepository` (Slice 2, extended here), `AccessRepository`/`AuthzService` (Slice 4).
+- Produces:
+  - `GrantCacheService.get(personId, permissionVersion): Promise<Grant[] | null>` / `.set(personId, permissionVersion, grants): Promise<void>` — TTL 5 minutes, key `access:grants:${personId}:${permissionVersion}`.
+  - `AccessRepository`'s constructor gains an **optional** third-position... second-position `cache?: GrantCacheService` parameter. Every existing call site (`new AccessRepository(db)`, Slices 4's tests) is unaffected — no cache means always-fresh resolution, exactly today's behaviour. This is also the correct resilience shape for production: a Redis outage degrades to slower-but-correct, never to wrong.
+  - `RoleAssignmentRepository.assign()`/`.end()` — same signatures, now additionally bump `person.permission_version` by 1, atomically with the role_assignment write.
+
+- [ ] **Step 1: Bump `permission_version` on role assignment write**
+
+Modify `apps/api/src/modules/identity/role-assignment.repository.ts`:
+
+```ts
+  /** Always creates status: 'active' — M1 has no pending-approval workflow. */
+  async assign(input: {
+    personId: string;
+    orgUnitId: string;
+    role: string;
+    programYearId: string;
+    termStart: Date;
+    termEnd: Date;
+    appointedBy: string;
+  }): Promise<RoleAssignment> {
+    const row = await this.db.$transaction(async (tx) => {
+      const created = await tx.roleAssignment.create({
+        data: {
+          personId: input.personId,
+          orgUnitId: input.orgUnitId,
+          role: input.role,
+          programYearId: input.programYearId,
+          termStart: input.termStart,
+          termEnd: input.termEnd,
+          status: 'active',
+          appointedBy: input.appointedBy,
+          trainedAt: [],
+        },
+      });
+      // rbac-design.md §5: role assignment created/ended bumps permission_version.
+      await tx.person.update({
+        where: { id: input.personId },
+        data: { permissionVersion: { increment: 1 } },
+      });
+      return created;
+    });
+    return toRoleAssignment(row);
+  }
+
+  /** Ended assignments are retained as history, never deleted. */
+  async end(id: string, reason: RoleAssignmentEndedReason): Promise<void> {
+    await this.db.$transaction(async (tx) => {
+      const updated = await tx.roleAssignment.update({
+        where: { id },
+        data: { status: 'ended', endedReason: reason },
+      });
+      await tx.person.update({
+        where: { id: updated.personId },
+        data: { permissionVersion: { increment: 1 } },
+      });
+    });
+  }
+```
+
+`findById`/`findActiveForUnit` are unchanged.
+
+Run: `pnpm --filter @toastmasters/api test:int` — expect PASS still (Slice 2/4 tests don't assert on `permissionVersion`, so this is additive; nothing should break).
+
+- [ ] **Step 2: Add the Redis test harness**
+
+Create `apps/api/test/support/test-redis.ts`:
+
+```ts
+import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
+import Redis from 'ioredis';
+
+async function start(): Promise<{ container: StartedTestContainer; url: string }> {
+  const container = await new GenericContainer('redis:7')
+    .withExposedPorts(6379)
+    .withWaitStrategy(Wait.forListeningPorts())
+    .start();
+
+  // Same IPv4-loopback fix as test-db.ts — Docker Desktop's port-forwarding
+  // proxy races IPv6 resolution of 'localhost' on some platforms.
+  const host = container.getHost() === 'localhost' ? '127.0.0.1' : container.getHost();
+  const url = `redis://${host}:${container.getMappedPort(6379)}`;
+
+  return { container, url };
+}
+
+/** Suite-level: start once, reuse across tests, stop in afterAll. */
+export async function startTestRedis(): Promise<{
+  client: Redis;
+  stop: () => Promise<void>;
+}> {
+  const { container, url } = await start();
+  const client = new Redis(url);
+  return {
+    client,
+    stop: async () => {
+      client.disconnect();
+      await container.stop();
+    },
+  };
+}
+```
+
+- [ ] **Step 3: Write the failing cache integration tests**
+
+Create `apps/api/test/integration/access-cache.int-spec.ts`:
+
+```ts
+import { describe, it, beforeAll, afterAll, expect } from 'vitest';
+import type { PrismaClient } from '@toastmasters/db';
+import { seedAccessVocabulary } from '@toastmasters/db';
+import { startTestDb } from '../support/test-db';
+import { startTestRedis } from '../support/test-redis';
+import { OrgUnitRepository } from '../../src/modules/org/org.repository';
+import { ProgramYearRepository } from '../../src/modules/identity/program-year.repository';
+import { PersonRepository } from '../../src/modules/identity/person.repository';
+import { RoleAssignmentRepository } from '../../src/modules/identity/role-assignment.repository';
+import { AccessRepository } from '../../src/modules/access/access.repository';
+import { GrantCacheService } from '../../src/modules/access/grant-cache.service';
+import { AuthzService } from '../../src/common/authz/authz.service';
+
+describe('Access resolution cache (integration)', () => {
+  let db: PrismaClient;
+  let stopDb: () => Promise<void>;
+  let stopRedis: () => Promise<void>;
+  let authz: AuthzService;
+  let people: PersonRepository;
+  let roleAssignments: RoleAssignmentRepository;
+
+  let clubId: string;
+  let clubPath: string;
+  let club2Id: string;
+  let club2Path: string;
+  let programYearId: string;
+
+  beforeAll(async () => {
+    ({ db, stop: stopDb } = await startTestDb());
+    const redis = await startTestRedis();
+    stopRedis = redis.stop;
+    await seedAccessVocabulary(db);
+
+    const orgUnits = new OrgUnitRepository(db);
+    const programYears = new ProgramYearRepository(db);
+    people = new PersonRepository(db);
+    roleAssignments = new RoleAssignmentRepository(db);
+    const cache = new GrantCacheService(redis.client);
+    authz = new AuthzService(new AccessRepository(db, cache));
+
+    const region = await orgUnits.createRoot({
+      type: 'region',
+      code: 'r1',
+      name: 'Region 1',
+      timezone: 'Asia/Dhaka',
+    });
+    const district = await orgUnits.createChild({
+      parentId: region.id,
+      type: 'district',
+      code: 'd41',
+      name: 'District 41',
+      timezone: 'Asia/Dhaka',
+    });
+    const club = await orgUnits.createChild({
+      parentId: district.id,
+      type: 'club',
+      code: 'c1',
+      name: 'Club 1',
+      timezone: 'Asia/Dhaka',
+    });
+    const club2 = await orgUnits.createChild({
+      parentId: district.id,
+      type: 'club',
+      code: 'c2',
+      name: 'Club 2',
+      timezone: 'Asia/Dhaka',
+    });
+    clubId = club.id;
+    clubPath = club.path;
+    club2Id = club2.id;
+    club2Path = club2.path;
+
+    const year = await programYears.create({
+      id: '2026-2027',
+      startsOn: new Date('2026-07-01'),
+      endsOn: new Date('2027-06-30'),
+    });
+    programYearId = year.id;
+  });
+  afterAll(async () => {
+    await stopDb();
+    await stopRedis();
+  });
+
+  it('a role assignment mid-session takes effect on the next check (permission_version bump)', async () => {
+    const member = await people.create({ email: 'member@example.com', fullName: 'New Treasurer' });
+    const request = {
+      principal: { userId: member.id, roles: [], scopes: [] },
+      resource: 'finance.ledger',
+      action: 'read' as const,
+      scope: clubPath,
+    };
+
+    const before = await authz.authorize(request);
+    expect(before.allowed).toBe(false);
+
+    await roleAssignments.assign({
+      personId: member.id,
+      orgUnitId: clubId,
+      role: 'club_treasurer',
+      programYearId,
+      termStart: new Date('2026-07-01'),
+      termEnd: new Date('2027-06-30'),
+      appointedBy: member.id,
+    });
+
+    const after = await authz.authorize(request);
+    expect(after.allowed).toBe(true);
+  });
+
+  it('serves a stale cached grant set until permission_version actually changes', async () => {
+    // A distinct club (club2), not clubId — reusing clubId collides with the
+    // first test's still-active club_treasurer@clubId assignment against
+    // Slice 2's role_assignment_singleton index.
+    const treasurer = await people.create({
+      email: 'stale@example.com',
+      fullName: 'Stale Treasurer',
+    });
+    const assignment = await roleAssignments.assign({
+      personId: treasurer.id,
+      orgUnitId: club2Id,
+      role: 'club_treasurer',
+      programYearId,
+      termStart: new Date('2026-07-01'),
+      termEnd: new Date('2027-06-30'),
+      appointedBy: treasurer.id,
+    });
+    const request = {
+      principal: { userId: treasurer.id, roles: [], scopes: [] },
+      resource: 'finance.ledger',
+      action: 'read' as const,
+      scope: club2Path,
+    };
+
+    const first = await authz.authorize(request);
+    expect(first.allowed).toBe(true);
+
+    // Mutate the assignment directly, bypassing the repository's version
+    // bump — a real revocation goes through RoleAssignmentRepository.end(),
+    // which does bump the version (proved by the next assertion).
+    await db.roleAssignment.update({ where: { id: assignment.id }, data: { status: 'ended' } });
+
+    const stillCached = await authz.authorize(request);
+    expect(stillCached.allowed).toBe(true); // same permissionVersion key -> stale cache hit
+
+    await roleAssignments.end(assignment.id, 'resigned');
+
+    const afterRealEnd = await authz.authorize(request);
+    expect(afterRealEnd.allowed).toBe(false); // new version -> fresh resolution
+  });
+});
+```
+
+Run: `pnpm --filter @toastmasters/api test:int -- access-cache` — expect FAIL (`GrantCacheService` doesn't exist; `AccessRepository` doesn't accept a second constructor argument yet).
+
+- [ ] **Step 4: Implement `GrantCacheService`**
+
+Create `apps/api/src/modules/access/redis-client.token.ts`:
+
+```ts
+/** DI token for the shared ioredis client — Redis itself isn't a class Nest can key providers by. */
+export const REDIS_CLIENT = Symbol('REDIS_CLIENT');
+```
+
+Create `apps/api/src/modules/access/grant-cache.service.ts`:
+
+```ts
+import { Inject, Injectable } from '@nestjs/common';
+import type Redis from 'ioredis';
+import type { Grant } from '../../common/authz/authz.types';
+import { REDIS_CLIENT } from './redis-client.token';
+
+const TTL_SECONDS = 5 * 60;
+
+/** rbac-design.md §5: resolved grant set, 5 min TTL, keyed personId:permissionVersion. */
+@Injectable()
+export class GrantCacheService {
+  constructor(@Inject(REDIS_CLIENT) private readonly redis: Redis) {}
+
+  private key(personId: string, permissionVersion: number): string {
+    return `access:grants:${personId}:${permissionVersion}`;
+  }
+
+  async get(personId: string, permissionVersion: number): Promise<Grant[] | null> {
+    const raw = await this.redis.get(this.key(personId, permissionVersion));
+    return raw ? (JSON.parse(raw) as Grant[]) : null;
+  }
+
+  async set(personId: string, permissionVersion: number, grants: Grant[]): Promise<void> {
+    await this.redis.set(
+      this.key(personId, permissionVersion),
+      JSON.stringify(grants),
+      'EX',
+      TTL_SECONDS,
+    );
+  }
+}
+```
+
+- [ ] **Step 5: Wire the optional cache into `AccessRepository`**
+
+Modify `apps/api/src/modules/access/access.repository.ts`:
+
+```ts
+import { Injectable } from '@nestjs/common';
+import { getPrisma, type PrismaClient } from '@toastmasters/db';
+import type { Grant } from '../../common/authz/authz.types';
+import type { GrantCacheService } from './grant-cache.service';
+
+interface PathRow {
+  path: string;
+}
+
+@Injectable()
+export class AccessRepository {
+  constructor(
+    private readonly db: PrismaClient = getPrisma(),
+    private readonly cache?: GrantCacheService,
+  ) {}
+
+  /**
+   * rbac-design.md §4.2 + §5: platform ∪ domain-role-template grants, cached
+   * by personId:permissionVersion when a cache is wired. No cache means
+   * always-fresh resolution — correctness never depends on Redis being up.
+   */
+  async effectiveGrants(personId: string): Promise<Grant[]> {
+    const permissionVersion = await this.permissionVersionOf(personId);
+
+    if (this.cache) {
+      const cached = await this.cache.get(personId, permissionVersion);
+      if (cached) return cached;
+    }
+
+    const [platformGrants, domainGrants] = await Promise.all([
+      this.platformRoleGrants(personId),
+      this.domainRoleGrants(personId),
+    ]);
+    const grants = [...platformGrants, ...domainGrants];
+
+    if (this.cache) {
+      await this.cache.set(personId, permissionVersion, grants);
+    }
+
+    return grants;
+  }
+
+  private async permissionVersionOf(personId: string): Promise<number> {
+    const person = await this.db.person.findUnique({
+      where: { id: personId },
+      select: { permissionVersion: true },
+    });
+    return person?.permissionVersion ?? 1;
+  }
+
+  // ...platformRoleGrants / domainRoleGrants / grantsForRoleAtScope / pathOf / regionRootPath unchanged from Slice 4...
+}
+```
+
+- [ ] **Step 6: Wire `REDIS_CLIENT` and `GrantCacheService` into `AccessModule`**
+
+Modify `apps/api/src/modules/access/access.module.ts`:
+
+```ts
+import { Module } from '@nestjs/common';
+import Redis from 'ioredis';
+import { redisConnectionOptions, type Env } from '@toastmasters/config';
+import { ENV } from '../../config/config.module';
+import { AccessRepository } from './access.repository';
+import { GrantCacheService } from './grant-cache.service';
+import { REDIS_CLIENT } from './redis-client.token';
+
+@Module({
+  providers: [
+    {
+      provide: REDIS_CLIENT,
+      inject: [ENV],
+      useFactory: (env: Env) => new Redis(redisConnectionOptions(env.REDIS_URL)),
+    },
+    GrantCacheService,
+    AccessRepository,
+  ],
+  exports: [AccessRepository],
+})
+export class AccessModule {}
+```
+
+`ConfigModule` is `@Global()` (already loaded via `AppModule`), so `ENV` is injectable here without an explicit `imports: [ConfigModule]`.
+
+- [ ] **Step 7: Run it to verify it passes**
+
+Run: `pnpm --filter @toastmasters/api test:int -- access-cache`
+Expected: PASS (both tests).
+
+- [ ] **Step 8: Verify the wider gate is still green**
+
+Run: `pnpm --filter @toastmasters/api test && pnpm --filter @toastmasters/api test:int && pnpm lint && pnpm typecheck && pnpm build`
+Expected: no errors; every unit and integration test green, including the unchanged Slice 1/2/3/4 integration suites (they construct `AccessRepository`/`RoleAssignmentRepository` the same way as before — the new parameters are additive and optional).
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add apps/api/package.json apps/api/src/modules/identity/role-assignment.repository.ts apps/api/src/modules/access apps/api/test/support/test-redis.ts apps/api/test/integration/access-cache.int-spec.ts
+git commit -m "feat(access): cache resolved grants, invalidated by permission_version"
+```
+
+---
+
+## Slices 6–10
+
+Each is expanded to Slice 0/1/2/3/4/5 depth (files, interfaces, bite-sized TDD steps with full code) immediately before it is executed, against the now-proven foundation. Their deliverables, dependencies, and ship criteria are fixed in the roadmap table above; the canonical schema and algorithms they implement are `rbac-design.md` §3–§9 and `system-design.md` §5–§7, and the design decisions specific to this deployment are in `docs/superpowers/specs/2026-07-28-platform-tier-super-admin-design.md`.
 
 **Self-review (this plan vs the spec):**
 

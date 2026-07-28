@@ -64,6 +64,7 @@ model OrgUnit {
   checklistRuns          ChecklistRun[]
   agendaTemplates        AgendaTemplate[]
   prospects              Prospect[]
+  ledgerEntries          LedgerEntry[]
 
   @@map("org_unit")
 }
@@ -112,6 +113,7 @@ model Person {
   convertedFromProspects    Prospect[]          @relation("ProspectConvertedToPerson")
   prospectVisitsLogged      ProspectVisit[]
   prospectCommunicationsLogged ProspectCommunication[]
+  ledgerEntriesRecorded     LedgerEntry[]
 
   @@map("person")
 }
@@ -213,6 +215,7 @@ model ProgramYear {
   roleAssignments RoleAssignment[]
   meetings        Meeting[]
   invitations     Invitation[]
+  ledgerEntries   LedgerEntry[]
 
   @@map("program_year")
 }
@@ -885,4 +888,56 @@ model ProspectCommunication {
   loggedAt       DateTime                     @default(now()) @map("logged_at")
 
   @@map("prospect_communication")
+}
+
+enum LedgerDirection {
+  in
+  out
+
+  @@map("ledger_direction")
+}
+
+enum LedgerCounterpartyKind {
+  member
+  prospect
+  vendor
+  district
+  other
+
+  @@map("ledger_counterparty_kind")
+}
+
+/**
+ * M4 Slice 5: system-design.md §12.1. Append-only at the DB layer (`REVOKE
+ * UPDATE, DELETE`, end of this slice's migration) — corrections are new
+ * reversing entries via `reversalOfEntryId`, never an edit. Scope cut: the
+ * design's `reversedByEntryId` (the forward pointer) is not a stored column
+ * here — it's derivable with `WHERE reversalOfEntryId = X`, so storing it
+ * would just be a denormalisation with no new information.
+ */
+model LedgerEntry {
+  id                String                  @id @default(uuid()) @db.Uuid
+  orgUnitId         String                  @map("org_unit_id") @db.Uuid
+  orgUnit           OrgUnit                 @relation(fields: [orgUnitId], references: [id])
+  programYearId     String                  @map("program_year_id")
+  programYear       ProgramYear             @relation(fields: [programYearId], references: [id])
+  direction         LedgerDirection
+  category          String
+  amount            Decimal                 @db.Decimal(12, 2)
+  currency          String
+  occurredOn        DateTime                @map("occurred_on") @db.Date
+  counterpartyKind  LedgerCounterpartyKind  @map("counterparty_kind")
+  counterpartyRef   String?                 @map("counterparty_ref") @db.Uuid
+  counterpartyLabel String                  @map("counterparty_label")
+  description       String
+  receiptUrl        String?                 @map("receipt_url")
+  recordedBy        String                  @map("recorded_by") @db.Uuid
+  recordedByPerson  Person                  @relation(fields: [recordedBy], references: [id])
+  recordedAt        DateTime                @default(now()) @map("recorded_at")
+  reversalOfEntryId String?                 @map("reversal_of_entry_id") @db.Uuid
+  reversalOfEntry   LedgerEntry?            @relation("LedgerReversal", fields: [reversalOfEntryId], references: [id])
+  reversals         LedgerEntry[]           @relation("LedgerReversal")
+
+  @@unique([reversalOfEntryId])
+  @@map("ledger_entry")
 }

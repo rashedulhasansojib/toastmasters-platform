@@ -168,3 +168,26 @@ enum ProspectPipelineStatus {
 - [x] `pnpm lint && pnpm typecheck && pnpm build` — green.
 - [ ] Tests / `test:int` — **skipped**, same autopilot note as Slices 2–3.
 - [x] Commit + push.
+
+---
+
+## Slice 5 — Append-only ledger (`LedgerEntry`)
+
+**Why:** `finance.ledger` is the ledger of club money facts everything downstream (dues, invoices, installments, reports) reconciles against. Must be genuinely append-only (`FR-FIN-2`), not append-only "by convention" — CLAUDE.md is explicit that this is a DB-layer guarantee (`REVOKE UPDATE, DELETE`), not an application-layer promise.
+
+**Schema:** `LedgerEntry` per system-design.md §12.1 (`direction`, `category`, `amount`/`currency`, `occurredOn`, a denormalised counterparty triple, `recordedBy`/`recordedAt`, `reversalOfEntryId`). A `@@unique([reversalOfEntryId])` partial-unique-adjacent index (nullable columns don't conflict on NULL in Postgres) caps each entry at **at most one** reversal, matching CLAUDE.md's "enforce with partial unique indexes" convention. Migration ends with `REVOKE UPDATE, DELETE ON "ledger_entry" FROM CURRENT_USER;` — the exact pattern already used for `audit_event` (`20260728073435_delegation_audit`), so the app's own connection role is physically incapable of mutating a written row, not merely asked nicely not to.
+
+**Scope cut:** the design's `reversedByEntryId` (forward pointer) isn't a stored column — it's derivable (`WHERE reversalOfEntryId = X`), so storing it would be pure denormalisation. Also **not implemented this slice**: the CLAUDE.md §5/§6 rule that `restricted` resources (of which `finance.ledger` is one of the four) get audited-on-read logging and 404-not-403 across a scope boundary — no restricted resource has a real route yet in this codebase (finance.ledger is the _first_), so that's a cross-cutting authz feature affecting all four restricted resources, not something to bolt onto one route as a side effect of this slice. Flagged for a dedicated follow-up, not silently dropped.
+
+**Business logic (real enough to warrant a service, unlike the pure-CRUD `agenda-item` precedent):** reversing an entry computes the opposite `direction` and copies `amount`/`currency`/`counterparty` from the original — the client only supplies a `reason` — so a reversal always exactly cancels what it reverses, and can never itself be reversed (`BadRequestException` if you try) or double-reversed (the unique index + `P2002` → `ConflictException`).
+
+**API:** `POST/GET /clubs/:clubUnitId/ledger-entries`, `POST /clubs/:clubUnitId/ledger-entries/:entryId/reverse`.
+
+**Steps:**
+
+- [x] Schema + migration (diff-generated + hand-appended `REVOKE`, matching the `audit_event` precedent exactly).
+- [x] Contracts (new `packages/contracts/src/finance.ts`).
+- [x] `FinanceModule` (new context) — repository + service + controller; wired into `app.module.ts`.
+- [x] `pnpm lint && pnpm typecheck && pnpm build` — green.
+- [ ] Tests / `test:int` — **skipped**, same autopilot note as Slices 2–4. Notably unverified this slice: that the `REVOKE` actually blocks an UPDATE/DELETE attempt end-to-end (the migration applied without error, which is as far as this pass went).
+- [x] Commit + push.

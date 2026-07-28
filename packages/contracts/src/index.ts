@@ -4,3 +4,4 @@ export * from './identity';
 export * from './access';
 export * from './meeting';
 export * from './membership';
+export * from './finance';

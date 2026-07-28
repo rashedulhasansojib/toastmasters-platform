@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { getPrisma, type PrismaClient } from '@toastmasters/db';
 import type { Grant } from '../../common/authz/authz.types';
+import type { GrantCacheService } from './grant-cache.service';
 
 interface PathRow {
   path: string;
@@ -8,19 +9,45 @@ interface PathRow {
 
 @Injectable()
 export class AccessRepository {
-  constructor(private readonly db: PrismaClient = getPrisma()) {}
+  constructor(
+    private readonly db: PrismaClient = getPrisma(),
+    private readonly cache?: GrantCacheService,
+  ) {}
 
   /**
-   * rbac-design.md §4.2: platform ∪ domain-role-template grants. Unit-policy
-   * overrides and direct person grants are Slice 6 — no table exists yet, so
-   * those two positions are simply absent from the union.
+   * rbac-design.md §4.2 + §5: platform ∪ domain-role-template grants, cached
+   * by personId:permissionVersion when a cache is wired. No cache means
+   * always-fresh resolution — correctness never depends on Redis being up.
+   * Unit-policy overrides and direct person grants are Slice 6 — no table
+   * exists yet, so those two positions are simply absent from the union.
    */
   async effectiveGrants(personId: string): Promise<Grant[]> {
+    const permissionVersion = await this.permissionVersionOf(personId);
+
+    if (this.cache) {
+      const cached = await this.cache.get(personId, permissionVersion);
+      if (cached) return cached;
+    }
+
     const [platformGrants, domainGrants] = await Promise.all([
       this.platformRoleGrants(personId),
       this.domainRoleGrants(personId),
     ]);
-    return [...platformGrants, ...domainGrants];
+    const grants = [...platformGrants, ...domainGrants];
+
+    if (this.cache) {
+      await this.cache.set(personId, permissionVersion, grants);
+    }
+
+    return grants;
+  }
+
+  private async permissionVersionOf(personId: string): Promise<number> {
+    const person = await this.db.person.findUnique({
+      where: { id: personId },
+      select: { permissionVersion: true },
+    });
+    return person?.permissionVersion ?? 1;
   }
 
   private async platformRoleGrants(personId: string): Promise<Grant[]> {

@@ -35,27 +35,41 @@ export class RoleAssignmentRepository {
     termEnd: Date;
     appointedBy: string;
   }): Promise<RoleAssignment> {
-    const row = await this.db.roleAssignment.create({
-      data: {
-        personId: input.personId,
-        orgUnitId: input.orgUnitId,
-        role: input.role,
-        programYearId: input.programYearId,
-        termStart: input.termStart,
-        termEnd: input.termEnd,
-        status: 'active',
-        appointedBy: input.appointedBy,
-        trainedAt: [],
-      },
+    const row = await this.db.$transaction(async (tx) => {
+      const created = await tx.roleAssignment.create({
+        data: {
+          personId: input.personId,
+          orgUnitId: input.orgUnitId,
+          role: input.role,
+          programYearId: input.programYearId,
+          termStart: input.termStart,
+          termEnd: input.termEnd,
+          status: 'active',
+          appointedBy: input.appointedBy,
+          trainedAt: [],
+        },
+      });
+      // rbac-design.md §5: role assignment created/ended bumps permission_version.
+      await tx.person.update({
+        where: { id: input.personId },
+        data: { permissionVersion: { increment: 1 } },
+      });
+      return created;
     });
     return toRoleAssignment(row);
   }
 
   /** Ended assignments are retained as history, never deleted. */
   async end(id: string, reason: RoleAssignmentEndedReason): Promise<void> {
-    await this.db.roleAssignment.update({
-      where: { id },
-      data: { status: 'ended', endedReason: reason },
+    await this.db.$transaction(async (tx) => {
+      const updated = await tx.roleAssignment.update({
+        where: { id },
+        data: { status: 'ended', endedReason: reason },
+      });
+      await tx.person.update({
+        where: { id: updated.personId },
+        data: { permissionVersion: { increment: 1 } },
+      });
     });
   }
 

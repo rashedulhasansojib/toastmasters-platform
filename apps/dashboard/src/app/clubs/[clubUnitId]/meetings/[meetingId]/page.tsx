@@ -1,10 +1,12 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getAgendaItems, getAgendaTemplates, getMeeting } from '@/lib/meetings';
+import { getAgendaItems, getAgendaTemplates, getMeeting, getRoleAssignments } from '@/lib/meetings';
 import { AgendaItemsList } from '@/components/agenda/AgendaItemsList';
 import { AddAgendaItemForm } from '@/components/agenda/AddAgendaItemForm';
 import { ApplyAgendaTemplateButton } from '@/components/agenda/ApplyAgendaTemplateButton';
 import { MeetingStatusActions } from '@/components/meetings/MeetingStatusActions';
+import { AssignRoleForm } from '@/components/roles/AssignRoleForm';
+import { RoleAssignmentsList } from '@/components/roles/RoleAssignmentsList';
 
 export default async function MeetingPage({
   params,
@@ -12,10 +14,11 @@ export default async function MeetingPage({
   params: Promise<{ clubUnitId: string; meetingId: string }>;
 }) {
   const { clubUnitId, meetingId } = await params;
-  const [meeting, items, templates] = await Promise.all([
+  const [meeting, items, templates, roleAssignments] = await Promise.all([
     getMeeting(clubUnitId, meetingId),
     getAgendaItems(clubUnitId, meetingId),
     getAgendaTemplates(clubUnitId),
+    getRoleAssignments(clubUnitId, meetingId),
   ]);
   if (!meeting) notFound();
 
@@ -55,6 +58,16 @@ export default async function MeetingPage({
           templates={templates}
         />
         <AgendaItemsList items={items} />
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2>Roles</h2>
+        <AssignRoleForm clubUnitId={clubUnitId} meetingId={meetingId} />
+        <RoleAssignmentsList
+          clubUnitId={clubUnitId}
+          meetingId={meetingId}
+          assignments={roleAssignments}
+        />
       </section>
     </main>
   );

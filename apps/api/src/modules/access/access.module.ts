@@ -3,6 +3,7 @@ import Redis from 'ioredis';
 import { redisConnectionOptions, type Env } from '@toastmasters/config';
 import { ENV } from '../../config/config.module';
 import { AccessRepository } from './access.repository';
+import { GrantAdminRepository } from './grant-admin.repository';
 import { GrantCacheService } from './grant-cache.service';
 import { REDIS_CLIENT } from './redis-client.token';
 
@@ -15,7 +16,8 @@ import { REDIS_CLIENT } from './redis-client.token';
     },
     GrantCacheService,
     AccessRepository,
+    GrantAdminRepository,
   ],
-  exports: [AccessRepository],
+  exports: [AccessRepository, GrantAdminRepository],
 })
 export class AccessModule {}

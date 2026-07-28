@@ -54,6 +54,9 @@ model OrgUnit {
   clubMemberships ClubMembership[]
   roleAssignments RoleAssignment[]
   platformRoleAssignments PlatformRoleAssignment[]
+  unitPolicyGrants UnitPolicyGrant[]
+  personGrants     PersonGrant[]
+  auditEvents      AuditEvent[]
 
   @@map("org_unit")
 }
@@ -84,6 +87,11 @@ model Person {
   appointedRoles  RoleAssignment[] @relation("RoleAssignmentAppointedBy")
   platformRoleAssignments PlatformRoleAssignment[] @relation("PlatformRoleAssignmentPerson")
   grantedPlatformRoles    PlatformRoleAssignment[] @relation("PlatformRoleAssignmentGrantedBy")
+  unitPolicyGrantsAsSubject UnitPolicyGrant[] @relation("UnitPolicyGrantSubject")
+  unitPolicyGrantsCreated   UnitPolicyGrant[] @relation("UnitPolicyGrantCreatedBy")
+  personGrantsReceived      PersonGrant[]     @relation("PersonGrantSubject")
+  personGrantsIssued        PersonGrant[]     @relation("PersonGrantGrantedBy")
+  auditEvents               AuditEvent[]
 
   @@map("person")
 }
@@ -225,6 +233,8 @@ model ResourceCatalog {
   sensitivity    ResourceSensitivity @default(normal)
 
   grants RoleTemplateGrant[]
+  unitPolicyGrants UnitPolicyGrant[]
+  personGrants     PersonGrant[]
 
   @@map("resource_catalog")
 }
@@ -290,4 +300,72 @@ model PlatformRoleAssignment {
 
   @@unique([personId, role, orgUnitId])
   @@map("platform_role_assignment")
+}
+
+enum UnitPolicySubjectKind {
+  role
+  person
+}
+
+model UnitPolicyGrant {
+  id              String                @id @default(uuid()) @db.Uuid
+  orgUnitId       String                @map("org_unit_id") @db.Uuid
+  orgUnit         OrgUnit               @relation(fields: [orgUnitId], references: [id])
+  subjectKind     UnitPolicySubjectKind @map("subject_kind")
+  subjectRole     String?               @map("subject_role")
+  subjectPersonId String?               @map("subject_person_id") @db.Uuid
+  subjectPerson   Person?               @relation("UnitPolicyGrantSubject", fields: [subjectPersonId], references: [id])
+  resource        String
+  resourceRef     ResourceCatalog       @relation(fields: [resource], references: [resource])
+  action          PermissionAction
+  condition       PermissionCondition   @default(any)
+  effect          PermissionEffect
+  createdBy       String                @map("created_by") @db.Uuid
+  createdByPerson Person                @relation("UnitPolicyGrantCreatedBy", fields: [createdBy], references: [id])
+  createdAt       DateTime              @default(now()) @map("created_at")
+  reason          String
+  expiresAt       DateTime?             @map("expires_at")
+
+  @@map("unit_policy_grant")
+}
+
+model PersonGrant {
+  id              String              @id @default(uuid()) @db.Uuid
+  personId        String              @map("person_id") @db.Uuid
+  person          Person              @relation("PersonGrantSubject", fields: [personId], references: [id])
+  orgUnitId       String              @map("org_unit_id") @db.Uuid
+  orgUnit         OrgUnit             @relation(fields: [orgUnitId], references: [id])
+  resource        String
+  resourceRef     ResourceCatalog     @relation(fields: [resource], references: [resource])
+  action          PermissionAction
+  condition       PermissionCondition @default(any)
+  effect          PermissionEffect
+  grantedBy       String              @map("granted_by") @db.Uuid
+  grantedByPerson Person              @relation("PersonGrantGrantedBy", fields: [grantedBy], references: [id])
+  grantedAt       DateTime            @default(now()) @map("granted_at")
+  reason          String
+  expiresAt       DateTime?           @map("expires_at")
+
+  @@map("person_grant")
+}
+
+enum AuditEventType {
+  break_glass_mint
+  restricted_read
+}
+
+model AuditEvent {
+  id            String            @id @default(uuid()) @db.Uuid
+  occurredAt    DateTime          @default(now()) @map("occurred_at")
+  actorPersonId String            @map("actor_person_id") @db.Uuid
+  actorPerson   Person            @relation(fields: [actorPersonId], references: [id])
+  type          AuditEventType
+  resource      String?
+  action        PermissionAction?
+  orgUnitId     String?           @map("org_unit_id") @db.Uuid
+  orgUnit       OrgUnit?          @relation(fields: [orgUnitId], references: [id])
+  reason        String?
+  metadata      Json              @default("{}")
+
+  @@map("audit_event")
 }

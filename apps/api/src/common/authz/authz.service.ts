@@ -15,7 +15,11 @@ export class AuthzService {
   /** The one authorization gate. Everything funnels through here (default-deny). */
   async authorize(request: AccessRequest): Promise<AccessDecision> {
     const grants = await this.effectiveGrants(request);
-    return evaluate(grants, request);
+    const decision = evaluate(grants, request);
+    if (decision.allowed) {
+      await this.accessRepository.auditRestrictedReadIfApplicable(request);
+    }
+    return decision;
   }
 
   /**

@@ -9,7 +9,7 @@
 **Tech Stack:** NestJS 11 (api), Prisma 7 + `@prisma/adapter-pg` (packages/db), Postgres + `ltree`, Redis/BullMQ (permission cache), Zod 4 (packages/contracts), Vitest 4 + Testcontainers 12, Argon2id + `jose` (sessions).
 
 > **Scope note.** This is the M1 milestone plan. It is delivered as ordered
-> **slices** (§ "Slice roadmap"). Slices 0–3 below are fully detailed and
+> **slices** (§ "Slice roadmap"). Slices 0–4 below are fully detailed and
 > execution-ready. Each later slice is expanded to the same bite-sized TDD depth
 > just before it is executed, so its code is written against a proven foundation
 > rather than guessed. This matches roadmap.md §7 ("plans are living documents;
@@ -1848,9 +1848,533 @@ git commit -m "feat(access): seed rbac vocabulary and starter role templates"
 
 ---
 
-## Slices 4–10
+## Slice 4 — Resolution + gate
 
-Each is expanded to Slice 0/1/2/3 depth (files, interfaces, bite-sized TDD steps with full code) immediately before it is executed, against the now-proven foundation. Their deliverables, dependencies, and ship criteria are fixed in the roadmap table above; the canonical schema and algorithms they implement are `rbac-design.md` §3–§9 and `system-design.md` §5–§7, and the design decisions specific to this deployment are in `docs/superpowers/specs/2026-07-28-platform-tier-super-admin-design.md`.
+**Why:** `AuthzService.effectiveGrants()` still returns `[]` unconditionally — a deliberate, documented stub since Phase 0. This slice replaces it with `rbac-design.md` §4.2's real resolution algorithm, so `authorize()` (already built, already unit-tested) finally has real data to evaluate.
+
+**Scoping decision.** §4.2 unions four grant sources: platform roles, domain-role templates, unit-policy overrides, direct person grants. The last two have no backing table until Slice 6 (`unit_policy_grant`, `person_grant` are that slice's own deliverable) — so `effectiveGrants` here unions all four _positions_ but only the first two can produce anything; the other two are `[]` by construction, not omitted, so Slice 6 only has to fill in two branches, not restructure the function. Similarly, §4.1's `system_admin` bypass (step 0, "always allowed, always logged") is **not** built here — it requires an `audit_event` table (Slice 6's deliverable) to satisfy the canonical "always logged" half of that behaviour, and this deployment's break-glass divergence (`docs/superpowers/specs/2026-07-28-platform-tier-super-admin-design.md` §6) narrows it further to "no standing grant on restricted resources" — both are Slice 6 work. For now `system_admin` flows through the same `effectiveGrants` → `evaluate()` path as everyone else and — since Slice 3 seeded it zero grants — currently resolves to nothing. That is correct, not a bug: a platform role with no wired bypass and no grants should deny by default, same as anyone else.
+
+**A real gap found while scoping this slice.** `common/authz`'s `Grant`/`scopeCovers` only support prefix-or-equal scope matching — there is no way to express `role_template.scope_rule = 'self_unit'`, which per `rbac-design.md` §4.2 must match the target unit **exactly**, not its descendants ("Without this flag a `self_unit` role silently behaves like `self_subtree` the moment a club gains a child node"). This is this slice's own ship criterion ("self_unit role does not reach a child unit"), so it can't be deferred — `Grant` gets a new `exactOnly` flag and `scopeCovers` gets a third parameter, extending the existing engine rather than working around it (CLAUDE.md §4: "Permission logic lives only in `common/authz`... extend `authorize()`, never inline it").
+
+**Files:**
+
+- Modify: `apps/api/src/common/authz/authz.types.ts` (add `Grant.exactOnly?: boolean`)
+- Modify: `apps/api/src/common/authz/evaluate.ts` (`scopeCovers` gains an `exactOnly` parameter; `grantApplies` passes `grant.exactOnly`)
+- Modify: `apps/api/src/common/authz/evaluate.spec.ts` (exactOnly cases)
+- Modify: `apps/api/src/common/authz/authz.service.ts` (constructor takes `AccessRepository`; `effectiveGrants` delegates to it)
+- Modify: `apps/api/src/common/authz/authz.service.spec.ts` (construct with a fake `AccessRepository` — this stays a fast, DB-free unit test)
+- Modify: `apps/api/src/common/authz/authz.module.ts` (imports `AccessModule`)
+- Create: `apps/api/src/modules/access/access.repository.ts`
+- Create: `apps/api/src/modules/access/access.module.ts`
+- Modify: `packages/db/prisma/schema.prisma` (add `PlatformRoleAssignment` model + reverse relations on `Person`/`OrgUnit`)
+- Create: `packages/db/prisma/migrations/<ts>_platform_role_assignment/migration.sql`
+- Create: `apps/api/test/integration/access-resolution.int-spec.ts`
+
+**Interfaces:**
+
+- Consumes: `OrgUnitRepository`, `PersonRepository`, `RoleAssignmentRepository` (Slices 1–2, via their integration-test usage — `AccessRepository` itself queries `role_assignment`/`role_template`/`role_template_grant`/`platform_role_assignment`/`org_unit` directly, since resolving effective grants is inherently a cross-table join, not a single aggregate's concern); `seedAccessVocabulary` (Slice 3).
+- Produces:
+  - `AccessRepository.effectiveGrants(personId: string): Promise<Grant[]>` — platform-role grants ∪ domain-role-template grants for that person's **active** assignments; unit-policy/direct-grant positions return `[]` until Slice 6.
+  - `AuthzService.effectiveGrants()`/`.authorize()`/`.explain()` — same signatures as today, now backed by real data.
+  - `Grant.exactOnly?: boolean` — when true, `scopeCovers` requires an exact match; when false/absent, prefix-or-equal (today's behaviour, unchanged for existing callers).
+
+**Ship-criteria mapping** (from the roadmap table): "club_treasurer reads own club ledger (allow), sibling club ledger (deny)" and "ended assignment grants nothing" → new integration test (Step 6). "`self_unit` role does not reach a child unit" → new unit test on `evaluate()` (Step 2) — the precise, synthetic-scope place to prove the mechanism, since real clubs have no child units to construct this against realistically. "Deny beats allow" → **already proved** by the existing `evaluate.spec.ts` test ("lets deny beat allow"); no new grant source produces a `deny` effect until Slice 6 (`unit_policy_grant`), so there is nothing new to wire here.
+
+- [ ] **Step 1: Add `exactOnly` to the `Grant` type**
+
+In `apps/api/src/common/authz/authz.types.ts`, add to the `Grant` interface:
+
+```ts
+export interface Grant {
+  role: string;
+  /** ltree path of the scope node this applies at, e.g. "district.42.area.7.club.318". */
+  scope: string;
+  /**
+   * true for a role_template.scope_rule = 'self_unit' grant: the target scope
+   * must equal this grant's scope exactly, not merely fall beneath it.
+   * Absent/false = today's prefix-or-equal behaviour (self_subtree).
+   */
+  exactOnly?: boolean;
+  resource: string;
+  action: Action;
+  condition: Condition;
+  effect: Effect;
+}
+```
+
+- [ ] **Step 2: Write the failing `exactOnly` tests, then extend `scopeCovers`/`evaluate`**
+
+Add to `apps/api/src/common/authz/evaluate.spec.ts`, inside `describe('scopeCovers', ...)`:
+
+```ts
+it('an exactOnly grant matches its own scope but not a descendant', () => {
+  expect(scopeCovers('district.1.club.10', 'district.1.club.10', true)).toBe(true);
+  expect(scopeCovers('district.1.club.10', 'district.1.club.10.sub', true)).toBe(false);
+});
+```
+
+And inside `describe('evaluate', ...)`:
+
+```ts
+it('a self_unit (exactOnly) grant does not reach a child unit', () => {
+  const exact = [grant({ exactOnly: true })];
+  expect(evaluate(exact, baseRequest).allowed).toBe(true);
+  const childRequest = { ...baseRequest, scope: 'district.1.club.10.sub' };
+  expect(evaluate(exact, childRequest).allowed).toBe(false);
+});
+```
+
+Run: `pnpm --filter @toastmasters/api test` — expect FAIL (`scopeCovers` doesn't accept a third argument yet; TS would in fact reject the call, so this fails at typecheck/transform, not just assertion).
+
+Now update `apps/api/src/common/authz/evaluate.ts`:
+
+```ts
+export function scopeCovers(grantScope: string, targetScope: string, exactOnly = false): boolean {
+  if (grantScope === targetScope) return true;
+  if (exactOnly) return false;
+  return targetScope.startsWith(`${grantScope}.`);
+}
+```
+
+```ts
+function grantApplies(grant: Grant, request: AccessRequest): boolean {
+  return (
+    grant.resource === request.resource &&
+    grant.action === request.action &&
+    scopeCovers(grant.scope, request.scope, grant.exactOnly) &&
+    conditionHolds(grant.condition, request)
+  );
+}
+```
+
+Run: `pnpm --filter @toastmasters/api test` — expect PASS, all `evaluate`/`scopeCovers` tests including the two new ones.
+
+- [ ] **Step 3: Add the `PlatformRoleAssignment` model**
+
+In `packages/db/prisma/schema.prisma`, append:
+
+```prisma
+model PlatformRoleAssignment {
+  // A synthetic id, not the composite (person_id, role, org_unit_id) primary
+  // key rbac-design.md §3 table 6 shows — Postgres cannot put a nullable
+  // column (org_unit_id is NULL for global roles) inside a PRIMARY KEY. The
+  // @@unique below carries the intended uniqueness instead; Postgres treats
+  // multiple NULL org_unit_id rows as non-conflicting, which is acceptable
+  // here since this slice inserts no rows into this table at all.
+  id              String    @id @default(uuid()) @db.Uuid
+  personId        String    @map("person_id") @db.Uuid
+  person          Person    @relation("PlatformRoleAssignmentPerson", fields: [personId], references: [id])
+  role            String
+  orgUnitId       String?   @map("org_unit_id") @db.Uuid
+  orgUnit         OrgUnit?  @relation(fields: [orgUnitId], references: [id])
+  grantedBy       String    @map("granted_by") @db.Uuid
+  grantedByPerson Person    @relation("PlatformRoleAssignmentGrantedBy", fields: [grantedBy], references: [id])
+  grantedAt       DateTime  @default(now()) @map("granted_at")
+  expiresAt       DateTime? @map("expires_at")
+
+  @@unique([personId, role, orgUnitId])
+  @@map("platform_role_assignment")
+}
+```
+
+Add the two reverse relations to `Person`:
+
+```prisma
+model Person {
+  // ...existing fields...
+  platformRoleAssignments PlatformRoleAssignment[] @relation("PlatformRoleAssignmentPerson")
+  grantedPlatformRoles    PlatformRoleAssignment[] @relation("PlatformRoleAssignmentGrantedBy")
+}
+```
+
+And one reverse relation to `OrgUnit`:
+
+```prisma
+model OrgUnit {
+  // ...existing fields...
+  platformRoleAssignments PlatformRoleAssignment[]
+}
+```
+
+- [ ] **Step 4: Generate the migration, review, apply with `migrate deploy`**
+
+Run: `pnpm --filter @toastmasters/db exec prisma migrate dev --create-only --name platform_role_assignment`
+Review the generated SQL — strip any `DROP INDEX` on `org_unit_path_gist`/`org_unit_path_unique` (the same false-positive drift seen in Slices 2 and 3).
+
+Then: `pnpm --filter @toastmasters/db exec prisma migrate deploy && pnpm --filter @toastmasters/db exec prisma generate`
+
+- [ ] **Step 5: Implement `AccessRepository`**
+
+Create `apps/api/src/modules/access/access.repository.ts`:
+
+```ts
+import { Injectable } from '@nestjs/common';
+import { getPrisma, type PrismaClient } from '@toastmasters/db';
+import type { Grant } from '../../common/authz/authz.types';
+
+interface PathRow {
+  path: string;
+}
+
+@Injectable()
+export class AccessRepository {
+  constructor(private readonly db: PrismaClient = getPrisma()) {}
+
+  /**
+   * rbac-design.md §4.2: platform ∪ domain-role-template grants. Unit-policy
+   * overrides and direct person grants are Slice 6 — no table exists yet, so
+   * those two positions are simply absent from the union.
+   */
+  async effectiveGrants(personId: string): Promise<Grant[]> {
+    const [platformGrants, domainGrants] = await Promise.all([
+      this.platformRoleGrants(personId),
+      this.domainRoleGrants(personId),
+    ]);
+    return [...platformGrants, ...domainGrants];
+  }
+
+  private async platformRoleGrants(personId: string): Promise<Grant[]> {
+    const assignments = await this.db.platformRoleAssignment.findMany({
+      where: { personId, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+    });
+    const out: Grant[] = [];
+    for (const pa of assignments) {
+      const scope = pa.orgUnitId ? await this.pathOf(pa.orgUnitId) : await this.regionRootPath();
+      out.push(...(await this.grantsForRoleAtScope(pa.role, scope)));
+    }
+    return out;
+  }
+
+  private async domainRoleGrants(personId: string): Promise<Grant[]> {
+    const assignments = await this.db.roleAssignment.findMany({
+      where: { personId, status: 'active' },
+    });
+    const out: Grant[] = [];
+    for (const ra of assignments) {
+      const scope = await this.pathOf(ra.orgUnitId);
+      out.push(...(await this.grantsForRoleAtScope(ra.role, scope)));
+    }
+    return out;
+  }
+
+  /** Shared by both grant sources: look up the template once, stamp every grant with its scope + exactOnly. */
+  private async grantsForRoleAtScope(role: string, scope: string): Promise<Grant[]> {
+    const template = await this.db.roleTemplate.findUnique({ where: { role } });
+    if (!template) return []; // role not in the catalogue — nothing to grant
+    const exactOnly = template.scopeRule === 'self_unit';
+    const rows = await this.db.roleTemplateGrant.findMany({ where: { role } });
+    return rows.map((g) => ({
+      role,
+      scope,
+      exactOnly,
+      resource: g.resource,
+      action: g.action,
+      condition: g.condition,
+      effect: g.effect,
+    }));
+  }
+
+  private async pathOf(orgUnitId: string): Promise<string> {
+    const rows = await this.db.$queryRaw<PathRow[]>`
+      SELECT path::text AS path FROM org_unit WHERE id = ${orgUnitId}::uuid
+    `;
+    if (!rows[0]) throw new Error(`Org unit ${orgUnitId} not found`);
+    return rows[0].path;
+  }
+
+  /** A platform_role_assignment with org_unit_id = NULL means global reach — the region root's own path, so ordinary prefix matching covers the whole tree with no special-casing in evaluate(). */
+  private async regionRootPath(): Promise<string> {
+    const rows = await this.db.$queryRaw<PathRow[]>`
+      SELECT path::text AS path FROM org_unit WHERE type = 'region' LIMIT 1
+    `;
+    if (!rows[0]) throw new Error('No region root org unit exists');
+    return rows[0].path;
+  }
+}
+```
+
+Create `apps/api/src/modules/access/access.module.ts`:
+
+```ts
+import { Module } from '@nestjs/common';
+import { AccessRepository } from './access.repository';
+
+@Module({
+  providers: [AccessRepository],
+  exports: [AccessRepository],
+})
+export class AccessModule {}
+```
+
+- [ ] **Step 6: Write the failing integration test**
+
+Create `apps/api/test/integration/access-resolution.int-spec.ts`:
+
+```ts
+import { describe, it, beforeAll, afterAll, expect } from 'vitest';
+import type { PrismaClient } from '@toastmasters/db';
+import { seedAccessVocabulary } from '@toastmasters/db';
+import { startTestDb } from '../support/test-db';
+import { OrgUnitRepository } from '../../src/modules/org/org.repository';
+import { ProgramYearRepository } from '../../src/modules/identity/program-year.repository';
+import { PersonRepository } from '../../src/modules/identity/person.repository';
+import { RoleAssignmentRepository } from '../../src/modules/identity/role-assignment.repository';
+import { AccessRepository } from '../../src/modules/access/access.repository';
+import { AuthzService } from '../../src/common/authz/authz.service';
+
+describe('Access resolution (integration)', () => {
+  let db: PrismaClient;
+  let stop: () => Promise<void>;
+  let authz: AuthzService;
+  let people: PersonRepository;
+  let roleAssignments: RoleAssignmentRepository;
+
+  let clubAPath: string;
+  let clubBPath: string;
+  let clubAId: string;
+  let clubCId: string;
+  let clubCPath: string;
+  let programYearId: string;
+
+  beforeAll(async () => {
+    ({ db, stop } = await startTestDb());
+    await seedAccessVocabulary(db);
+
+    const orgUnits = new OrgUnitRepository(db);
+    const programYears = new ProgramYearRepository(db);
+    people = new PersonRepository(db);
+    roleAssignments = new RoleAssignmentRepository(db);
+    authz = new AuthzService(new AccessRepository(db));
+
+    const region = await orgUnits.createRoot({
+      type: 'region',
+      code: 'r1',
+      name: 'Region 1',
+      timezone: 'Asia/Dhaka',
+    });
+    const district = await orgUnits.createChild({
+      parentId: region.id,
+      type: 'district',
+      code: 'd41',
+      name: 'District 41',
+      timezone: 'Asia/Dhaka',
+    });
+    const clubA = await orgUnits.createChild({
+      parentId: district.id,
+      type: 'club',
+      code: 'cA',
+      name: 'Club A',
+      timezone: 'Asia/Dhaka',
+    });
+    const clubB = await orgUnits.createChild({
+      parentId: district.id,
+      type: 'club',
+      code: 'cB',
+      name: 'Club B',
+      timezone: 'Asia/Dhaka',
+    });
+    const clubC = await orgUnits.createChild({
+      parentId: district.id,
+      type: 'club',
+      code: 'cC',
+      name: 'Club C',
+      timezone: 'Asia/Dhaka',
+    });
+    clubAId = clubA.id;
+    clubAPath = clubA.path;
+    clubBPath = clubB.path;
+    clubCId = clubC.id;
+    clubCPath = clubC.path;
+
+    const year = await programYears.create({
+      id: '2026-2027',
+      startsOn: new Date('2026-07-01'),
+      endsOn: new Date('2027-06-30'),
+    });
+    programYearId = year.id;
+  });
+  afterAll(async () => {
+    await stop();
+  });
+
+  it('club_treasurer reads their own club ledger but not a sibling club ledger', async () => {
+    const treasurer = await people.create({
+      email: 'treasurer@example.com',
+      fullName: 'Treasurer One',
+    });
+    await roleAssignments.assign({
+      personId: treasurer.id,
+      orgUnitId: clubAId,
+      role: 'club_treasurer',
+      programYearId,
+      termStart: new Date('2026-07-01'),
+      termEnd: new Date('2027-06-30'),
+      appointedBy: treasurer.id,
+    });
+    const principal = { userId: treasurer.id, roles: [], scopes: [] };
+
+    const ownClub = await authz.authorize({
+      principal,
+      resource: 'finance.ledger',
+      action: 'read',
+      scope: clubAPath,
+    });
+    expect(ownClub.allowed).toBe(true);
+
+    const siblingClub = await authz.authorize({
+      principal,
+      resource: 'finance.ledger',
+      action: 'read',
+      scope: clubBPath,
+    });
+    expect(siblingClub.allowed).toBe(false);
+  });
+
+  it('an ended assignment grants nothing', async () => {
+    // A distinct club (clubC), not clubA — reusing clubA here collides with
+    // the previous test's still-active club_treasurer@clubA assignment
+    // against Slice 2's role_assignment_singleton index (found by actually
+    // running this test).
+    const treasurer = await people.create({
+      email: 'ended-treasurer@example.com',
+      fullName: 'Ended Treasurer',
+    });
+    const assignment = await roleAssignments.assign({
+      personId: treasurer.id,
+      orgUnitId: clubCId,
+      role: 'club_treasurer',
+      programYearId,
+      termStart: new Date('2026-07-01'),
+      termEnd: new Date('2027-06-30'),
+      appointedBy: treasurer.id,
+    });
+    await roleAssignments.end(assignment.id, 'resigned');
+
+    const decision = await authz.authorize({
+      principal: { userId: treasurer.id, roles: [], scopes: [] },
+      resource: 'finance.ledger',
+      action: 'read',
+      scope: clubCPath,
+    });
+    expect(decision).toEqual({ allowed: false, reason: 'default-deny' });
+  });
+});
+```
+
+Run: `pnpm --filter @toastmasters/api test:int -- access-resolution` — expect FAIL (`AuthzService` doesn't accept a constructor argument yet).
+
+- [ ] **Step 7: Wire `AuthzService` to `AccessRepository`**
+
+Modify `apps/api/src/common/authz/authz.service.ts`:
+
+```ts
+import { Injectable } from '@nestjs/common';
+import type { AccessDecision, AccessRequest, Grant } from './authz.types';
+import { evaluate } from './evaluate';
+import { AccessRepository } from '../../modules/access/access.repository';
+
+@Injectable()
+export class AuthzService {
+  constructor(private readonly accessRepository: AccessRepository) {}
+
+  /** Resolve the grants that apply to a request (rbac-design.md §4.2). */
+  async effectiveGrants(request: AccessRequest): Promise<Grant[]> {
+    return this.accessRepository.effectiveGrants(request.principal.userId);
+  }
+
+  /** The one authorization gate. Everything funnels through here (default-deny). */
+  async authorize(request: AccessRequest): Promise<AccessDecision> {
+    const grants = await this.effectiveGrants(request);
+    return evaluate(grants, request);
+  }
+
+  /**
+   * Access inspector: the decision plus the grants that were considered — the
+   * "why can Karim see the ledger?" trace from rbac-design.md. Ships with the
+   * engine so any decision is auditable.
+   */
+  async explain(
+    request: AccessRequest,
+  ): Promise<{ decision: AccessDecision; considered: Grant[] }> {
+    const considered = await this.effectiveGrants(request);
+    return { decision: evaluate(considered, request), considered };
+  }
+}
+```
+
+Modify `apps/api/src/common/authz/authz.module.ts`:
+
+```ts
+import { Global, Module } from '@nestjs/common';
+import { AuthzService } from './authz.service';
+import { AccessModule } from '../../modules/access/access.module';
+
+@Global()
+@Module({
+  imports: [AccessModule],
+  providers: [AuthzService],
+  exports: [AuthzService],
+})
+export class AuthzModule {}
+```
+
+Update the now-broken `apps/api/src/common/authz/authz.service.spec.ts` to construct `AuthzService` with a fake `AccessRepository`, keeping it a fast, DB-free unit test — the DB-backed behaviour is what Step 6's integration test proves:
+
+```ts
+import { describe, it, expect } from 'vitest';
+import { AuthzService } from './authz.service';
+import type { AccessRequest } from './authz.types';
+import type { AccessRepository } from '../../modules/access/access.repository';
+
+const request: AccessRequest = {
+  principal: { userId: 'u1', roles: [], scopes: [] },
+  resource: 'finance.ledger',
+  action: 'read',
+  scope: 'district.1.club.10',
+};
+
+function fakeAccessRepository(): AccessRepository {
+  return { effectiveGrants: async () => [] } as unknown as AccessRepository;
+}
+
+describe('AuthzService', () => {
+  it('denies by default while no grants resolve', async () => {
+    const service = new AuthzService(fakeAccessRepository());
+    const decision = await service.authorize(request);
+    expect(decision).toEqual({ allowed: false, reason: 'default-deny' });
+  });
+
+  it('explain() returns the considered set alongside the decision', async () => {
+    const service = new AuthzService(fakeAccessRepository());
+    const { decision, considered } = await service.explain(request);
+    expect(considered).toEqual([]);
+    expect(decision.allowed).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 8: Run it to verify it passes**
+
+Run: `pnpm --filter @toastmasters/api test:int -- access-resolution`
+Expected: PASS (both new tests).
+
+- [ ] **Step 9: Verify the wider gate is still green**
+
+Run: `pnpm --filter @toastmasters/api test && pnpm --filter @toastmasters/api test:int && pnpm --filter @toastmasters/db build && pnpm lint && pnpm typecheck && pnpm build`
+Expected: no errors; every unit and integration test green, including the pre-existing `authz.service.spec.ts` (now DB-free again) and the two new `exactOnly` cases in `evaluate.spec.ts`.
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add apps/api/src/common/authz apps/api/src/modules/access packages/db/prisma/schema.prisma packages/db/prisma/migrations apps/api/test/integration/access-resolution.int-spec.ts
+git commit -m "feat(access): wire real grant resolution into authorize()"
+```
+
+---
+
+## Slices 5–10
+
+Each is expanded to Slice 0/1/2/3/4 depth (files, interfaces, bite-sized TDD steps with full code) immediately before it is executed, against the now-proven foundation. Their deliverables, dependencies, and ship criteria are fixed in the roadmap table above; the canonical schema and algorithms they implement are `rbac-design.md` §3–§9 and `system-design.md` §5–§7, and the design decisions specific to this deployment are in `docs/superpowers/specs/2026-07-28-platform-tier-super-admin-design.md`.
 
 **Self-review (this plan vs the spec):**
 

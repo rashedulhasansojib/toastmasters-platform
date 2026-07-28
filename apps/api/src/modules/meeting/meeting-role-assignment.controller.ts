@@ -1,16 +1,20 @@
-import { Body, Controller, Get, NotFoundException, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, NotFoundException, Param, Post, Query } from '@nestjs/common';
 import { z } from 'zod';
 import {
   createMeetingRoleAssignmentRequestSchema,
+  meetingRoleKey,
   type CreateMeetingRoleAssignmentRequest,
   type MeetingRoleAssignment,
+  type RoleRotationSuggestion,
 } from '@toastmasters/contracts';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { ResourceScope } from '../../common/authz/resource-scope.decorator';
 import { MeetingRepository } from './meeting.repository';
 import { MeetingRoleAssignmentRepository } from './meeting-role-assignment.repository';
+import { RoleRotationRepository } from './role-rotation.repository';
 
 const uuidPipe = new ZodValidationPipe(z.uuid());
+const roleKeyPipe = new ZodValidationPipe(meetingRoleKey);
 
 /** M3 Slice 3. Same club-scoped-in-the-URL shape as AgendaItemController; no service layer. */
 @Controller('clubs/:clubUnitId/meetings/:meetingId/role-assignments')
@@ -18,6 +22,7 @@ export class MeetingRoleAssignmentController {
   constructor(
     private readonly meetings: MeetingRepository,
     private readonly roleAssignments: MeetingRoleAssignmentRepository,
+    private readonly rotation: RoleRotationRepository,
   ) {}
 
   private async assertMeetingInClub(clubUnitId: string, meetingId: string): Promise<void> {
@@ -52,5 +57,17 @@ export class MeetingRoleAssignmentController {
   ): Promise<MeetingRoleAssignment[]> {
     await this.assertMeetingInClub(clubUnitId, meetingId);
     return this.roleAssignments.findByMeeting(meetingId);
+  }
+
+  /** M3 Slice 8: system-design.md §9.3 — ranked suggestions, never auto-assignment. Reuses meeting.role:read — no new resource. */
+  @Get('suggestions')
+  @ResourceScope('meeting.role', 'read', { source: 'param', key: 'clubUnitId' })
+  async suggestions(
+    @Param('clubUnitId', uuidPipe) clubUnitId: string,
+    @Param('meetingId', uuidPipe) meetingId: string,
+    @Query('roleKey', roleKeyPipe) roleKey: z.infer<typeof meetingRoleKey>,
+  ): Promise<RoleRotationSuggestion[]> {
+    await this.assertMeetingInClub(clubUnitId, meetingId);
+    return this.rotation.suggest({ clubUnitId, meetingId, roleKey });
   }
 }

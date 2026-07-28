@@ -18,6 +18,7 @@ import { CapabilityTokenService } from './capability-token.service';
 import { CapabilityTokenController } from './capability-token.controller';
 import { MeetingLiveRecordRepository } from './meeting-live-record.repository';
 import { MeetingLiveRecordController } from './meeting-live-record.controller';
+import { RoleRotationRepository } from './role-rotation.repository';
 
 @Module({
   providers: [
@@ -31,6 +32,7 @@ import { MeetingLiveRecordController } from './meeting-live-record.controller';
     CapabilityTokenRepository,
     CapabilityTokenService,
     MeetingLiveRecordRepository,
+    RoleRotationRepository,
   ],
   controllers: [
     MeetingController,

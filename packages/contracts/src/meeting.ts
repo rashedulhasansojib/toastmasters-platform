@@ -107,6 +107,16 @@ export type CreateMeetingRoleAssignmentRequest = z.infer<
   typeof createMeetingRoleAssignmentRequestSchema
 >;
 
+/** M3 Slice 8: system-design.md §9.3 — ranked, reasoned suggestions, never auto-assignment. */
+export const roleRotationSuggestion = z.object({
+  personId: z.uuid(),
+  fullName: z.string(),
+  lastFulfilledAt: z.iso.datetime().nullable(),
+  stalenessDays: z.number().int().nonnegative().nullable(),
+  reason: z.string(),
+});
+export type RoleRotationSuggestion = z.infer<typeof roleRotationSuggestion>;
+
 export const speechSlotStatus = z.enum(['requested', 'approved', 'declined']);
 export type SpeechSlotStatus = z.infer<typeof speechSlotStatus>;
 

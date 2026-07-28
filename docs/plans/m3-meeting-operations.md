@@ -166,3 +166,27 @@
 - [x] Bumped resource count (14→15) and `authorization-matrix.int-spec.ts`.
 - [x] Full gate — green (496 integration, up from 470; 72 unit; lint/typecheck/build clean).
 - [x] Commit: `feat(meeting): live meeting-day tools — idempotent timer/ah-counter/grammarian records`
+
+---
+
+## Slice 8 — Role rotation suggestions
+
+**Why:** `system-design.md` §9.3 — ranked, reasoned suggestions for who should fill a role next, never auto-assignment.
+
+**Scoping decisions:**
+
+- **`blackoutDates` skipped** — not modeled on `Person` yet; everything else in §9.3's query is implemented as written.
+- **Reuses `meeting.role:read`** — no new resource, since this is a read projection over the same data Slice 3 already gates. No dedicated 403 test in this slice's own file; Slice 3's already covers the identical resource+scope+guard combination.
+- **`GET .../role-assignments/suggestions?roleKey=X`** on the existing `MeetingRoleAssignmentController`, not a new controller.
+
+**Files:** `packages/contracts/src/meeting.ts` (+`roleRotationSuggestion`), `apps/api/src/modules/meeting/role-rotation.repository.ts` (new), `meeting-role-assignment.controller.ts` (+endpoint), `meeting.module.ts`.
+
+**Tests** (`role-rotation-http.int-spec.ts`, new): active members not already assigned in the meeting are suggested with a reason; an already-assigned member is excluded.
+
+- [x] Repository + controller wiring.
+- [x] lint/typecheck clean. Full test run deferred — see session note below.
+- [ ] Commit: `feat(meeting): role rotation suggestions — ranked, reasoned, never automatic`
+
+---
+
+**Session note (unverified batch below):** slices 8 onward in this session were built with `lint`/`typecheck` checked after each slice but **`test`/`test:int`/`build` deliberately skipped per explicit instruction** ("no need to run test now, I will test when I get back all together"). Run the full gate (`pnpm lint && pnpm typecheck && pnpm test && pnpm test:int && pnpm build`) before trusting any slice below as done.

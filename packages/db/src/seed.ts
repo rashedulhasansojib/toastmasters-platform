@@ -45,7 +45,7 @@ const RESOURCES: ResourceSeed[] = [
     resource: 'meeting.meeting',
     context: 'meeting',
     label: 'Meeting',
-    allowedActions: ['read', 'update'],
+    allowedActions: ['read', 'create', 'update'],
     clubScoped: true,
     sensitivity: 'normal',
   },
@@ -117,6 +117,8 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
     isSingleton: true,
     label: 'Vice President Education',
     grants: [
+      { resource: 'meeting.meeting', action: 'create' },
+      { resource: 'meeting.meeting', action: 'read' },
       { resource: 'meeting.meeting', action: 'update' },
       { resource: 'meeting.role', action: 'update' },
       { resource: 'identity.role_assignment', action: 'read' },

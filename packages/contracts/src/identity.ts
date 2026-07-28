@@ -74,6 +74,18 @@ export const roleAssignment = z.object({
 });
 export type RoleAssignment = z.infer<typeof roleAssignment>;
 
+/** Slice 9: the HTTP surface for appointing an officer — e.g. a President assigning a VPE (prd.md FR-ACC-8). */
+export const createRoleAssignmentRequestSchema = z
+  .object({
+    personId: z.uuid(),
+    role: z.string().min(1),
+    programYearId: z.string().min(1),
+    termStart: z.iso.date(),
+    termEnd: z.iso.date(),
+  })
+  .strict();
+export type CreateRoleAssignmentRequest = z.infer<typeof createRoleAssignmentRequestSchema>;
+
 export const programYearStatus = z.enum(['upcoming', 'current', 'closed']);
 export type ProgramYearStatus = z.infer<typeof programYearStatus>;
 

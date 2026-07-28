@@ -50,7 +50,12 @@ export class ResourceGuard implements CanActivate {
     ]);
     if (!meta) return true; // Authentication-only route.
 
-    const scope = request.params?.['scope'] ?? request.query?.['scope'] ?? '';
+    const scope = meta.locate
+      ? await this.authz.resolveScope(
+          (meta.locate.source === 'param' ? request.params : request.query)?.[meta.locate.key] ??
+            '',
+        )
+      : (request.params?.['scope'] ?? request.query?.['scope'] ?? '');
     const decision = await this.authz.authorize({
       principal,
       resource: meta.resource,

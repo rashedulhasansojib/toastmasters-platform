@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import type { AccessDecision, AccessRequest, Grant } from './authz.types';
 import { evaluate } from './evaluate';
 import { AccessRepository } from '../../modules/access/access.repository';
@@ -6,6 +6,15 @@ import { AccessRepository } from '../../modules/access/access.repository';
 @Injectable()
 export class AuthzService {
   constructor(private readonly accessRepository: AccessRepository) {}
+
+  /** Resolves an org-unit id to its ltree scope path for `@ResourceScope({ locate: ... })` routes (Slice 9). */
+  async resolveScope(orgUnitId: string): Promise<string> {
+    try {
+      return await this.accessRepository.pathOf(orgUnitId);
+    } catch {
+      throw new NotFoundException('Org unit not found');
+    }
+  }
 
   /** Resolve the grants that apply to a request (rbac-design.md §4.2). */
   async effectiveGrants(request: AccessRequest): Promise<Grant[]> {

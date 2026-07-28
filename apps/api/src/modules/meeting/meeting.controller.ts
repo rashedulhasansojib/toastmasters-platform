@@ -1,0 +1,58 @@
+import { Body, Controller, Get, NotFoundException, Param, Post } from '@nestjs/common';
+import { z } from 'zod';
+import {
+  createMeetingRequestSchema,
+  type CreateMeetingRequest,
+  type Meeting,
+} from '@toastmasters/contracts';
+import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
+import { ResourceScope } from '../../common/authz/resource-scope.decorator';
+import { CurrentUser } from '../../common/auth/current-user.decorator';
+import type { Principal } from '../../common/authz/authz.types';
+import { MeetingRepository } from './meeting.repository';
+
+const uuidPipe = new ZodValidationPipe(z.uuid());
+
+/**
+ * Club-scoped in the URL so the guard can resolve scope from `clubUnitId`
+ * before touching the database for the target row (Slice 9's ship gate:
+ * query-level denial, not filtered-after-fetch).
+ */
+@Controller('clubs/:clubUnitId/meetings')
+export class MeetingController {
+  constructor(private readonly meetings: MeetingRepository) {}
+
+  @Post()
+  @ResourceScope('meeting.meeting', 'create', { source: 'param', key: 'clubUnitId' })
+  async create(
+    @Param('clubUnitId', uuidPipe) clubUnitId: string,
+    @CurrentUser() principal: Principal,
+    @Body(new ZodValidationPipe(createMeetingRequestSchema)) body: CreateMeetingRequest,
+  ): Promise<Meeting> {
+    return this.meetings.create({
+      clubUnitId,
+      programYearId: body.programYearId,
+      scheduledAt: new Date(body.scheduledAt),
+      createdBy: principal.userId,
+    });
+  }
+
+  @Get()
+  @ResourceScope('meeting.meeting', 'read', { source: 'param', key: 'clubUnitId' })
+  async list(@Param('clubUnitId', uuidPipe) clubUnitId: string): Promise<Meeting[]> {
+    return this.meetings.findByClub(clubUnitId);
+  }
+
+  @Get(':meetingId')
+  @ResourceScope('meeting.meeting', 'read', { source: 'param', key: 'clubUnitId' })
+  async findOne(
+    @Param('clubUnitId', uuidPipe) clubUnitId: string,
+    @Param('meetingId', uuidPipe) meetingId: string,
+  ): Promise<Meeting> {
+    const found = await this.meetings.findById(meetingId);
+    if (!found || found.clubUnitId !== clubUnitId) {
+      throw new NotFoundException('Meeting not found');
+    }
+    return found;
+  }
+}

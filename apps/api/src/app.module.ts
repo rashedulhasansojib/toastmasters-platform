@@ -11,6 +11,7 @@ import { AuthzModule } from './common/authz/authz.module';
 import { EmailModule } from './common/email/email.module';
 import { JwtAuthGuard } from './common/auth/jwt-auth.guard';
 import { ResourceGuard } from './common/authz/resource.guard';
+import { MeetingModule } from './modules/meeting/meeting.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { ResourceGuard } from './common/authz/resource.guard';
     AuthzModule,
     EmailModule,
     HealthModule,
+    MeetingModule,
   ],
   // Global guard chain: authenticate first (JwtAuthGuard), then authorize
   // (ResourceGuard). Both honour @Public(). Default-deny everywhere else.

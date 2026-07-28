@@ -5,6 +5,7 @@ import { PersonRepository } from './person.repository';
 import { ClubMembershipRepository } from './club-membership.repository';
 import { ProgramYearRepository } from './program-year.repository';
 import { RoleAssignmentRepository } from './role-assignment.repository';
+import { IdentityController } from './identity.controller';
 
 @Module({
   providers: [
@@ -14,6 +15,7 @@ import { RoleAssignmentRepository } from './role-assignment.repository';
     ProgramYearRepository,
     RoleAssignmentRepository,
   ],
+  controllers: [IdentityController],
   exports: [
     PersonRepository,
     ClubMembershipRepository,

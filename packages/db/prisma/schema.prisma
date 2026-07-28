@@ -57,6 +57,7 @@ model OrgUnit {
   unitPolicyGrants UnitPolicyGrant[]
   personGrants     PersonGrant[]
   auditEvents      AuditEvent[]
+  meetings         Meeting[]
 
   @@map("org_unit")
 }
@@ -92,6 +93,7 @@ model Person {
   personGrantsReceived      PersonGrant[]     @relation("PersonGrantSubject")
   personGrantsIssued        PersonGrant[]     @relation("PersonGrantGrantedBy")
   auditEvents               AuditEvent[]
+  meetingsCreated           Meeting[]
 
   @@map("person")
 }
@@ -191,8 +193,29 @@ model ProgramYear {
   status   ProgramYearStatus @default(upcoming)
 
   roleAssignments RoleAssignment[]
+  meetings        Meeting[]
 
   @@map("program_year")
+}
+
+/**
+ * Deliberately bare (Slice 9 — the M1 ship gate needs a record to hang
+ * authorization on, not meeting operations). system-design.md's full entity
+ * (agenda, roles, speech slots, lifecycle states, checklists) is a later
+ * milestone.
+ */
+model Meeting {
+  id              String      @id @default(uuid()) @db.Uuid
+  clubUnitId      String      @map("club_unit_id") @db.Uuid
+  clubUnit        OrgUnit     @relation(fields: [clubUnitId], references: [id])
+  programYearId   String      @map("program_year_id")
+  programYear     ProgramYear @relation(fields: [programYearId], references: [id])
+  scheduledAt     DateTime    @map("scheduled_at")
+  createdBy       String      @map("created_by") @db.Uuid
+  createdByPerson Person      @relation(fields: [createdBy], references: [id])
+  createdAt       DateTime    @default(now()) @map("created_at")
+
+  @@map("meeting")
 }
 
 enum ResourceSensitivity {

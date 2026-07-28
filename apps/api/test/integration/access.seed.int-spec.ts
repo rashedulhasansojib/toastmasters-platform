@@ -65,4 +65,40 @@ describe('seedAccessVocabulary (integration)', () => {
     });
     expect(vpeGrants).toHaveLength(0);
   });
+
+  it("grants club_vpe (not club_president) meeting.meeting:create — system-design.md §7.5's Meeting/agenda row", async () => {
+    const meetingResource = await db.resourceCatalog.findUnique({
+      where: { resource: 'meeting.meeting' },
+    });
+    expect(meetingResource?.allowedActions).toContain('create');
+
+    const vpeCreate = await db.roleTemplateGrant.findUnique({
+      where: {
+        role_resource_action_condition: {
+          role: 'club_vpe',
+          resource: 'meeting.meeting',
+          action: 'create',
+          condition: 'any',
+        },
+      },
+    });
+    expect(vpeCreate?.effect).toBe('allow');
+
+    const vpeRead = await db.roleTemplateGrant.findUnique({
+      where: {
+        role_resource_action_condition: {
+          role: 'club_vpe',
+          resource: 'meeting.meeting',
+          action: 'read',
+          condition: 'any',
+        },
+      },
+    });
+    expect(vpeRead?.effect).toBe('allow'); // create/update without read would be unusable
+
+    const presidentCreate = await db.roleTemplateGrant.findMany({
+      where: { role: 'club_president', resource: 'meeting.meeting', action: 'create' },
+    });
+    expect(presidentCreate).toHaveLength(0);
+  });
 });

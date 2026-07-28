@@ -280,8 +280,23 @@
 
 **M3 status:** all roadmap-listed content shipped (agenda builder, roles-as-entities, speech-slot request/approval, agenda templates, checklists, capability tokens, live meeting-day tools, role rotation suggestions, ballots, guarded close-out, printable agenda). Deferred, explicitly, for a later slice: `reopen`, domain-event emission (`MeetingHeld` etc. — needs an event bus that doesn't exist yet), guest ballot voting via capability tokens, `ProspectRef` ballot candidates (needs M4's `Prospect`), a real PDF renderer (needs a dependency decision), assignee-scoped (vs. officer-only) role confirm/decline.
 
-**Verification status:** slices 8–12 above have `lint`/`typecheck` green but **the test suite (`pnpm test`, `pnpm test:int`) and `pnpm build` have not been run** — deliberately skipped per an explicit mid-session instruction to defer verification to a single batch run later. Run the full gate before trusting this milestone as done:
+**Verification status:** `pnpm lint`, `pnpm typecheck`, `pnpm test` (72 unit), and `pnpm build` are green across the whole monorepo as of the dashboard slices below. `pnpm test:int` (Testcontainers — real Postgres + Redis) has **not** been run since slice 7 (496 integration tests then; slices 8–12 and all dashboard work below are unverified against it) — no Docker was available in the environment that did this work. Run it before trusting slices 8–12 or the authz-affecting parts of the dashboard slices as done:
 
 ```
-pnpm lint && pnpm typecheck && pnpm test && pnpm test:int && pnpm build
+pnpm test:int
 ```
+
+**Dashboard UI status:** through slice 12, only the agenda (slice 1–2) had a dashboard screen — everything else in this milestone was API-only. A follow-up pass (outside the numbered slices above, same milestone) built the missing UI end to end, porting what applied from `../toastmaster-portal`'s Timer/Ah-Counter/guest-token/print-view patterns onto the new data model:
+
+- Meetings list + create, and guarded lifecycle actions (publish/start/close/cancel).
+- Agenda templates (build + apply-to-meeting) and a print-agenda link.
+- Role assignment, confirm/decline, and rotation suggestions.
+- Speech-slot request/approve/decline.
+- Checklist templates and per-meeting runs (tap-to-toggle items).
+- Capability-token issue/revoke and the public `/guest/[token]` landing page (verify-only — guest data entry has no public write route yet, see below).
+- Live meeting-day tools (timer/ah-counter/grammarian) at `/clubs/:clubUnitId/meetings/:meetingId/live`, its own route given per-second client ticking.
+- Ballot open/vote/tally.
+
+Scope cuts made in this pass, not oversights: the timer uses one fixed flag-time threshold instead of six per-category ones; live-record "recording" is an explicit action, not continuous auto-sync; there is no member directory/combobox yet, so person assignment everywhere is a raw person-ID text field; capability tokens have no list view (the API never returns a token after issue, by design, so issued links only live in the issuing page's local state); and the guest landing page cannot actually let a guest submit timer/ah-counter data, because `POST /live-records` still requires an authenticated grant — only issuance and verification are public today.
+
+Ported `select.tsx` (base-nova/Base UI, same toolchain as slice 2) from the legacy portal — no new dependency, just more use of what's already installed.

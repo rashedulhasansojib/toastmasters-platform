@@ -322,6 +322,31 @@ enum ProspectPipelineStatus {
 
 ---
 
+## Dashboard UI status
+
+Built after all 10 backend slices, in the same autopilot pass, mirroring M3's dashboard-UI-as-a-follow-on-phase precedent (this wasn't itself one of the 10 slices above — the slice breakdown table is API-only, same as it was for M3 before its UI phase).
+
+**Built:**
+
+- `lib/membership.ts`, `lib/finance.ts` — read helpers for every M4 endpoint, same `authedFetch`/`prospect.array().parse(...)` pattern as `lib/meetings.ts`.
+- A BFF proxy route (`app/api/clubs/[clubUnitId]/...`) for every M4 write endpoint across all 10 slices, plus `app/api/public/capability-tokens/[token]/guest-registration` for the one public write route.
+- `/clubs/:clubUnitId/prospects` (list + create) and `/clubs/:clubUnitId/prospects/:id` (status update, convert, visits, communications) — the full Slice 1/2/4 surface.
+- `/clubs/:clubUnitId/finance` — one hub page, sections for ledger (Slice 5), dues settings + records + payments (Slice 6), invoices + payments/void/credit-note (Slice 7), installment plans + payments/cancel (Slice 8), financial reports + finalize (Slice 9).
+- `/clubs/:clubUnitId/public` — the Slice 10 public upcoming-meetings page.
+- `/guest/:token` (M3's existing capability-token landing page) now renders a real `GuestRegistrationForm` when `purpose === 'guest_register'`, instead of falling through to the "not wired up yet" placeholder — every other purpose still does.
+- Nav links for Prospects/Finance added to `layout.tsx`.
+
+**Deliberate scope cuts, consistent with the rest of this milestone's UI-lightness:**
+
+- No dedicated invoice/dues-record/installment-plan **detail** pages — everything is a flat list on the finance hub. A prospect gets its own detail page (visits/communications need the room); finance rows don't yet.
+- Ledger-entry linking (dues payments, invoice payments, installment payments all reference an existing `LedgerEntry.id`) is a **raw ID paste via `window.prompt`**, not a picker — functionally correct (matches the API's actual design, which links rather than embeds) but not a good officer experience. A proper "pick from recent ledger entries" combobox is the obvious next UI refinement.
+- No kanban/board view for the prospect pipeline — a flat list grouped by nothing, status shown as text. `system-design.md` §22's interface-surface table sketches a "Prospect kanban" for the VP Membership view; this is a flat list instead.
+- `programYearId` comes from `session.programYearId` throughout (same pattern `CreateMeetingForm` already established) — if that's ever null (no active program year), every M4 create form in the hub degrades to an inline error rather than being hidden.
+
+**Not done at all, same as every backend slice since #2:** no manual click-through of any of this in a browser, no dev-server run. `pnpm lint && pnpm typecheck && pnpm build` is green (dashboard `next build` succeeds, including static-generation of every new route), which proves the code compiles and the App Router's route tree is well-formed — it does not prove any form actually works end-to-end against the live API. Before trusting this UI, at minimum: log in, walk one full prospect → convert → dues → invoice → payment cycle by hand, and confirm the `window.prompt`-based ledger-linking flow doesn't feel broken in practice (browser `prompt()` dialogs are a genuinely weak UX choice made purely for speed here, not a considered design decision).
+
+---
+
 ## M4 status: all 10 slices shipped
 
 Every slice above landed as its own commit on `feat/m4-members-money`, pushed after each one. **What this milestone has NOT had, across every slice from #2 on**: a single new automated test, a `test:int` run, or a from-scratch manual curl/live-data verification pass (Slice 1 alone got that full treatment, before the autopilot instruction). Every schema change applied cleanly to the real dev DB (Neon) via `prisma migrate deploy`, and every `pnpm lint && pnpm typecheck && pnpm build` gate came back green — but green types and a clean build are necessary, not sufficient. Before this branch is trusted with real club money and real member PII, at minimum: run `test:int` end-to-end (needs a container runtime this environment doesn't have), and manually walk the ship-gate story once for real — a guest attends (Slice 10's public join) → converts (Slice 4) → is invoiced (Slice 6→7) → pays (Slice 7's payment endpoint) — plus the two items flagged as higher-risk above (financial-report aggregation math, the invoice sequence's row-lock concurrency behavior, the DI-cycle trace).

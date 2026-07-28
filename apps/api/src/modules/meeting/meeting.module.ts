@@ -19,6 +19,8 @@ import { CapabilityTokenController } from './capability-token.controller';
 import { MeetingLiveRecordRepository } from './meeting-live-record.repository';
 import { MeetingLiveRecordController } from './meeting-live-record.controller';
 import { RoleRotationRepository } from './role-rotation.repository';
+import { AgendaTemplateRepository } from './agenda-template.repository';
+import { AgendaTemplateController } from './agenda-template.controller';
 
 @Module({
   providers: [
@@ -33,6 +35,7 @@ import { RoleRotationRepository } from './role-rotation.repository';
     CapabilityTokenService,
     MeetingLiveRecordRepository,
     RoleRotationRepository,
+    AgendaTemplateRepository,
   ],
   controllers: [
     MeetingController,
@@ -43,6 +46,7 @@ import { RoleRotationRepository } from './role-rotation.repository';
     ChecklistRunController,
     CapabilityTokenController,
     MeetingLiveRecordController,
+    AgendaTemplateController,
   ],
   exports: [MeetingRepository, CapabilityTokenRepository],
 })

@@ -185,8 +185,29 @@
 
 - [x] Repository + controller wiring.
 - [x] lint/typecheck clean. Full test run deferred — see session note below.
-- [ ] Commit: `feat(meeting): role rotation suggestions — ranked, reasoned, never automatic`
+- [x] Commit: `feat(meeting): role rotation suggestions — ranked, reasoned, never automatic`
 
 ---
 
 **Session note (unverified batch below):** slices 8 onward in this session were built with `lint`/`typecheck` checked after each slice but **`test`/`test:int`/`build` deliberately skipped per explicit instruction** ("no need to run test now, I will test when I get back all together"). Run the full gate (`pnpm lint && pnpm typecheck && pnpm test && pnpm test:int && pnpm build`) before trusting any slice below as done.
+
+---
+
+## Slice 9 — Agenda templates
+
+**Why:** a club builds an agenda shape once (Word of the Day, Table Topics, Prepared Speeches, …) and applies it to every meeting instead of retyping it — the same reusable-template-then-snapshot pattern `ChecklistTemplate`/`ChecklistRun` already established in Slice 5.
+
+**Scoping decisions:**
+
+- **Reuses `meeting.agenda_item`'s create/read grants** — building a template is the same capability as building one meeting's agenda, just club- instead of meeting-scoped. No new resource, no matrix bump.
+- **`POST .../agenda-items/from-template` bulk-appends**, continuing the existing position sequence — matches Slice 1's append-only, server-assigned `position` invariant exactly; applying a template never overwrites items already on the meeting.
+- **No dedicated 403 test** — same resource+scope+guard Slice 1 already tests.
+
+**Files:** `packages/db/prisma/schema.prisma` (+`AgendaTemplate`, +migration), `packages/contracts/src/meeting.ts` (+template schemas), `apps/api/src/modules/meeting/agenda-template.{repository,controller}.ts` (new), `agenda-item.repository.ts` (+`createFromTemplate`), `agenda-item.controller.ts` (+`from-template` route), `meeting.module.ts`.
+
+**Tests** (`agenda-template-http.int-spec.ts`, new): a VPE builds a template, applies it to a meeting that already has one item — the two template items append at positions 2/3, list length 3.
+
+- [x] Schema + migration.
+- [x] Repository + controller wiring.
+- [x] lint/typecheck clean; test suite deferred (session note above).
+- [x] Commit: `feat(meeting): agenda templates — build once, apply to any meeting`

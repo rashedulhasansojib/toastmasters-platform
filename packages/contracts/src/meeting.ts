@@ -45,6 +45,36 @@ export const createAgendaItemRequestSchema = z
   .strict();
 export type CreateAgendaItemRequest = z.infer<typeof createAgendaItemRequestSchema>;
 
+/** M3 Slice 9: a reusable agenda template a club applies to many meetings. */
+export const agendaTemplateItem = z.object({
+  order: z.number().int().nonnegative(),
+  title: z.string().min(1),
+  plannedDurationSeconds: z.number().int().positive(),
+  roleKey: z.string().min(1).nullable(),
+});
+export type AgendaTemplateItem = z.infer<typeof agendaTemplateItem>;
+
+export const agendaTemplate = z.object({
+  id: z.uuid(),
+  orgUnitId: z.uuid(),
+  name: z.string().min(1),
+  items: z.array(agendaTemplateItem),
+  isActive: z.boolean(),
+  createdAt: z.iso.datetime(),
+});
+export type AgendaTemplate = z.infer<typeof agendaTemplate>;
+
+export const createAgendaTemplateRequestSchema = z
+  .object({
+    name: z.string().min(1),
+    items: z.array(agendaTemplateItem.omit({ order: true })).min(1),
+  })
+  .strict();
+export type CreateAgendaTemplateRequest = z.infer<typeof createAgendaTemplateRequestSchema>;
+
+export const applyAgendaTemplateRequestSchema = z.object({ templateId: z.uuid() }).strict();
+export type ApplyAgendaTemplateRequest = z.infer<typeof applyAgendaTemplateRequestSchema>;
+
 /** system-design.md §9.2's fixed roleKey vocabulary. */
 export const meetingRoleKey = z.enum([
   'toastmaster',

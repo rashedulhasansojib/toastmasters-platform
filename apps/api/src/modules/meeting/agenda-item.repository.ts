@@ -46,6 +46,37 @@ export class AgendaItemRepository {
     return toAgendaItem(row);
   }
 
+  /** M3 Slice 9: bulk-appends a template's items, still position-continuing and append-only — never overwrites existing items. */
+  async createFromTemplate(
+    meetingId: string,
+    items: Array<{ title: string; plannedDurationSeconds: number; roleKey: string | null }>,
+  ): Promise<AgendaItem[]> {
+    const rows = await this.db.$transaction(async (tx) => {
+      const last = await tx.agendaItem.findFirst({
+        where: { meetingId },
+        orderBy: { position: 'desc' },
+      });
+      let position = last?.position ?? 0;
+      const created = [];
+      for (const item of items) {
+        position += 1;
+        created.push(
+          await tx.agendaItem.create({
+            data: {
+              meetingId,
+              position,
+              title: item.title,
+              plannedDurationSeconds: item.plannedDurationSeconds,
+              roleKey: item.roleKey,
+            },
+          }),
+        );
+      }
+      return created;
+    });
+    return rows.map(toAgendaItem);
+  }
+
   async findByMeeting(meetingId: string): Promise<AgendaItem[]> {
     const rows = await this.db.agendaItem.findMany({
       where: { meetingId },

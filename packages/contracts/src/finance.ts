@@ -205,3 +205,58 @@ export type VoidInvoiceRequest = z.infer<typeof voidInvoiceRequestSchema>;
 
 export const creditNoteInvoiceRequestSchema = z.object({ reason: z.string().min(1) }).strict();
 export type CreditNoteInvoiceRequest = z.infer<typeof creditNoteInvoiceRequestSchema>;
+
+/**
+ * M4 Slice 8: system-design.md §12.3 / CLAUDE.md §2 decision 8 — installment
+ * plans are permitted, Treasurer approves alone (`approvedBy` is satisfied
+ * by the caller holding `finance.installment_plan:create`, no co-approval
+ * step). `SUM(schedule.amount) = totalAmount` (I-14) is asserted in the
+ * service that builds the schedule, not client-constructible — there is no
+ * request schema for `schedule` itself.
+ */
+export const installmentPlanStatus = z.enum(['active', 'completed', 'defaulted', 'cancelled']);
+export type InstallmentPlanStatus = z.infer<typeof installmentPlanStatus>;
+
+export const installmentScheduleEntry = z.object({
+  seq: z.number().int().positive(),
+  dueOn: z.iso.date(),
+  amount: z.number(),
+  paidAt: z.iso.datetime().nullable(),
+  ledgerEntryId: z.uuid().nullable(),
+});
+export type InstallmentScheduleEntry = z.infer<typeof installmentScheduleEntry>;
+
+export const installmentPlan = z.object({
+  id: z.uuid(),
+  orgUnitId: z.uuid(),
+  duesRecordId: z.uuid(),
+  personId: z.uuid(),
+  totalAmount: z.number(),
+  currency: z.string(),
+  schedule: z.array(installmentScheduleEntry),
+  status: installmentPlanStatus,
+  approvedBy: z.uuid(),
+  createdAt: z.iso.datetime(),
+  notes: z.string().nullable(),
+});
+export type InstallmentPlan = z.infer<typeof installmentPlan>;
+
+export const createInstallmentPlanRequestSchema = z
+  .object({
+    duesRecordId: z.uuid(),
+    installmentCount: z.number().int().min(2).max(12),
+    firstDueOn: z.iso.date(),
+    notes: z.string().min(1).optional(),
+  })
+  .strict();
+export type CreateInstallmentPlanRequest = z.infer<typeof createInstallmentPlanRequestSchema>;
+
+export const recordInstallmentPaymentRequestSchema = z
+  .object({
+    ledgerEntryId: z.uuid(),
+  })
+  .strict();
+export type RecordInstallmentPaymentRequest = z.infer<typeof recordInstallmentPaymentRequestSchema>;
+
+export const cancelInstallmentPlanRequestSchema = z.object({ reason: z.string().min(1) }).strict();
+export type CancelInstallmentPlanRequest = z.infer<typeof cancelInstallmentPlanRequestSchema>;

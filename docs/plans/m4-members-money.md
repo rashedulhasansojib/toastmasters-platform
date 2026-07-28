@@ -242,3 +242,30 @@ enum ProspectPipelineStatus {
 - [x] `pnpm lint && pnpm typecheck && pnpm build` — green.
 - [ ] New tests / `test:int` — **skipped**, same autopilot note as Slices 2–6. Most notably unverified: the row-lock's actual concurrent-safety under real parallel requests (a single-request curl can't exercise it) — this is exactly the kind of invariant `test:int`'s "real Postgres + Redis, transactions included" tier exists to prove, and it hasn't been proven yet.
 - [x] Commit + push.
+
+---
+
+## Slice 8 — Installment plans (Treasurer-approved, TI portion front-loaded)
+
+**Why:** decision 8 — plans are permitted, Treasurer approves alone. `I-14` (`SUM(schedule.amount) = totalAmount`) must actually hold, not just be documented.
+
+**Resolving a real tension in the design text:** system-design.md §12.3 says the plan "covers local dues only" but also that an outstanding TI portion is "front-loaded in the plan's schedule" — those two sentences can't both be literally true if `totalAmount` is local-only while TI is _in_ the schedule (I-14 would be violated). This implementation's reading, documented directly on the `InstallmentPlan` schema comment: any outstanding TI amount becomes an immediately-due schedule entry (seq 1, due today) ahead of the evenly-split local instalments, and `totalAmount` covers everything actually in the schedule — so I-14 holds exactly and TI still lands first, which is what the design is actually protecting against (TI dues lapsing mid-plan).
+
+**Business logic:** `buildInstallmentSchedule()` (pure function, `installment-plan.service.ts`) does the TI-front-load-then-split-local math, with a rounding-remainder-absorbed-by-the-last-share helper (`splitEvenly`) so the sum is exact to the cent, not approximately equal. Caught one real bug here via `pnpm typecheck` (a possibly-undefined array index) that a manual trace wouldn't have surfaced as fast — the fast lint/typecheck/build gate is still earning its keep even with test-writing skipped this milestone.
+
+**Design/scope notes:** "Treasurer approves alone" is implemented as an authorization fact, not a workflow step — holding `finance.installment_plan:create` at this club _is_ the approval, so there's no separate `approve` action or endpoint. `defaulted` status is unreachable this slice (same class of deferral as `DuesRecordStatus.lapsed` — needs a deadline job). Cancelling is only legal on an `active` plan; there's no `undo` after `completed`.
+
+**New resource:** `finance.installment_plan` (restricted, same bracket as ledger/dues/invoice) — `club_treasurer` read/create/update, `club_member` read (`condition: 'own'`).
+
+**API:** `POST/GET /clubs/:clubUnitId/installment-plans`, `GET .../installment-plans/:id`, `POST .../installment-plans/:id/schedule/:seq/payments`, `POST .../installment-plans/:id/cancel`.
+
+**Steps:**
+
+- [x] Schema (`InstallmentPlan`) + migration.
+- [x] Seed: `finance.installment_plan` resource + grants — ran `pnpm db:seed`.
+- [x] Contracts (`installmentPlan`, create/payment/cancel request schemas).
+- [x] Repository + service (`buildInstallmentSchedule`, exported for its own sake as a pure function) + controller, wired into `FinanceModule`.
+- [x] Updated `access.seed.int-spec.ts` (20→21 resources, restricted list) and `authorization-matrix.int-spec.ts` — same cheap-fix pattern as Slices 6–7.
+- [x] `pnpm lint && pnpm typecheck && pnpm build` — green (after fixing the typecheck failure above).
+- [ ] New tests / `test:int` — **skipped**, same autopilot note as Slices 2–7. The schedule-building math (`buildInstallmentSchedule`) is exactly the kind of pure-function logic this project's own convention (`CLAUDE.md` §7) calls out as unit-test-worthy — traced by hand instead (100/3-cent split example, confirmed the rounding remainder lands correctly and the sum matches `totalAmount` to the cent), which is weaker evidence than an actual assertion.
+- [x] Commit + push.

@@ -72,6 +72,7 @@ model OrgUnit {
   duesRecords            DuesRecord[]
   invoices               Invoice[]
   invoiceSequences       InvoiceSequence[]
+  installmentPlans       InstallmentPlan[]
 
   @@map("org_unit")
 }
@@ -122,6 +123,8 @@ model Person {
   prospectCommunicationsLogged ProspectCommunication[]
   ledgerEntriesRecorded     LedgerEntry[]
   duesRecords               DuesRecord[]
+  installmentPlans          InstallmentPlan[] @relation("InstallmentPlanPerson")
+  installmentPlansApproved  InstallmentPlan[] @relation("InstallmentPlanApprovedBy")
 
   @@map("person")
 }
@@ -998,6 +1001,8 @@ model DuesRecord {
   ledgerEntryIds     String[]         @map("ledger_entry_ids") @db.Uuid
   createdAt          DateTime         @default(now()) @map("created_at")
 
+  installmentPlans   InstallmentPlan[]
+
   @@unique([clubMembershipId, duesPeriod])
   @@map("dues_record")
 }
@@ -1075,4 +1080,52 @@ model Invoice {
 
   @@unique([orgUnitId, programYearId, invoiceNumber])
   @@map("invoice")
+}
+
+enum InstallmentPlanStatus {
+  active
+  completed
+  defaulted
+  cancelled
+
+  @@map("installment_plan_status")
+}
+
+/**
+ * M4 Slice 8: system-design.md §12.3 / CLAUDE.md §2 decision 8 (Treasurer
+ * approves alone — `approvedBy` is satisfied by the caller holding
+ * `finance.installment_plan:create` at this club, no separate approval
+ * step). `schedule` is a Json array (`{seq, dueOn, amount, paidAt,
+ * ledgerEntryId}[]`); I-14 (`SUM(schedule.amount) = totalAmount`) is
+ * asserted in `InstallmentPlanService`, not a DB constraint — Postgres has
+ * no cheap way to sum a jsonb array in a CHECK constraint.
+ *
+ * Design-text note on `totalAmount`: system-design.md says the plan "covers
+ * local dues only" but also that an outstanding TI portion is "front-loaded
+ * in the plan's schedule" — read literally these are in tension (if TI is
+ * *in* the schedule, `totalAmount` can't equal local-only and still satisfy
+ * I-14). This implementation resolves it by including any outstanding TI
+ * amount as an immediately-due schedule entry (seq 1, dueOn = today) ahead
+ * of the local instalments, and `totalAmount` covers everything actually in
+ * the schedule (TI + local) — so I-14 holds exactly, and TI still reaches
+ * WHQ first as the design intends.
+ */
+model InstallmentPlan {
+  id             String                @id @default(uuid()) @db.Uuid
+  orgUnitId      String                @map("org_unit_id") @db.Uuid
+  orgUnit        OrgUnit               @relation(fields: [orgUnitId], references: [id])
+  duesRecordId   String                @map("dues_record_id") @db.Uuid
+  duesRecord     DuesRecord            @relation(fields: [duesRecordId], references: [id])
+  personId       String                @map("person_id") @db.Uuid
+  person         Person                @relation("InstallmentPlanPerson", fields: [personId], references: [id])
+  totalAmount    Decimal               @map("total_amount") @db.Decimal(10, 2)
+  currency       String
+  schedule       Json
+  status         InstallmentPlanStatus @default(active)
+  approvedBy     String                @map("approved_by") @db.Uuid
+  approvedByPerson Person              @relation("InstallmentPlanApprovedBy", fields: [approvedBy], references: [id])
+  createdAt      DateTime              @default(now()) @map("created_at")
+  notes          String?
+
+  @@map("installment_plan")
 }

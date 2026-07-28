@@ -202,6 +202,15 @@ const RESOURCES: ResourceSeed[] = [
     clubScoped: true,
     sensitivity: 'restricted',
   },
+  {
+    // M4 Slice 8: system-design.md §12.3 / CLAUDE.md §2 decision 8.
+    resource: 'finance.installment_plan',
+    context: 'finance',
+    label: 'Installment plan',
+    allowedActions: ['read', 'create', 'update'],
+    clubScoped: true,
+    sensitivity: 'restricted',
+  },
 ];
 
 // Grants transcribed verbatim from system-design.md §7.5 for the resources
@@ -279,6 +288,9 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'finance.invoice', action: 'read' },
       { resource: 'finance.invoice', action: 'create' },
       { resource: 'finance.invoice', action: 'update' },
+      { resource: 'finance.installment_plan', action: 'read' },
+      { resource: 'finance.installment_plan', action: 'create' },
+      { resource: 'finance.installment_plan', action: 'update' },
       { resource: 'meeting.meeting', action: 'read' },
       { resource: 'identity.role_assignment', action: 'read' },
     ],
@@ -322,6 +334,7 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'finance.ledger', action: 'read', condition: 'own' },
       { resource: 'finance.dues', action: 'read', condition: 'own' },
       { resource: 'finance.invoice', action: 'read', condition: 'own' },
+      { resource: 'finance.installment_plan', action: 'read', condition: 'own' },
     ],
   },
   // Platform roles: tier 'platform', not bound to a unit type. Zero grants —

@@ -13,6 +13,9 @@ import { DuesRecordController } from './dues-record.controller';
 import { InvoiceRepository } from './invoice.repository';
 import { InvoiceService } from './invoice.service';
 import { InvoiceController } from './invoice.controller';
+import { InstallmentPlanRepository } from './installment-plan.repository';
+import { InstallmentPlanService } from './installment-plan.service';
+import { InstallmentPlanController } from './installment-plan.controller';
 
 @Module({
   imports: [IdentityModule],
@@ -25,12 +28,15 @@ import { InvoiceController } from './invoice.controller';
     DuesRecordService,
     InvoiceRepository,
     InvoiceService,
+    InstallmentPlanRepository,
+    InstallmentPlanService,
   ],
   controllers: [
     LedgerEntryController,
     ClubDuesSettingsController,
     DuesRecordController,
     InvoiceController,
+    InstallmentPlanController,
   ],
   exports: [LedgerEntryRepository, LedgerEntryService],
 })

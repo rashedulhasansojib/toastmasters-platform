@@ -9,7 +9,7 @@
 **Tech Stack:** NestJS 11 (api), Prisma 7 + `@prisma/adapter-pg` (packages/db), Postgres + `ltree`, Redis/BullMQ (permission cache), Zod 4 (packages/contracts), Vitest 4 + Testcontainers 12, Argon2id + `jose` (sessions).
 
 > **Scope note.** This is the M1 milestone plan. It is delivered as ordered
-> **slices** (§ "Slice roadmap"). Slices 0–5 below are fully detailed and
+> **slices** (§ "Slice roadmap"). Slices 0–6 below are fully detailed and
 > execution-ready. Each later slice is expanded to the same bite-sized TDD depth
 > just before it is executed, so its code is written against a proven foundation
 > rather than guessed. This matches roadmap.md §7 ("plans are living documents;
@@ -2810,9 +2810,1060 @@ git commit -m "feat(access): cache resolved grants, invalidated by permission_ve
 
 ---
 
-## Slices 6–10
+## Slice 6 — Delegation, overrides, break-glass, audit
 
-Each is expanded to Slice 0/1/2/3/4/5 depth (files, interfaces, bite-sized TDD steps with full code) immediately before it is executed, against the now-proven foundation. Their deliverables, dependencies, and ship criteria are fixed in the roadmap table above; the canonical schema and algorithms they implement are `rbac-design.md` §3–§9 and `system-design.md` §5–§7, and the design decisions specific to this deployment are in `docs/superpowers/specs/2026-07-28-platform-tier-super-admin-design.md`.
+**Why:** `effectiveGrants` (Slice 4) unions four sources but only two produce anything — platform-role and domain-role-template grants. Unit-policy overrides and direct person grants have been `[]` positions since Slice 4 specifically because their tables didn't exist. They exist now. This slice also finally builds `system_admin`'s real authority — Slice 3 seeded it zero grants and Slice 4 explicitly left its bypass unbuilt because it needs an audit trail, which this slice's `audit_event` table provides.
+
+**How `system_admin` actually resolves (a real design decision, not the canonical sketch).** `rbac-design.md` §4.1 sketches `system_admin` as a hardcoded step-0 bypass ("always allowed, always logged") _before_ grant resolution. This deployment's divergence (`docs/superpowers/specs/...` §6) replaces that: _"the `system_admin` resolution grants everything except the four restricted resources."_ The word **resolution** is doing the work — it says this flows through the normal `effectiveGrants` → `evaluate()` pipeline as synthesized grants, not a separate short-circuit. So `AccessRepository.platformRoleGrants()` gets one addition: when the role is `system_admin`, instead of querying (empty) `role_template_grant` rows, synthesize an `allow`/`any` grant for every **non-restricted** resource's `allowed_actions`, at the assigned scope. No new branch in `evaluate()` or `authorize()` at all — the existing engine already does the right thing once it has the right grants.
+
+**Break-glass is the existing direct-grant mechanism, reused, not a new table** (per the divergence spec §6.2). `mintBreakGlass` is a _separate_ operation from ordinary delegation — it deliberately does **not** go through `canDelegate` (by definition `system_admin` doesn't hold standing restricted-resource access, so it would always fail that check). It's gated instead on actually holding the `system_admin` platform role, and it writes both the `person_grant` row and an audit event for the mint, atomically.
+
+**Audit-on-read is general, not `system_admin`-specific.** `rbac-design.md` §2.1: restricted resources are "always logged on read" — stated as a resource-catalogue property, not a `system_admin` special case. So the hook lives in `AuthzService.authorize()` itself: after any **allowed** `read` decision on a resource whose `sensitivity = 'restricted'`, write an `audit_event`. This applies uniformly — a club treasurer's ordinary ledger read gets logged exactly like `system_admin`'s break-glass read. One mechanism, not two.
+
+**Scoping decision: `unit_policy_grant` is built, its own delegation-gating is not.** The roadmap's ship criteria don't name `unit_policy_grant` directly, but `rbac-design.md` §12's worked example ("Club Admin hides the ledger from the SAA — `unit_policy_grant` deny on `finance.ledger:read`... deny wins") and the platform-tier spec's own testing checklist ("deny in a unit policy beats a template allow") both call for it, and it's the third of `effectiveGrants`'s four union positions — leaving it out means Slice 4's union is still incomplete after this slice. What's _not_ built: gating _who_ may create a `unit_policy_grant` through `canDelegate` — no ship criterion exercises that path, and `person_grant` creation (which _is_ ship-gated, via the escalation-blocking criterion) already proves `canDelegate` works. Noted inline as a follow-up, not silently skipped.
+
+**Files:**
+
+- Modify: `packages/db/prisma/schema.prisma` (add `UnitPolicyGrant`, `PersonGrant`, `AuditEvent` models + `UnitPolicySubjectKind`, `AuditEventType` enums; append-only `REVOKE UPDATE, DELETE` on `audit_event`, hand-added like the ltree indexes)
+- Create: `packages/db/prisma/migrations/<ts>_delegation_audit/migration.sql`
+- Create: `apps/api/src/common/authz/can-delegate.ts`
+- Create: `apps/api/src/common/authz/can-delegate.spec.ts`
+- Modify: `apps/api/src/modules/access/access.repository.ts` (`unitPolicyOverrides`, `personGrants` sources; `system_admin` grant synthesis; `auditRestrictedReadIfApplicable`; `pathOf`/`regionRootPath` made reusable)
+- Modify: `apps/api/src/common/authz/authz.service.ts` (calls the audit hook after an allowed decision)
+- Create: `apps/api/src/modules/access/grant-admin.repository.ts` (`grantPersonGrant` — `canDelegate`-gated; `mintBreakGlass`; `createUnitPolicyGrant`; `grantPlatformRole`; `revokePlatformRole` — last-`unit_admin` guard)
+- Modify: `apps/api/src/modules/access/access.module.ts` (registers `GrantAdminRepository`)
+- Create: `apps/api/test/integration/access-delegation.int-spec.ts` (escalation blocked, last `unit_admin`, unit-policy deny-beats-allow)
+- Create: `apps/api/test/integration/access-break-glass.int-spec.ts` (break-glass flow, expired direct grant, broad non-restricted `system_admin` access)
+
+**Interfaces:**
+
+- Consumes: `evaluate.ts`'s `scopeCovers` (Slice 4), `AccessRepository.effectiveGrants` (Slice 4/5), `platform_role_assignment` (Slice 4).
+- Produces:
+  - `canDelegate(actorGrants: Grant[], target: { resource, action, scope }): boolean` — pure, no DB, matches `rbac-design.md` §7.4/§12 exactly.
+  - `GrantAdminRepository.grantPersonGrant(input): Promise<PersonGrant>` — throws unless `canDelegate` passes for the actor.
+  - `GrantAdminRepository.mintBreakGlass(input): Promise<PersonGrant>` — requires the caller to hold `system_admin`; not `canDelegate`-gated; also writes a `break_glass_mint` audit event.
+  - `GrantAdminRepository.grantPlatformRole(input)` / `.revokePlatformRole(id)` — the latter refuses to remove the last active `unit_admin` for a unit.
+  - `GrantAdminRepository.createUnitPolicyGrant(input)` — ungated (see scoping note above).
+  - `AccessRepository.effectiveGrants` — now genuinely all four §4.2 sources; `system_admin` resolves to broad non-restricted access; a restricted `read` that's allowed writes an `audit_event`.
+
+- [ ] **Step 1: Add the schema**
+
+In `packages/db/prisma/schema.prisma`, append:
+
+```prisma
+enum UnitPolicySubjectKind {
+  role
+  person
+}
+
+model UnitPolicyGrant {
+  id              String                @id @default(uuid()) @db.Uuid
+  orgUnitId       String                @map("org_unit_id") @db.Uuid
+  orgUnit         OrgUnit               @relation(fields: [orgUnitId], references: [id])
+  subjectKind     UnitPolicySubjectKind @map("subject_kind")
+  subjectRole     String?               @map("subject_role")
+  subjectPersonId String?               @map("subject_person_id") @db.Uuid
+  subjectPerson   Person?               @relation("UnitPolicyGrantSubject", fields: [subjectPersonId], references: [id])
+  resource        String
+  resourceRef     ResourceCatalog       @relation(fields: [resource], references: [resource])
+  action          PermissionAction
+  condition       PermissionCondition   @default(any)
+  effect          PermissionEffect
+  createdBy       String                @map("created_by") @db.Uuid
+  createdByPerson Person                @relation("UnitPolicyGrantCreatedBy", fields: [createdBy], references: [id])
+  createdAt       DateTime              @default(now()) @map("created_at")
+  reason          String
+  expiresAt       DateTime?             @map("expires_at")
+
+  @@map("unit_policy_grant")
+}
+
+model PersonGrant {
+  id              String              @id @default(uuid()) @db.Uuid
+  personId        String              @map("person_id") @db.Uuid
+  person          Person              @relation("PersonGrantSubject", fields: [personId], references: [id])
+  orgUnitId       String              @map("org_unit_id") @db.Uuid
+  orgUnit         OrgUnit             @relation(fields: [orgUnitId], references: [id])
+  resource        String
+  resourceRef     ResourceCatalog     @relation(fields: [resource], references: [resource])
+  action          PermissionAction
+  condition       PermissionCondition @default(any)
+  effect          PermissionEffect
+  grantedBy       String              @map("granted_by") @db.Uuid
+  grantedByPerson Person              @relation("PersonGrantGrantedBy", fields: [grantedBy], references: [id])
+  grantedAt       DateTime            @default(now()) @map("granted_at")
+  reason          String
+  expiresAt       DateTime?           @map("expires_at")
+
+  @@map("person_grant")
+}
+
+enum AuditEventType {
+  break_glass_mint
+  restricted_read
+}
+
+model AuditEvent {
+  id            String            @id @default(uuid()) @db.Uuid
+  occurredAt    DateTime          @default(now()) @map("occurred_at")
+  actorPersonId String            @map("actor_person_id") @db.Uuid
+  actorPerson   Person            @relation(fields: [actorPersonId], references: [id])
+  type          AuditEventType
+  resource      String?
+  action        PermissionAction?
+  orgUnitId     String?           @map("org_unit_id") @db.Uuid
+  orgUnit       OrgUnit?          @relation(fields: [orgUnitId], references: [id])
+  reason        String?
+  metadata      Json              @default("{}")
+
+  @@map("audit_event")
+}
+```
+
+Add the reverse relations to `Person` (`platformRoleAssignments`/`grantedPlatformRoles` already exist from Slice 4):
+
+```prisma
+model Person {
+  // ...existing fields...
+  unitPolicyGrantsAsSubject UnitPolicyGrant[] @relation("UnitPolicyGrantSubject")
+  unitPolicyGrantsCreated   UnitPolicyGrant[] @relation("UnitPolicyGrantCreatedBy")
+  personGrantsReceived      PersonGrant[]     @relation("PersonGrantSubject")
+  personGrantsIssued        PersonGrant[]     @relation("PersonGrantGrantedBy")
+  auditEvents               AuditEvent[]
+}
+```
+
+And to `OrgUnit`:
+
+```prisma
+model OrgUnit {
+  // ...existing fields...
+  unitPolicyGrants UnitPolicyGrant[]
+  personGrants     PersonGrant[]
+  auditEvents      AuditEvent[]
+}
+```
+
+- [ ] **Step 2: Generate the migration, add the append-only guard, review, apply with `migrate deploy`**
+
+Run: `pnpm --filter @toastmasters/db exec prisma migrate dev --create-only --name delegation_audit`
+Strip the usual spurious `DROP INDEX "org_unit_path_gist"` / `"org_unit_path_unique"` (same false-positive drift as every prior slice). Then append, per CLAUDE.md's append-only rule (DoD item 4 — enforced at the DB layer, not by convention):
+
+```sql
+-- audit_event is append-only at the database, not by convention.
+REVOKE UPDATE, DELETE ON "audit_event" FROM CURRENT_USER;
+```
+
+> Skip this if the migrating role must retain those privileges to run future migrations against this table (e.g. an `ALTER TABLE` on `audit_event` itself would then fail) — in that case grant migrations should run as a separate, more-privileged role. For this deployment's single-role local/CI setup, revoking from `CURRENT_USER` is correct and matches the existing pattern of hand-added SQL after `--create-only`.
+
+Then: `pnpm --filter @toastmasters/db exec prisma migrate deploy && pnpm --filter @toastmasters/db exec prisma generate`
+
+- [ ] **Step 3: `canDelegate` — write the failing tests, then implement**
+
+Create `apps/api/src/common/authz/can-delegate.spec.ts`:
+
+```ts
+import { describe, it, expect } from 'vitest';
+import { canDelegate } from './can-delegate';
+import type { Grant } from './authz.types';
+
+function grant(overrides: Partial<Grant> = {}): Grant {
+  return {
+    role: 'club_president',
+    scope: 'district.1.club.10',
+    resource: 'meeting.role',
+    action: 'update',
+    condition: 'any',
+    effect: 'allow',
+    ...overrides,
+  };
+}
+
+describe('canDelegate', () => {
+  it('allows delegating a grant the actor already holds at the target scope', () => {
+    const actorGrants = [grant()];
+    expect(
+      canDelegate(actorGrants, {
+        resource: 'meeting.role',
+        action: 'update',
+        scope: 'district.1.club.10',
+      }),
+    ).toBe(true);
+  });
+
+  it('blocks escalation: cannot delegate a resource/action the actor does not hold anywhere (rbac-design.md §12)', () => {
+    const actorGrants = [grant()]; // only meeting.role:update at the club
+    expect(
+      canDelegate(actorGrants, { resource: 'platform.audit', action: 'read', scope: 'district.1' }),
+    ).toBe(false);
+  });
+
+  it('blocks delegating a grant the actor holds at a different scope', () => {
+    const actorGrants = [grant({ scope: 'district.1.club.99' })];
+    expect(
+      canDelegate(actorGrants, {
+        resource: 'meeting.role',
+        action: 'update',
+        scope: 'district.1.club.10',
+      }),
+    ).toBe(false);
+  });
+
+  it('respects exactOnly identically to evaluate() — a self_unit grant does not cover a child scope', () => {
+    const actorGrants = [grant({ exactOnly: true })];
+    expect(
+      canDelegate(actorGrants, {
+        resource: 'meeting.role',
+        action: 'update',
+        scope: 'district.1.club.10.sub',
+      }),
+    ).toBe(false);
+  });
+
+  it('ignores a deny grant — denies never confer delegation authority', () => {
+    const actorGrants = [grant({ effect: 'deny' })];
+    expect(
+      canDelegate(actorGrants, {
+        resource: 'meeting.role',
+        action: 'update',
+        scope: 'district.1.club.10',
+      }),
+    ).toBe(false);
+  });
+});
+```
+
+Run: `pnpm --filter @toastmasters/api test -- can-delegate` — expect FAIL (module doesn't exist).
+
+Create `apps/api/src/common/authz/can-delegate.ts`:
+
+```ts
+import type { Action, Grant } from './authz.types';
+import { scopeCovers } from './evaluate';
+
+/**
+ * rbac-design.md §7.4: an actor may only delegate (grant to someone else) a
+ * resource/action it already holds `allow` for at a scope covering the
+ * target. This is the one guard every grant-creation path must pass through
+ * — including what an invitation carrying roles would call — or invites
+ * become a privilege-escalation route (§11).
+ */
+export function canDelegate(
+  actorGrants: readonly Grant[],
+  target: { resource: string; action: Action; scope: string },
+): boolean {
+  return actorGrants.some(
+    (g) =>
+      g.effect === 'allow' &&
+      g.resource === target.resource &&
+      g.action === target.action &&
+      scopeCovers(g.scope, target.scope, g.exactOnly),
+  );
+}
+```
+
+Run: `pnpm --filter @toastmasters/api test -- can-delegate` — expect PASS (all five cases).
+
+- [ ] **Step 4: Extend `AccessRepository`**
+
+Modify `apps/api/src/modules/access/access.repository.ts` — four changes: complete the union with the two remaining sources, synthesize `system_admin`'s broad grant, add the restricted-read audit hook, and make the path helpers reusable by `GrantAdminRepository`.
+
+```ts
+import { Injectable } from '@nestjs/common';
+import { getPrisma, type PrismaClient } from '@toastmasters/db';
+import type { Action, Grant } from '../../common/authz/authz.types';
+import type { GrantCacheService } from './grant-cache.service';
+
+interface PathRow {
+  path: string;
+}
+
+// A function, not a module-level constant — `new Date()` must be evaluated
+// fresh on every call. A frozen constant would capture "now" once at import
+// time, and Testcontainers startup alone can take 10+ seconds, long enough
+// for an "already expired" fixture in a later test to still compare as valid
+// against a comparison timestamp captured before the module even loaded.
+// (Found by actually running Step 7's "expired direct grant" test — it
+// passed against a fresh `new Date()` per call and failed against a frozen
+// constant, exactly as it should.)
+function notExpired() {
+  return { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] };
+}
+
+@Injectable()
+export class AccessRepository {
+  constructor(
+    private readonly db: PrismaClient = getPrisma(),
+    private readonly cache?: GrantCacheService,
+  ) {}
+
+  /** rbac-design.md §4.2 + §5: all four grant sources, cached by personId:permissionVersion. */
+  async effectiveGrants(personId: string): Promise<Grant[]> {
+    const permissionVersion = await this.permissionVersionOf(personId);
+
+    if (this.cache) {
+      const cached = await this.cache.get(personId, permissionVersion);
+      if (cached) return cached;
+    }
+
+    const [platformGrants, domainGrants, overrideGrants, directGrants] = await Promise.all([
+      this.platformRoleGrants(personId),
+      this.domainRoleGrants(personId),
+      this.unitPolicyOverrides(personId),
+      this.personGrants(personId),
+    ]);
+    const grants = [...platformGrants, ...domainGrants, ...overrideGrants, ...directGrants];
+
+    if (this.cache) {
+      await this.cache.set(personId, permissionVersion, grants);
+    }
+
+    return grants;
+  }
+
+  /**
+   * rbac-design.md §2.1: restricted resources are "always logged on read".
+   * Called from AuthzService.authorize() after an allowed decision — applies
+   * uniformly to every role, not just system_admin's break-glass reads.
+   */
+  async auditRestrictedReadIfApplicable(request: {
+    principal: { userId: string };
+    resource: string;
+    action: Action;
+  }): Promise<void> {
+    if (request.action !== 'read') return;
+    const catalog = await this.db.resourceCatalog.findUnique({
+      where: { resource: request.resource },
+    });
+    if (catalog?.sensitivity !== 'restricted') return;
+    await this.db.auditEvent.create({
+      data: {
+        actorPersonId: request.principal.userId,
+        type: 'restricted_read',
+        resource: request.resource,
+        action: request.action,
+      },
+    });
+  }
+
+  private async permissionVersionOf(personId: string): Promise<number> {
+    const person = await this.db.person.findUnique({
+      where: { id: personId },
+      select: { permissionVersion: true },
+    });
+    return person?.permissionVersion ?? 1;
+  }
+
+  private async platformRoleGrants(personId: string): Promise<Grant[]> {
+    const assignments = await this.db.platformRoleAssignment.findMany({
+      where: { personId, ...notExpired() },
+    });
+    const out: Grant[] = [];
+    for (const pa of assignments) {
+      const scope = pa.orgUnitId ? await this.pathOf(pa.orgUnitId) : await this.regionRootPath();
+      if (pa.role === 'system_admin') {
+        out.push(...(await this.systemAdminGrants(scope)));
+        continue;
+      }
+      out.push(...(await this.grantsForRoleAtScope(pa.role, scope)));
+    }
+    return out;
+  }
+
+  /**
+   * The deployment's break-glass divergence (docs/superpowers/specs/...  §6):
+   * system_admin's *resolution* grants everything except the four restricted
+   * resources — not a role_template_grant row (Slice 3 seeded none), and not
+   * a step-0 bypass in evaluate()/authorize() (rbac-design.md §4.1's sketch).
+   * Restricted access only ever comes from a minted break-glass person_grant.
+   */
+  private async systemAdminGrants(scope: string): Promise<Grant[]> {
+    const resources = await this.db.resourceCatalog.findMany({
+      where: { sensitivity: { not: 'restricted' } },
+    });
+    const out: Grant[] = [];
+    for (const r of resources) {
+      for (const action of r.allowedActions) {
+        out.push({
+          role: 'system_admin',
+          scope,
+          resource: r.resource,
+          action,
+          condition: 'any',
+          effect: 'allow',
+        });
+      }
+    }
+    return out;
+  }
+
+  private async domainRoleGrants(personId: string): Promise<Grant[]> {
+    const assignments = await this.db.roleAssignment.findMany({
+      where: { personId, status: 'active' },
+    });
+    const out: Grant[] = [];
+    for (const ra of assignments) {
+      const scope = await this.pathOf(ra.orgUnitId);
+      out.push(...(await this.grantsForRoleAtScope(ra.role, scope)));
+    }
+    return out;
+  }
+
+  /**
+   * rbac-design.md §4.2(c): unit-policy overrides apply to the unit itself —
+   * exactOnly, regardless of the overridden role's own scope_rule. Matches
+   * against either a direct person subject or the person's active domain
+   * roles at that unit.
+   */
+  private async unitPolicyOverrides(personId: string): Promise<Grant[]> {
+    const activeRoles = await this.db.roleAssignment.findMany({
+      where: { personId, status: 'active' },
+      select: { role: true, orgUnitId: true },
+    });
+    const rows = await this.db.unitPolicyGrant.findMany({
+      where: {
+        ...notExpired(),
+        OR: [
+          { subjectKind: 'person', subjectPersonId: personId },
+          ...(activeRoles.length
+            ? [
+                {
+                  subjectKind: 'role' as const,
+                  subjectRole: { in: activeRoles.map((r) => r.role) },
+                  orgUnitId: { in: activeRoles.map((r) => r.orgUnitId) },
+                },
+              ]
+            : []),
+        ],
+      },
+    });
+    const out: Grant[] = [];
+    for (const ov of rows) {
+      const scope = await this.pathOf(ov.orgUnitId);
+      out.push({
+        role: `policy:${ov.orgUnitId}`,
+        scope,
+        exactOnly: true,
+        resource: ov.resource,
+        action: ov.action,
+        condition: ov.condition,
+        effect: ov.effect,
+      });
+    }
+    return out;
+  }
+
+  /** rbac-design.md §4.2(d): direct grants — exceptions, expiry enforced here. */
+  private async personGrants(personId: string): Promise<Grant[]> {
+    const rows = await this.db.personGrant.findMany({ where: { personId, ...notExpired() } });
+    const out: Grant[] = [];
+    for (const pg of rows) {
+      const scope = await this.pathOf(pg.orgUnitId);
+      out.push({
+        role: `direct:${pg.reason}`,
+        scope,
+        exactOnly: true,
+        resource: pg.resource,
+        action: pg.action,
+        condition: pg.condition,
+        effect: pg.effect,
+      });
+    }
+    return out;
+  }
+
+  /** Shared by both role-template grant sources: look up the template once, stamp scope + exactOnly. */
+  private async grantsForRoleAtScope(role: string, scope: string): Promise<Grant[]> {
+    const template = await this.db.roleTemplate.findUnique({ where: { role } });
+    if (!template) return []; // role not in the catalogue — nothing to grant
+    const exactOnly = template.scopeRule === 'self_unit';
+    const rows = await this.db.roleTemplateGrant.findMany({ where: { role } });
+    return rows.map((g) => ({
+      role,
+      scope,
+      exactOnly,
+      resource: g.resource,
+      action: g.action,
+      condition: g.condition,
+      effect: g.effect,
+    }));
+  }
+
+  /** Not private — GrantAdminRepository resolves target scopes for canDelegate the same way. */
+  async pathOf(orgUnitId: string): Promise<string> {
+    const rows = await this.db.$queryRaw<PathRow[]>`
+      SELECT path::text AS path FROM org_unit WHERE id = ${orgUnitId}::uuid
+    `;
+    if (!rows[0]) throw new Error(`Org unit ${orgUnitId} not found`);
+    return rows[0].path;
+  }
+
+  /**
+   * A platform_role_assignment with org_unit_id = NULL means global reach —
+   * resolved to the region root's own path, so ordinary prefix matching
+   * covers the whole tree with no special-casing needed in evaluate().
+   */
+  async regionRootPath(): Promise<string> {
+    const rows = await this.db.$queryRaw<PathRow[]>`
+      SELECT path::text AS path FROM org_unit WHERE type = 'region' LIMIT 1
+    `;
+    if (!rows[0]) throw new Error('No region root org unit exists');
+    return rows[0].path;
+  }
+}
+```
+
+- [ ] **Step 5: Wire the audit hook into `AuthzService`**
+
+Modify `apps/api/src/common/authz/authz.service.ts`'s `authorize()`:
+
+```ts
+  /** The one authorization gate. Everything funnels through here (default-deny). */
+  async authorize(request: AccessRequest): Promise<AccessDecision> {
+    const grants = await this.effectiveGrants(request);
+    const decision = evaluate(grants, request);
+    if (decision.allowed) {
+      await this.accessRepository.auditRestrictedReadIfApplicable(request);
+    }
+    return decision;
+  }
+```
+
+(`effectiveGrants`/`explain` are unchanged.)
+
+- [ ] **Step 6: Implement `GrantAdminRepository`**
+
+Create `apps/api/src/modules/access/grant-admin.repository.ts`:
+
+```ts
+import { ForbiddenException, Injectable } from '@nestjs/common';
+import { getPrisma, type PrismaClient } from '@toastmasters/db';
+import { canDelegate } from '../../common/authz/can-delegate';
+import type { Action, Condition } from '../../common/authz/authz.types';
+import { AccessRepository } from './access.repository';
+
+const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
+
+@Injectable()
+export class GrantAdminRepository {
+  constructor(
+    private readonly db: PrismaClient = getPrisma(),
+    private readonly accessRepository: AccessRepository = new AccessRepository(),
+  ) {}
+
+  /** rbac-design.md §7.4/§12: the one guard every grant-creation path needs, or invitations carrying roles become an escalation route. */
+  async grantPersonGrant(input: {
+    actorId: string;
+    personId: string;
+    orgUnitId: string;
+    resource: string;
+    action: Action;
+    condition?: Condition;
+    reason: string;
+    expiresAt?: Date | null;
+  }) {
+    const [actorGrants, scope] = await Promise.all([
+      this.accessRepository.effectiveGrants(input.actorId),
+      this.accessRepository.pathOf(input.orgUnitId),
+    ]);
+    if (!canDelegate(actorGrants, { resource: input.resource, action: input.action, scope })) {
+      throw new ForbiddenException(
+        `${input.actorId} cannot delegate ${input.resource}:${input.action} — does not hold it at this scope`,
+      );
+    }
+    return this.db.personGrant.create({
+      data: {
+        personId: input.personId,
+        orgUnitId: input.orgUnitId,
+        resource: input.resource,
+        action: input.action,
+        condition: input.condition ?? 'any',
+        effect: 'allow',
+        grantedBy: input.actorId,
+        reason: input.reason,
+        expiresAt: input.expiresAt ?? null,
+      },
+    });
+  }
+
+  /**
+   * docs/superpowers/specs/...-super-admin-design.md §6: break-glass is the
+   * existing direct-grant mechanism, reused. Deliberately NOT canDelegate-
+   * gated — system_admin holds no standing restricted-resource access by
+   * design, so it would always fail that check. Gated instead on actually
+   * holding the system_admin platform role. Mints the grant and audits the
+   * mint atomically.
+   */
+  async mintBreakGlass(input: {
+    systemAdminPersonId: string;
+    orgUnitId: string;
+    resource: string;
+    action: Action;
+    reason: string;
+    expiresAt?: Date;
+  }) {
+    const isSystemAdmin = await this.db.platformRoleAssignment.findFirst({
+      where: { personId: input.systemAdminPersonId, role: 'system_admin' },
+    });
+    if (!isSystemAdmin) {
+      throw new ForbiddenException('Only system_admin may mint break-glass access');
+    }
+
+    return this.db.$transaction(async (tx) => {
+      const grant = await tx.personGrant.create({
+        data: {
+          personId: input.systemAdminPersonId,
+          orgUnitId: input.orgUnitId,
+          resource: input.resource,
+          action: input.action,
+          condition: 'any',
+          effect: 'allow',
+          grantedBy: input.systemAdminPersonId,
+          reason: input.reason,
+          expiresAt: input.expiresAt ?? new Date(Date.now() + FIFTEEN_MINUTES_MS),
+        },
+      });
+      await tx.auditEvent.create({
+        data: {
+          actorPersonId: input.systemAdminPersonId,
+          type: 'break_glass_mint',
+          resource: input.resource,
+          action: input.action,
+          orgUnitId: input.orgUnitId,
+          reason: input.reason,
+        },
+      });
+      return grant;
+    });
+  }
+
+  /** Test-fixture-level creation — see the Slice 6 plan's scoping note: not canDelegate-gated. */
+  async createUnitPolicyGrant(input: {
+    orgUnitId: string;
+    subjectRole: string;
+    resource: string;
+    action: Action;
+    effect: 'allow' | 'deny';
+    createdBy: string;
+    reason: string;
+  }) {
+    return this.db.unitPolicyGrant.create({
+      data: {
+        orgUnitId: input.orgUnitId,
+        subjectKind: 'role',
+        subjectRole: input.subjectRole,
+        resource: input.resource,
+        action: input.action,
+        condition: 'any',
+        effect: input.effect,
+        createdBy: input.createdBy,
+        reason: input.reason,
+      },
+    });
+  }
+
+  async grantPlatformRole(input: {
+    personId: string;
+    role: string;
+    orgUnitId: string | null;
+    grantedBy: string;
+    expiresAt?: Date | null;
+  }) {
+    return this.db.platformRoleAssignment.create({
+      data: {
+        personId: input.personId,
+        role: input.role,
+        orgUnitId: input.orgUnitId,
+        grantedBy: input.grantedBy,
+        expiresAt: input.expiresAt ?? null,
+      },
+    });
+  }
+
+  /**
+   * rbac-design.md §7.2/§7.4: cannot remove the last unit_admin for a unit —
+   * platform_role_assignment has no status/history field (unlike
+   * role_assignment), so "revoke" is a hard delete here; that's acceptable
+   * given how rare platform-role changes are meant to be (§6 table).
+   */
+  async revokePlatformRole(id: string): Promise<void> {
+    const target = await this.db.platformRoleAssignment.findUnique({ where: { id } });
+    if (!target) return;
+
+    if (target.role === 'unit_admin' && target.orgUnitId) {
+      const remaining = await this.db.platformRoleAssignment.count({
+        where: {
+          role: 'unit_admin',
+          orgUnitId: target.orgUnitId,
+          id: { not: id },
+          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        },
+      });
+      if (remaining === 0) {
+        throw new ForbiddenException('Cannot remove the last unit_admin for this unit');
+      }
+    }
+
+    await this.db.platformRoleAssignment.delete({ where: { id } });
+  }
+}
+```
+
+Modify `apps/api/src/modules/access/access.module.ts` to register it:
+
+```ts
+  providers: [
+    {
+      provide: REDIS_CLIENT,
+      inject: [ENV],
+      useFactory: (env: Env) => new Redis(redisConnectionOptions(env.REDIS_URL)),
+    },
+    GrantCacheService,
+    AccessRepository,
+    GrantAdminRepository,
+  ],
+  exports: [AccessRepository, GrantAdminRepository],
+```
+
+- [ ] **Step 7: Write the failing integration tests**
+
+Create `apps/api/test/integration/access-delegation.int-spec.ts`:
+
+```ts
+import { describe, it, beforeAll, afterAll, expect } from 'vitest';
+import type { PrismaClient } from '@toastmasters/db';
+import { seedAccessVocabulary } from '@toastmasters/db';
+import { startTestDb } from '../support/test-db';
+import { OrgUnitRepository } from '../../src/modules/org/org.repository';
+import { ProgramYearRepository } from '../../src/modules/identity/program-year.repository';
+import { PersonRepository } from '../../src/modules/identity/person.repository';
+import { RoleAssignmentRepository } from '../../src/modules/identity/role-assignment.repository';
+import { AccessRepository } from '../../src/modules/access/access.repository';
+import { GrantAdminRepository } from '../../src/modules/access/grant-admin.repository';
+import { AuthzService } from '../../src/common/authz/authz.service';
+
+describe('Delegation and unit-policy overrides (integration)', () => {
+  let db: PrismaClient;
+  let stop: () => Promise<void>;
+  let authz: AuthzService;
+  let people: PersonRepository;
+  let roleAssignments: RoleAssignmentRepository;
+  let grantAdmin: GrantAdminRepository;
+
+  let districtId: string;
+  let clubId: string;
+  let clubPath: string;
+  let programYearId: string;
+
+  beforeAll(async () => {
+    ({ db, stop } = await startTestDb());
+    await seedAccessVocabulary(db);
+
+    const orgUnits = new OrgUnitRepository(db);
+    const programYears = new ProgramYearRepository(db);
+    people = new PersonRepository(db);
+    roleAssignments = new RoleAssignmentRepository(db);
+    const access = new AccessRepository(db);
+    grantAdmin = new GrantAdminRepository(db, access);
+    authz = new AuthzService(access);
+
+    const region = await orgUnits.createRoot({
+      type: 'region',
+      code: 'r1',
+      name: 'Region 1',
+      timezone: 'Asia/Dhaka',
+    });
+    const district = await orgUnits.createChild({
+      parentId: region.id,
+      type: 'district',
+      code: 'd41',
+      name: 'District 41',
+      timezone: 'Asia/Dhaka',
+    });
+    const club = await orgUnits.createChild({
+      parentId: district.id,
+      type: 'club',
+      code: 'c1',
+      name: 'Club 1',
+      timezone: 'Asia/Dhaka',
+    });
+    districtId = district.id;
+    clubId = club.id;
+    clubPath = club.path;
+
+    const year = await programYears.create({
+      id: '2026-2027',
+      startsOn: new Date('2026-07-01'),
+      endsOn: new Date('2027-06-30'),
+    });
+    programYearId = year.id;
+  });
+  afterAll(async () => {
+    await stop();
+  });
+
+  it('blocks a President from delegating a grant they do not hold (escalation via invitation)', async () => {
+    const president = await people.create({
+      email: 'president@example.com',
+      fullName: 'President',
+    });
+    await roleAssignments.assign({
+      personId: president.id,
+      orgUnitId: clubId,
+      role: 'club_president',
+      programYearId,
+      termStart: new Date('2026-07-01'),
+      termEnd: new Date('2027-06-30'),
+      appointedBy: president.id,
+    });
+    const nobody = await people.create({ email: 'nobody@example.com', fullName: 'Nobody Yet' });
+
+    // The President's grants are all club-scoped; platform.audit at the
+    // district is not among them — matches rbac-design.md §12's worked
+    // example exactly.
+    await expect(
+      grantAdmin.grantPersonGrant({
+        actorId: president.id,
+        personId: nobody.id,
+        orgUnitId: districtId,
+        resource: 'platform.audit',
+        action: 'read',
+        reason: 'attempted escalation',
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('refuses to remove the last unit_admin for a unit, but allows it when another remains', async () => {
+    const admin1 = await people.create({ email: 'admin1@example.com', fullName: 'Admin One' });
+    const admin2 = await people.create({ email: 'admin2@example.com', fullName: 'Admin Two' });
+
+    const a1 = await grantAdmin.grantPlatformRole({
+      personId: admin1.id,
+      role: 'unit_admin',
+      orgUnitId: clubId,
+      grantedBy: admin1.id,
+    });
+    await expect(grantAdmin.revokePlatformRole(a1.id)).rejects.toThrow();
+
+    const a2 = await grantAdmin.grantPlatformRole({
+      personId: admin2.id,
+      role: 'unit_admin',
+      orgUnitId: clubId,
+      grantedBy: admin1.id,
+    });
+    await expect(grantAdmin.revokePlatformRole(a1.id)).resolves.not.toThrow();
+    // a2 is now the last one — removing it should fail in turn.
+    await expect(grantAdmin.revokePlatformRole(a2.id)).rejects.toThrow();
+  });
+
+  it('a unit-policy deny beats a role-template allow (rbac-design.md §12)', async () => {
+    const saa = await people.create({ email: 'saa@example.com', fullName: 'Sergeant at Arms' });
+    await roleAssignments.assign({
+      personId: saa.id,
+      orgUnitId: clubId,
+      role: 'club_member', // seeded with meeting.meeting:read — see Slice 3
+      programYearId,
+      termStart: new Date('2026-07-01'),
+      termEnd: new Date('2027-06-30'),
+      appointedBy: saa.id,
+    });
+    const request = {
+      principal: { userId: saa.id, roles: [], scopes: [] },
+      resource: 'meeting.meeting',
+      action: 'read' as const,
+      scope: clubPath,
+    };
+
+    const before = await authz.authorize(request);
+    expect(before.allowed).toBe(true);
+
+    await grantAdmin.createUnitPolicyGrant({
+      orgUnitId: clubId,
+      subjectRole: 'club_member',
+      resource: 'meeting.meeting',
+      action: 'read',
+      effect: 'deny',
+      createdBy: saa.id,
+      reason: 'club policy: agenda is officers-only this term',
+    });
+
+    const after = await authz.authorize(request);
+    expect(after.allowed).toBe(false);
+  });
+});
+```
+
+Create `apps/api/test/integration/access-break-glass.int-spec.ts`:
+
+```ts
+import { describe, it, beforeAll, afterAll, expect } from 'vitest';
+import type { PrismaClient } from '@toastmasters/db';
+import { seedAccessVocabulary } from '@toastmasters/db';
+import { startTestDb } from '../support/test-db';
+import { OrgUnitRepository } from '../../src/modules/org/org.repository';
+import { PersonRepository } from '../../src/modules/identity/person.repository';
+import { AccessRepository } from '../../src/modules/access/access.repository';
+import { GrantAdminRepository } from '../../src/modules/access/grant-admin.repository';
+import { AuthzService } from '../../src/common/authz/authz.service';
+
+describe('system_admin break-glass and direct-grant expiry (integration)', () => {
+  let db: PrismaClient;
+  let stop: () => Promise<void>;
+  let authz: AuthzService;
+  let people: PersonRepository;
+  let grantAdmin: GrantAdminRepository;
+
+  let clubId: string;
+  let clubPath: string;
+
+  beforeAll(async () => {
+    ({ db, stop } = await startTestDb());
+    await seedAccessVocabulary(db);
+
+    const orgUnits = new OrgUnitRepository(db);
+    people = new PersonRepository(db);
+    const access = new AccessRepository(db);
+    grantAdmin = new GrantAdminRepository(db, access);
+    authz = new AuthzService(access);
+
+    const region = await orgUnits.createRoot({
+      type: 'region',
+      code: 'r1',
+      name: 'Region 1',
+      timezone: 'Asia/Dhaka',
+    });
+    const district = await orgUnits.createChild({
+      parentId: region.id,
+      type: 'district',
+      code: 'd41',
+      name: 'District 41',
+      timezone: 'Asia/Dhaka',
+    });
+    const club = await orgUnits.createChild({
+      parentId: district.id,
+      type: 'club',
+      code: 'c1',
+      name: 'Club 1',
+      timezone: 'Asia/Dhaka',
+    });
+    clubId = club.id;
+    clubPath = club.path;
+  });
+  afterAll(async () => {
+    await stop();
+  });
+
+  it('grants system_admin broad access to a non-restricted resource with no explicit template grant', async () => {
+    const sysAdmin = await people.create({
+      email: 'sysadmin@example.com',
+      fullName: 'System Admin',
+    });
+    await grantAdmin.grantPlatformRole({
+      personId: sysAdmin.id,
+      role: 'system_admin',
+      orgUnitId: null,
+      grantedBy: sysAdmin.id,
+    });
+
+    const decision = await authz.authorize({
+      principal: { userId: sysAdmin.id, roles: [], scopes: [] },
+      resource: 'meeting.meeting',
+      action: 'read',
+      scope: clubPath,
+    });
+    expect(decision.allowed).toBe(true);
+  });
+
+  it('denies system_admin a restricted read until it mints break-glass, then allows and audits it', async () => {
+    const sysAdmin = await people.create({
+      email: 'sysadmin2@example.com',
+      fullName: 'System Admin Two',
+    });
+    await grantAdmin.grantPlatformRole({
+      personId: sysAdmin.id,
+      role: 'system_admin',
+      orgUnitId: null,
+      grantedBy: sysAdmin.id,
+    });
+    const request = {
+      principal: { userId: sysAdmin.id, roles: [], scopes: [] },
+      resource: 'finance.ledger',
+      action: 'read' as const,
+      scope: clubPath,
+    };
+
+    const before = await authz.authorize(request);
+    expect(before.allowed).toBe(false); // restricted — excluded from the broad synthesis
+
+    await grantAdmin.mintBreakGlass({
+      systemAdminPersonId: sysAdmin.id,
+      orgUnitId: clubId,
+      resource: 'finance.ledger',
+      action: 'read',
+      reason: 'investigating a member-reported discrepancy',
+    });
+
+    const after = await authz.authorize(request);
+    expect(after.allowed).toBe(true);
+
+    const events = await db.auditEvent.findMany({ where: { actorPersonId: sysAdmin.id } });
+    expect(events.map((e) => e.type).sort()).toEqual(['break_glass_mint', 'restricted_read']);
+  });
+
+  it('treats an expired direct grant as inert', async () => {
+    const sysAdmin = await people.create({
+      email: 'sysadmin3@example.com',
+      fullName: 'System Admin Three',
+    });
+    await grantAdmin.grantPlatformRole({
+      personId: sysAdmin.id,
+      role: 'system_admin',
+      orgUnitId: null,
+      grantedBy: sysAdmin.id,
+    });
+    await grantAdmin.mintBreakGlass({
+      systemAdminPersonId: sysAdmin.id,
+      orgUnitId: clubId,
+      resource: 'finance.ledger',
+      action: 'read',
+      reason: 'already expired, for this test',
+      expiresAt: new Date(Date.now() - 1000), // already in the past
+    });
+
+    const decision = await authz.authorize({
+      principal: { userId: sysAdmin.id, roles: [], scopes: [] },
+      resource: 'finance.ledger',
+      action: 'read',
+      scope: clubPath,
+    });
+    expect(decision.allowed).toBe(false);
+  });
+});
+```
+
+Run: `pnpm --filter @toastmasters/api test:int -- access-delegation access-break-glass` — expect FAIL (`GrantAdminRepository`/`can-delegate` don't exist yet; `AccessRepository` doesn't expose `pathOf` publicly).
+
+- [ ] **Step 8: Run it to verify everything passes**
+
+Run: `pnpm --filter @toastmasters/api test:int` — expect PASS, all suites (harness, org, identity, access-seed, access-resolution, access-cache, access-delegation, access-break-glass).
+
+- [ ] **Step 9: Verify the wider gate is still green**
+
+Run: `pnpm --filter @toastmasters/api test && pnpm --filter @toastmasters/db build && pnpm lint && pnpm typecheck && pnpm build`
+Expected: no errors.
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add packages/db/prisma/schema.prisma packages/db/prisma/migrations apps/api/src/common/authz/can-delegate.ts apps/api/src/common/authz/can-delegate.spec.ts apps/api/src/common/authz/authz.service.ts apps/api/src/modules/access apps/api/test/integration/access-delegation.int-spec.ts apps/api/test/integration/access-break-glass.int-spec.ts
+git commit -m "feat(access): delegation guard, unit-policy overrides, and system_admin break-glass"
+```
+
+---
+
+## Slices 7–10
+
+Each is expanded to Slice 0/1/2/3/4/5/6 depth (files, interfaces, bite-sized TDD steps with full code) immediately before it is executed, against the now-proven foundation. Their deliverables, dependencies, and ship criteria are fixed in the roadmap table above; the canonical schema and algorithms they implement are `rbac-design.md` §3–§9 and `system-design.md` §5–§7, and the design decisions specific to this deployment are in `docs/superpowers/specs/2026-07-28-platform-tier-super-admin-design.md`.
 
 **Self-review (this plan vs the spec):**
 

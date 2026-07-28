@@ -5,14 +5,17 @@ import { MeetingRepository } from './meeting.repository';
 import { MeetingController } from './meeting.controller';
 import { AgendaItemRepository } from './agenda-item.repository';
 import { AgendaItemController } from './agenda-item.controller';
+import { MeetingRoleAssignmentRepository } from './meeting-role-assignment.repository';
+import { MeetingRoleAssignmentController } from './meeting-role-assignment.controller';
 
 @Module({
   providers: [
     { provide: PRISMA_CLIENT, useFactory: () => getPrisma() },
     MeetingRepository,
     AgendaItemRepository,
+    MeetingRoleAssignmentRepository,
   ],
-  controllers: [MeetingController, AgendaItemController],
+  controllers: [MeetingController, AgendaItemController, MeetingRoleAssignmentController],
   exports: [MeetingRepository],
 })
 export class MeetingModule {}

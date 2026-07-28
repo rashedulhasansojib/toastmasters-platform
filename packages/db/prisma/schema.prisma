@@ -59,6 +59,7 @@ model OrgUnit {
   auditEvents      AuditEvent[]
   meetings         Meeting[]
   invitations      Invitation[]
+  meetingRoleAssignments MeetingRoleAssignment[]
 
   @@map("org_unit")
 }
@@ -97,6 +98,7 @@ model Person {
   meetingsCreated           Meeting[]
   invitationsSent           Invitation[] @relation("InvitationInvitedBy")
   invitationsAccepted       Invitation[] @relation("InvitationAcceptedBy")
+  meetingRoleAssignments    MeetingRoleAssignment[]
 
   @@map("person")
 }
@@ -219,6 +221,7 @@ model Meeting {
   createdByPerson Person      @relation(fields: [createdBy], references: [id])
   createdAt       DateTime    @default(now()) @map("created_at")
   agendaItems     AgendaItem[]
+  roleAssignments MeetingRoleAssignment[]
 
   @@map("meeting")
 }
@@ -236,6 +239,70 @@ model AgendaItem {
 
   @@unique([meetingId, position])
   @@map("agenda_item")
+}
+
+/** system-design.md §9.2's fixed roleKey vocabulary — extend via migration, not app code. */
+enum MeetingRoleKey {
+  toastmaster
+  general_evaluator
+  table_topics_master
+  timer
+  ah_counter
+  grammarian
+  sergeant_at_arms
+  speaker
+  evaluator
+
+  @@map("meeting_role_key")
+}
+
+/**
+ * M3 Slice 3 scoping: `guest` (assignee.kind === "guest", §9.2) is deferred —
+ * it references a Prospect row that doesn't exist until M4. Only member and
+ * cross_club assignees, which reference models that already exist, ship now.
+ */
+enum MeetingRoleAssigneeKind {
+  member
+  cross_club
+  unfilled
+
+  @@map("meeting_role_assignee_kind")
+}
+
+enum MeetingRoleAssignmentStatus {
+  proposed
+  confirmed
+  declined
+  fulfilled
+  no_show
+
+  @@map("meeting_role_assignment_status")
+}
+
+/**
+ * M3 Slice 3: system-design.md §9.2 — role assignments reference identity,
+ * not strings. Status transitions (confirm/decline/fulfil) are a later
+ * slice; this slice only proves the shape (assignments are created
+ * `proposed` and read back).
+ */
+model MeetingRoleAssignment {
+  id                     String                      @id @default(uuid()) @db.Uuid
+  meetingId              String                      @map("meeting_id") @db.Uuid
+  meeting                Meeting                     @relation(fields: [meetingId], references: [id])
+  roleKey                MeetingRoleKey              @map("role_key")
+  slotIndex              Int?                        @map("slot_index")
+  assigneeKind           MeetingRoleAssigneeKind     @map("assignee_kind")
+  assigneePersonId       String?                     @map("assignee_person_id") @db.Uuid
+  assigneePerson         Person?                     @relation(fields: [assigneePersonId], references: [id])
+  assigneeHomeClubUnitId String?                     @map("assignee_home_club_unit_id") @db.Uuid
+  assigneeHomeClubUnit   OrgUnit?                    @relation(fields: [assigneeHomeClubUnitId], references: [id])
+  status                 MeetingRoleAssignmentStatus @default(proposed)
+  confirmedAt            DateTime?                   @map("confirmed_at")
+  fulfilledAt            DateTime?                   @map("fulfilled_at")
+  declinedReason         String?                     @map("declined_reason")
+  createdAt              DateTime                    @default(now()) @map("created_at")
+
+  @@map("meeting_role_assignment")
 }
 
 enum InvitationStatus {

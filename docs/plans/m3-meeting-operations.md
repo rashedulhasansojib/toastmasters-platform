@@ -50,3 +50,26 @@
 - [x] Agenda page + form + proxy route, verified against the real dev stack.
 - [x] Full gate (lint/typecheck/build for dashboard; unaffected `apps/api` suites untouched by this slice).
 - [x] Commit: `feat(dashboard): agenda page — the agenda builder's first real UI`
+
+---
+
+## Slice 3 — Meeting roles are entities, not strings
+
+**Why:** `system-design.md` §9.2 — role assignments must reference identity (Pathways credit, rotation fairness, cross-club logging, reliable attendance), not the placeholder `roleKey` string Slice 1's `AgendaItem` carries. The `meeting.role` resource was already seeded in M1/M2 anticipating this slice (grants existed, no endpoints did) — this slice finally wires it up.
+
+**Scoping decisions:**
+
+- **`guest` assignee deferred.** §9.2 lists `member | cross_club | guest | unfilled`; `guest` references a `Prospect` row that doesn't exist until M4. Ships now: `member`, `cross_club`, `unfilled`.
+- **No status transitions this slice.** Assignments are created `proposed` and read back; `confirm`/`decline`/`fulfil` (§9.2's `status` lifecycle) is a later increment, matching Slice 1's own "smallest real increment" precedent.
+- **`roleKey` is a fixed Prisma enum**, not seeded reference data — §9.2's vocabulary (`toastmaster`, `general_evaluator`, …) is closed enough (extend via migration) that it doesn't warrant the RBAC-catalogue seeded-data treatment CLAUDE.md reserves for resources/actions/DCP goals/role templates.
+- **Bug found in passing:** `club_vpe` had `update` on `meeting.role` since M2 but never `read` — added here (caught by this slice's own GET test failing 403 first).
+
+**Files:** `packages/db/prisma/schema.prisma` (+`MeetingRoleAssignment`, +3 enums, +migration), `packages/db/src/seed.ts` (`meeting.role` gains `create` action + `club_vpe` create/read grants), `packages/contracts/src/meeting.ts` (+`meetingRoleAssignment`, `meetingRoleAssignee` discriminated union, +create request schema), `apps/api/src/modules/meeting/meeting-role-assignment.{repository,controller}.ts` (new), `meeting.module.ts` (register both).
+
+**Tests** (`meeting-role-assignment-http.int-spec.ts`, new): (1) a `club_vpe` proposes one assignment of each supported assignee kind, `GET` returns all three as `proposed`; (2) sibling-club member 403's (non-negotiable per `CLAUDE.md`).
+
+- [x] Schema + migration + seed.
+- [x] Repository + controller + module wiring, TDD against the 2 tests above.
+- [x] Bumped `authorization-matrix.int-spec.ts`'s `meeting.role` actions to include `create`.
+- [x] Full gate — green (366 integration, up from 352; 72 unit; lint/typecheck/build clean).
+- [x] Commit: `feat(meeting): role assignments are entities — roles reference identity, not strings`

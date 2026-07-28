@@ -44,3 +44,65 @@ export const createAgendaItemRequestSchema = z
   })
   .strict();
 export type CreateAgendaItemRequest = z.infer<typeof createAgendaItemRequestSchema>;
+
+/** system-design.md §9.2's fixed roleKey vocabulary. */
+export const meetingRoleKey = z.enum([
+  'toastmaster',
+  'general_evaluator',
+  'table_topics_master',
+  'timer',
+  'ah_counter',
+  'grammarian',
+  'sergeant_at_arms',
+  'speaker',
+  'evaluator',
+]);
+export type MeetingRoleKey = z.infer<typeof meetingRoleKey>;
+
+export const meetingRoleAssignmentStatus = z.enum([
+  'proposed',
+  'confirmed',
+  'declined',
+  'fulfilled',
+  'no_show',
+]);
+export type MeetingRoleAssignmentStatus = z.infer<typeof meetingRoleAssignmentStatus>;
+
+/**
+ * M3 Slice 3 scoping: `guest` (§9.2) is deferred — it references a Prospect
+ * row that doesn't exist until M4.
+ */
+export const meetingRoleAssignee = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('member'), personId: z.uuid() }).strict(),
+  z
+    .object({ kind: z.literal('cross_club'), personId: z.uuid(), homeClubUnitId: z.uuid() })
+    .strict(),
+  z.object({ kind: z.literal('unfilled') }).strict(),
+]);
+export type MeetingRoleAssignee = z.infer<typeof meetingRoleAssignee>;
+
+/** M3 Slice 3: system-design.md §9.2 — role assignments reference identity, not strings. */
+export const meetingRoleAssignment = z.object({
+  id: z.uuid(),
+  meetingId: z.uuid(),
+  roleKey: meetingRoleKey,
+  slotIndex: z.number().int().nonnegative().nullable(),
+  assignee: meetingRoleAssignee,
+  status: meetingRoleAssignmentStatus,
+  confirmedAt: z.iso.datetime().nullable(),
+  fulfilledAt: z.iso.datetime().nullable(),
+  declinedReason: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+});
+export type MeetingRoleAssignment = z.infer<typeof meetingRoleAssignment>;
+
+export const createMeetingRoleAssignmentRequestSchema = z
+  .object({
+    roleKey: meetingRoleKey,
+    slotIndex: z.number().int().nonnegative().optional(),
+    assignee: meetingRoleAssignee,
+  })
+  .strict();
+export type CreateMeetingRoleAssignmentRequest = z.infer<
+  typeof createMeetingRoleAssignmentRequestSchema
+>;

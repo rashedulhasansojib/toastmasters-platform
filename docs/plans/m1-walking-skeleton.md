@@ -9,11 +9,8 @@
 **Tech Stack:** NestJS 11 (api), Prisma 7 + `@prisma/adapter-pg` (packages/db), Postgres + `ltree`, Redis/BullMQ (permission cache), Zod 4 (packages/contracts), Vitest 4 + Testcontainers 12, Argon2id + `jose` (sessions).
 
 > **Scope note.** This is the M1 milestone plan. It is delivered as ordered
-> **slices** (§ "Slice roadmap"). Slices 0–9 below are fully detailed and
-> execution-ready. Each later slice is expanded to the same bite-sized TDD depth
-> just before it is executed, so its code is written against a proven foundation
-> rather than guessed. This matches roadmap.md §7 ("plans are living documents;
-> each is a checklist of slices").
+> **slices** (§ "Slice roadmap"). Slices 0–10 below are fully detailed and
+> execution-ready — Slice 10 is the last slice in M1.
 >
 > **Migration-apply correction (learned during Slice 2).** Steps that say
 > "apply the migration" in Slices 0–2 use `prisma migrate dev --name <x>`
@@ -4861,7 +4858,171 @@ git commit -m "feat(meeting): meeting + VPE-assignment routes through the gate �
 
 ## Slice 10 — Authorisation matrix + doc updates
 
-Expanded to Slice 0–9 depth (files, interfaces, bite-sized TDD steps with full code) immediately before it is executed, against the now-proven foundation. Its deliverables, dependencies, and ship criteria are fixed in the roadmap table above; the canonical schema and algorithms it implements are `rbac-design.md` §3–§9 and `system-design.md` §5–§7, and the design decisions specific to this deployment are in `docs/superpowers/specs/2026-07-28-platform-tier-super-admin-design.md`.
+**Why:** CLAUDE.md §7: "The authorisation matrix — every `(role × resource × action × scope)`, generated from role templates and asserted against `authorize()`. The single most valuable suite in the project." Nine slices built the engine and exercised it with targeted cases; this slice generates the exhaustive sweep rbac-design.md §9 describes, and closes out the doc divergences M1 accumulated along the way (CLAUDE.md's own rule, §0: "When this file and a design document disagree... tell the human, so one of them gets fixed").
+
+**Divergences found by reading the docs against what M1 actually built** (not guessed — each is a direct read of the cited section):
+
+1. **Break-glass, never surfaced in CLAUDE.md.** `system-design.md` §7.7's canonical table gives `system_admin` standing **R (audited bypass)** on the ledger/evaluations/health-signals. Slice 6 built this deployment's stricter model instead — no standing restricted-resource access, a minted, reason-required, expiring grant instead (`docs/superpowers/specs/2026-07-28-platform-tier-super-admin-design.md`) — and every slice's plan section has referenced that spec since, but **CLAUDE.md itself never got the callout**, so anyone reading only the operational doc would assume the canonical §7.7 table. Fixed with a "Known divergence" note in CLAUDE.md §5, mirroring the existing NestJS/Next.js one in §3.
+2. **Region tier: decided, never recorded.** CLAUDE.md §2 still lists "Region tier above District" as Phase-0 decision 6, **open**. It was implicitly closed in Slice 1: `org_unit_single_region_root` is a hard unique index — this deployment always roots at `region`, never at `district` directly. That's narrower than `system-design.md` §5.1 ("A district-only deployment roots at `type: district`") and `prd.md` FR-ORG-2 ("...the region tier is optional") both describe as a general platform capability. Recorded as decided (CLAUDE.md §2, alongside decision 1's existing "Decided since the design docs were written" note) and footnoted at both source locations — the capability isn't built, not contradicted; a future district-only mode would mean dropping that unique index.
+3. **The roadmap table's own "CLAUDE.md §1" pointer is imprecise.** §1 ("What this project is") is still accurate as written — nothing there needs to change. The actual stale content is §2's decision log (item 2 above) and the missing §5 callout (item 1 above). Noted here rather than force an edit into §1 for its own sake.
+
+No third divergence found in `system-design.md` §4.6 (tenancy posture) — it already correctly lists "cross-tenant test matrix in CI" as **✗ not covered**, and this slice's matrix suite tests role/resource/action/scope, not SaaS tenant isolation; nothing there is inaccurate.
+
+**Scoping decisions for the matrix suite:**
+
+- Generated from the **seeded reference data** (`role_template` × `resource_catalog`), not a hand-maintained expectation table — the whole point (rbac-design.md §9) is that a new grant added to the seed is covered automatically, never silently unchecked.
+- **`system_admin` is derived specially**, matching `access.repository.ts`'s real synthesis: expected-allow for every `(resource, action)` pair on a non-restricted resource, expected-deny on the four restricted ones — not from `role_template_grant` rows, which Slice 3 deliberately left empty for it.
+- **`unit_admin`/`support_readonly` currently expect all-deny** against this catalogue — their seeded grants are `[]` (Slice 3's note: their real authority is org-tree/role-template administration, which M1 doesn't model as `resource_catalog` rows at all). Asserted explicitly, not skipped, so the day that changes, this suite catches it.
+- **Condition is not part of the matrix.** A condition-gated grant (e.g. `club_member`'s `finance.ledger:read (own)`) is checked with every ownership context flag `true` — "could this role ever get this," the same capability-check framing Slice 7's `whatCanDoAt` already established, not a specific-row decision.
+- **Sibling-club isolation** is the other half, run only for scope-narrow roles (the four club-tier roles + `unit_admin`, each granted at Club A specifically) — global roles (`system_admin`, `support_readonly`, granted at the region root) have no "sibling" by construction, so they're excluded from that half rather than given a vacuous pass.
+
+**Files:**
+
+- Create: `apps/api/test/integration/authorization-matrix.int-spec.ts`
+- Modify: `CLAUDE.md` (§2 decision log, §5 break-glass callout)
+- Modify: `system-design.md` (§5.1 region-tier footnote, §7.7 break-glass footnote)
+- Modify: `prd.md` (FR-ORG-2 footnote)
+
+**TDD steps:**
+
+- [ ] **Step 1: The generated matrix**
+
+  This suite _is_ the red/green cycle — rather than write a failing assertion and then implement (there's no new production code, only a new test against Slices 3–9's already-shipped `authorize()`), each generated case is run and any real failure is a bug in either the seed or the engine, fixed on the spot exactly like Slice 9's two seed gaps.
+
+  ```ts
+  // authorization-matrix.int-spec.ts (shape)
+  const ROLES = [
+    'club_president',
+    'club_vpe',
+    'club_treasurer',
+    'club_member',
+    'system_admin',
+    'unit_admin',
+    'support_readonly',
+  ];
+  const CLUB_SCOPED_ROLES = [
+    'club_president',
+    'club_vpe',
+    'club_treasurer',
+    'club_member',
+    'unit_admin',
+  ];
+  const RESOURCE_ACTIONS: Array<{ resource: string; actions: Action[] }> = [
+    { resource: 'identity.role_assignment', actions: ['read', 'create', 'update'] },
+    { resource: 'meeting.meeting', actions: ['read', 'create', 'update'] },
+    { resource: 'meeting.role', actions: ['read', 'update'] },
+    { resource: 'finance.ledger', actions: ['read', 'create', 'update'] },
+    { resource: 'education.evaluation', actions: ['read', 'create', 'update'] },
+    { resource: 'membership.health_signal', actions: ['read'] },
+    { resource: 'platform.audit', actions: ['read'] },
+  ];
+
+  // beforeAll: region -> district -> Club A, Club B; one actor per role, each holding
+  // exactly that role — club-tier + unit_admin at Club A, system_admin/support_readonly
+  // granted globally (orgUnitId: null).
+
+  async function expectedAllow(db, role, resource, action) {
+    if (role === 'system_admin') {
+      const catalog = await db.resourceCatalog.findUnique({ where: { resource } });
+      return catalog?.sensitivity !== 'restricted';
+    }
+    const grant = await db.roleTemplateGrant.findFirst({
+      where: { role, resource, action, effect: 'allow' },
+    });
+    return grant != null;
+  }
+
+  for (const role of ROLES) {
+    for (const { resource, actions } of RESOURCE_ACTIONS) {
+      for (const action of actions) {
+        it(`${role} · ${resource}:${action}`, async () => {
+          const expected = await expectedAllow(db, role, resource, action);
+          const decision = await authz.authorize({
+            principal: { userId: actorId[role], roles: [], scopes: [] },
+            resource,
+            action,
+            scope: clubAPath,
+            context: { isOwner: true, isAssigned: true, isParty: true, isPublished: true },
+          });
+          expect(decision.allowed).toBe(expected);
+        });
+      }
+    }
+  }
+
+  for (const role of CLUB_SCOPED_ROLES) {
+    for (const { resource, actions } of RESOURCE_ACTIONS) {
+      for (const action of actions) {
+        it(`${role} · ${resource}:${action} · sibling club denied`, async () => {
+          const decision = await authz.authorize({
+            principal: { userId: actorId[role], roles: [], scopes: [] },
+            resource,
+            action,
+            scope: clubBPath,
+            context: { isOwner: true, isAssigned: true, isParty: true, isPublished: true },
+          });
+          expect(decision.allowed).toBe(false);
+        });
+      }
+    }
+  }
+  ```
+
+  Run it. Any failure is investigated and fixed at the source (seed or `evaluate()`), the same discipline as every prior slice's negative case — not weakened to make the suite pass.
+
+- [ ] **Step 2: `CLAUDE.md` §2 — close decision 6**
+
+  ```diff
+  -**Decided since the design docs were written** (reflected below): the database is **PostgreSQL on Neon** — this closes open decision 1 — and the ORM is **Prisma**. See §3.
+  +**Decided since the design docs were written** (reflected below): the database is **PostgreSQL on Neon** — this closes open decision 1 — and the ORM is **Prisma**. See §3. Decision 6 (region tier) is also closed: **the org tree always roots at `region`** — `org_unit_single_region_root` is a hard unique index, not the optional district-root `system-design.md` §5.1 and `prd.md` FR-ORG-2 describe as a general capability. Chosen in Slice 1 (M1 walking skeleton) for this single, always-region-rooted deployment; a future district-only mode would mean dropping that constraint.
+  ```
+
+  And remove item 6 from the "Still open" list (renumbering not required — the list is referential, not positional elsewhere).
+
+- [ ] **Step 3: `CLAUDE.md` §5 — the break-glass callout**
+
+  Add, after the bullet list and before "The anti-patterns...":
+
+  ```md
+  > **Known divergence from the design docs.** `system-design.md` §7.7 gives `system_admin` standing **R (audited bypass)** on the ledger, evaluations, and health signals. This deployment is stricter (`docs/superpowers/specs/2026-07-28-platform-tier-super-admin-design.md`): `system_admin` holds **no** standing grant on any `restricted` resource — it mints a reason-required, expiring `person_grant` first (break-glass), and that read is audited like any other. Built in the M1 walking skeleton's Slice 6.
+  ```
+
+- [ ] **Step 4: `system-design.md` footnotes**
+
+  §5.1, after "A district-only deployment roots at `type: 'district'`.":
+
+  ```md
+  (This deployment always roots at `region` — see CLAUDE.md §2, Phase-0 decision 6.)
+  ```
+
+  §7.7, after the table:
+
+  ```md
+  > **This deployment overrides the table above** for `system_admin`'s restricted-resource row — see `docs/superpowers/specs/2026-07-28-platform-tier-super-admin-design.md` and CLAUDE.md §5.
+  ```
+
+- [ ] **Step 5: `prd.md` FR-ORG-2 footnote**
+
+  ```md
+  <!-- FR-ORG-2: this deployment always roots at region (CLAUDE.md §2, Phase-0 decision 6) — the district-only mode described here isn't built. -->
+  ```
+
+  (Placed immediately after the requirements table, matching the doc's existing footnote convention.)
+
+- [ ] **Step 6: Full gate**
+
+  `pnpm lint && pnpm typecheck && pnpm test && pnpm build`, plus `pnpm test:int`. The matrix suite is part of `test:int` — a real, non-trivial addition to the count, not a rubber stamp.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add apps/api/test/integration/authorization-matrix.int-spec.ts CLAUDE.md system-design.md prd.md
+git commit -m "test(access): generated authorisation matrix; close M1's doc divergences"
+```
+
+This is the last M1 slice. After Step 7, the milestone's own ship gate (Slice 9) and its supporting proof (this slice's matrix) are both green — M1 is done.
+
+---
 
 **Self-review (this plan vs the spec):**
 

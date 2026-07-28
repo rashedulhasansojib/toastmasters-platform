@@ -10,13 +10,10 @@
 
 > **Scope note.** M1's plan sketched its full slice roadmap before detailing
 > any slice, because the whole milestone's shape was known up front. M2 is
-> being scoped incrementally instead: **Slices 1–7** below are detailed and
-> execution-ready. Permission-versioning UX (mid-session JWT reissue) will
-> get its own detailed section, written just before it's implemented, once
-> Slice 7's shape has proven out — mirroring M1's own governing principle:
-> "if `authorize()` feels awkward here, fix it before M2" applies equally to
-> "if the invitation/org-editor/unit-policy/dashboard shape feels awkward
-> here, fix it before the next slice."
+> being scoped incrementally instead: **Slices 1–8** below are detailed and
+> execution-ready — that closes out the milestone's originally-sketched
+> scope (invitations, unit policies, permission versioning, org editor,
+> unit switcher, `ActivityEvent`/audit emission, access inspector).
 
 ---
 
@@ -1135,5 +1132,18 @@ git commit -m "feat(access): session query endpoints — GET /me and GET /switch
 git add apps/dashboard docs/plans/m2-identity-org.md
 git commit -m "feat(dashboard): login and unit switcher — the first dashboard UI"
 ```
+
+---
+
+## Slice 8 — Permission-versioning UX (mid-session JWT reissue)
+
+**Why:** `rbac-design.md` §5: "the session JWT carries `v`. If `v` ≠ current `permission_version`, the resolved set is rebuilt and the token reissued." The engine side of this already works (`authorize()` never trusts `v`, always resolves live from `AccessRepository.effectiveGrants()`), but nothing keeps the session cookie's own `v` claim fresh after a mid-session revocation — a real (if minor) polish gap, not a security one. Closing it here rather than leaving M2's scope note pointing at it forever.
+
+**Scope, kept small per current guidance to favor velocity over exhaustive coverage this session:** `JwtAuthGuard` gains a `PersonRepository` lookup after verifying the token; on a `v` mismatch it reissues the cookie with the current `permissionVersion` (same `activeUnitId`/`programYearId`/`sub`) via the existing `SessionService`. This also closes a latent gap for free: a JWT for a since-deleted person previously passed the guard on signature alone — now `findById` returning `null` is a 401. Two tests: one proving reissue-on-mismatch (a role assignment happens, `v` bumps, the next request under the old cookie gets a fresh `Set-Cookie` with the new `v`), one proving _no_ reissue when `v` is already current (no `Set-Cookie` header) — the negative case that keeps this from silently reissuing on every request.
+
+**Files:** `apps/api/src/common/auth/jwt-auth.guard.ts`; `apps/api/test/integration/auth-http.int-spec.ts`.
+
+- [x] Implement + test. Full gate run once at the end.
+- [x] Commit: `feat(access): reissue the session cookie when permissionVersion drifts mid-session`
 
 ---

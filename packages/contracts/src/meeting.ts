@@ -244,3 +244,67 @@ export const capabilityTokenVerification = z.object({
   purpose: z.string().nullable(),
 });
 export type CapabilityTokenVerification = z.infer<typeof capabilityTokenVerification>;
+
+/**
+ * M3 Slice 7: system-design.md §9.1's timerRecord/ahCounterRecord/
+ * grammarianRecord, one write path with a `kind` discriminator (see the
+ * Slice 7 plan note). `clientKey` is client-minted so a venue-wifi drop can
+ * safely retry the same write (FR-MTG-6/NFR-3) — the server returns the
+ * originally-stored record unchanged on a repeat key, never a duplicate.
+ */
+const liveRecordTargetFields = {
+  clientKey: z.string().min(1),
+  targetRoleAssignmentId: z.uuid().optional(),
+  targetLabel: z.string().min(1).optional(),
+};
+
+export const createMeetingLiveRecordRequestSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('timer'),
+      ...liveRecordTargetFields,
+      payload: z.object({
+        category: z.string().min(1),
+        elapsedMs: z.number().int().nonnegative(),
+        signal: z.enum(['green', 'yellow', 'red']).nullable(),
+      }),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('ah_counter'),
+      ...liveRecordTargetFields,
+      payload: z.object({
+        counts: z.array(
+          z.object({ word: z.string().min(1), count: z.number().int().nonnegative() }),
+        ),
+      }),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('grammarian'),
+      ...liveRecordTargetFields,
+      payload: z.object({
+        wordOfDayUses: z.number().int().nonnegative(),
+        corrections: z.array(
+          z.object({ said: z.string().min(1), shouldHaveBeen: z.string().min(1) }),
+        ),
+      }),
+    })
+    .strict(),
+]);
+export type CreateMeetingLiveRecordRequest = z.infer<typeof createMeetingLiveRecordRequestSchema>;
+
+export const meetingLiveRecord = z.object({
+  id: z.uuid(),
+  meetingId: z.uuid(),
+  kind: z.enum(['timer', 'ah_counter', 'grammarian']),
+  clientKey: z.string(),
+  targetRoleAssignmentId: z.uuid().nullable(),
+  targetLabel: z.string().nullable(),
+  payload: z.record(z.string(), z.unknown()),
+  recordedBy: z.uuid(),
+  createdAt: z.iso.datetime(),
+});
+export type MeetingLiveRecord = z.infer<typeof meetingLiveRecord>;

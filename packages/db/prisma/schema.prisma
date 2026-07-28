@@ -103,6 +103,7 @@ model Person {
   meetingRoleAssignments    MeetingRoleAssignment[]
   speechSlotsRequested      SpeechSlot[]
   capabilityTokensIssued    CapabilityToken[]
+  meetingLiveRecords        MeetingLiveRecord[]
 
   @@map("person")
 }
@@ -229,8 +230,44 @@ model Meeting {
   speechSlots     SpeechSlot[]
   checklistRuns   ChecklistRun[]
   capabilityTokens CapabilityToken[]
+  liveRecords     MeetingLiveRecord[]
 
   @@map("meeting")
+}
+
+enum MeetingLiveToolKind {
+  timer
+  ah_counter
+  grammarian
+
+  @@map("meeting_live_tool_kind")
+}
+
+/**
+ * M3 Slice 7: system-design.md §9.1's timerRecord[]/ahCounterRecord[]/
+ * grammarianRecord, consolidated into one table with a `kind` discriminator
+ * and a `payload` Json column (see the Slice 7 plan note) instead of three
+ * separate tables — the three shapes never share a query, only a write
+ * path, so one idempotent-write table is enough.
+ * FR-MTG-6/NFR-3: `clientKey` is client-minted so a venue-wifi drop can
+ * safely retry the same write without creating a duplicate.
+ */
+model MeetingLiveRecord {
+  id                     String              @id @default(uuid()) @db.Uuid
+  meetingId              String              @map("meeting_id") @db.Uuid
+  meeting                Meeting             @relation(fields: [meetingId], references: [id])
+  kind                   MeetingLiveToolKind
+  clientKey              String              @map("client_key")
+  targetRoleAssignmentId String?             @map("target_role_assignment_id") @db.Uuid
+  targetRoleAssignment   MeetingRoleAssignment? @relation(fields: [targetRoleAssignmentId], references: [id])
+  targetLabel            String?             @map("target_label")
+  payload                Json
+  recordedBy             String              @map("recorded_by") @db.Uuid
+  recordedByPerson       Person              @relation(fields: [recordedBy], references: [id])
+  createdAt              DateTime            @default(now()) @map("created_at")
+
+  @@unique([meetingId, clientKey])
+  @@map("meeting_live_record")
 }
 
 /**
@@ -331,6 +368,7 @@ model MeetingRoleAssignment {
   fulfilledAt            DateTime?                   @map("fulfilled_at")
   declinedReason         String?                     @map("declined_reason")
   createdAt              DateTime                    @default(now()) @map("created_at")
+  liveRecords            MeetingLiveRecord[]
 
   @@map("meeting_role_assignment")
 }

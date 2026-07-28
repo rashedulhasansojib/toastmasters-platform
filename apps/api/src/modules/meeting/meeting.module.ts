@@ -16,6 +16,8 @@ import { ChecklistRunController } from './checklist-run.controller';
 import { CapabilityTokenRepository } from './capability-token.repository';
 import { CapabilityTokenService } from './capability-token.service';
 import { CapabilityTokenController } from './capability-token.controller';
+import { MeetingLiveRecordRepository } from './meeting-live-record.repository';
+import { MeetingLiveRecordController } from './meeting-live-record.controller';
 
 @Module({
   providers: [
@@ -28,6 +30,7 @@ import { CapabilityTokenController } from './capability-token.controller';
     ChecklistRunRepository,
     CapabilityTokenRepository,
     CapabilityTokenService,
+    MeetingLiveRecordRepository,
   ],
   controllers: [
     MeetingController,
@@ -37,6 +40,7 @@ import { CapabilityTokenController } from './capability-token.controller';
     ChecklistTemplateController,
     ChecklistRunController,
     CapabilityTokenController,
+    MeetingLiveRecordController,
   ],
   exports: [MeetingRepository, CapabilityTokenRepository],
 })

@@ -55,6 +55,7 @@ describe('Authorisation matrix (generated from role_template × resource_catalog
     { resource: 'meeting.speech_slot', actions: ['read', 'create', 'approve'] },
     { resource: 'meeting.checklist', actions: ['read', 'create', 'update'] },
     { resource: 'meeting.capability_token', actions: ['create', 'update'] },
+    { resource: 'meeting.live_record', actions: ['read', 'create'] },
     { resource: 'finance.ledger', actions: ['read', 'create', 'update'] },
     { resource: 'education.evaluation', actions: ['read', 'create', 'update'] },
     { resource: 'membership.health_signal', actions: ['read'] },

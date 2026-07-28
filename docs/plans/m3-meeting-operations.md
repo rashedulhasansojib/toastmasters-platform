@@ -143,3 +143,26 @@
 - [x] Bumped resource count (13→14) and `authorization-matrix.int-spec.ts`.
 - [x] Full gate — green (470 integration, up from 443; 72 unit; lint/typecheck/build clean).
 - [x] Commit: `feat(meeting): capability tokens — the guest primitive`
+
+---
+
+## Slice 7 — Live meeting-day tools (timer / ah-counter / grammarian)
+
+**Why:** `system-design.md` §9.1's `timerRecord[]`/`ahCounterRecord[]`/`grammarianRecord`. `FR-MTG-6`/`NFR-3`: writes must be offline-tolerant and idempotent — the ship gate line "a wifi drop mid-meeting loses no timing" lives here.
+
+**Scoping decisions:**
+
+- **One table, `kind`-discriminated**, not three — the three record shapes never share a query, only a write path. `payload` is `Json`, validated at the API boundary by a Zod discriminated union.
+- **Idempotency via a client-minted `clientKey`**, unique per meeting. `create()` is a Prisma `upsert` — replaying the same key after a dropped connection returns the original record untouched, never a duplicate row.
+- **`targetRoleAssignmentId` is optional** — a formal role assignment when one exists (Slice 3), else a free-text `targetLabel` (e.g. a Table Topics respondent who was never given a role row).
+- **`club_member` gets create+read**, not just officers — Timer/Ah-Counter/Grammarian are ordinary member roles, not VPE-only.
+
+**Files:** `packages/db/prisma/schema.prisma` (+`MeetingLiveRecord`, +migration), `packages/db/src/seed.ts` (`meeting.live_record` resource + grants), `packages/contracts/src/meeting.ts` (+discriminated create-request union), `apps/api/src/modules/meeting/meeting-live-record.{repository,controller}.ts` (new), `meeting.module.ts`.
+
+**Tests** (`meeting-live-record-http.int-spec.ts`, new): (1) a member records elapsed time as Timer; replaying the identical `clientKey` returns the same row, list stays length 1; (2) sibling-club member 403's.
+
+- [x] Schema + migration + seed.
+- [x] Repository + controller + module wiring.
+- [x] Bumped resource count (14→15) and `authorization-matrix.int-spec.ts`.
+- [x] Full gate — green (496 integration, up from 470; 72 unit; lint/typecheck/build clean).
+- [x] Commit: `feat(meeting): live meeting-day tools — idempotent timer/ah-counter/grammarian records`

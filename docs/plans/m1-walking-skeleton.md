@@ -9,7 +9,7 @@
 **Tech Stack:** NestJS 11 (api), Prisma 7 + `@prisma/adapter-pg` (packages/db), Postgres + `ltree`, Redis/BullMQ (permission cache), Zod 4 (packages/contracts), Vitest 4 + Testcontainers 12, Argon2id + `jose` (sessions).
 
 > **Scope note.** This is the M1 milestone plan. It is delivered as ordered
-> **slices** (§ "Slice roadmap"). Slices 0–8 below are fully detailed and
+> **slices** (§ "Slice roadmap"). Slices 0–9 below are fully detailed and
 > execution-ready. Each later slice is expanded to the same bite-sized TDD depth
 > just before it is executed, so its code is written against a proven foundation
 > rather than guessed. This matches roadmap.md §7 ("plans are living documents;
@@ -4618,9 +4618,250 @@ git commit -m "feat(identity): login, httpOnly session cookie, and unit switchin
 
 ---
 
-## Slices 9–10
+## Slice 9 — One meeting route through the gate (M1 ship gate)
 
-Each is expanded to Slice 0–8 depth (files, interfaces, bite-sized TDD steps with full code) immediately before it is executed, against the now-proven foundation. Their deliverables, dependencies, and ship criteria are fixed in the roadmap table above; the canonical schema and algorithms they implement are `rbac-design.md` §3–§9 and `system-design.md` §5–§7, and the design decisions specific to this deployment are in `docs/superpowers/specs/2026-07-28-platform-tier-super-admin-design.md`.
+**Why:** this is the milestone's own reason to exist. `roadmap.md`'s canonical ship gate is "A President creates a meeting and assigns a VPE; a member of another club cannot see it — the denial is a query-level 403/404, not a filtered-after-fetch" (`roadmap.md` line 149, `prd.md` FR-ACC-8). This slice wires two real, product-shaped HTTP routes through `authorize()` and proves both halves against real Postgres + Redis.
+
+**Resolved ambiguity (flagged to the user before starting, per CLAUDE.md's "tell the human" rule):** the roadmap table's own Deliverable column ("meeting module") and Ship-criteria column ("President assigns a VPE") described two different resources, and the plan's own top-of-file Goal statement only mentioned the VPE assignment. Checked against `system-design.md` §7.5's permission matrix — "Meeting / agenda: Pres = R, VPE = **W**" — so **`club_vpe`, not `club_president`, creates meetings**, matching FR-MTG-1. User chose **"both, minimal"**: a bare `meeting.meeting:create` route plus the `identity.role_assignment` HTTP route, reusing everything built since Slice 2/4. Story: President appoints Karim as VPE (`identity.role_assignment`) → Karim (now VPE) creates a meeting (`meeting.meeting`) → a Club B member is denied at the guard, before any meeting row is ever queried.
+
+**A real gap in the existing scaffold, closed here:** `@ResourceScope`/`ResourceGuard` (scaffolded in Phase 0, used as-is by Slice 7's inspector) only ever read a raw **ltree path** directly off `request.query.scope` — fine for an admin tool where the caller already knows internal paths, but wrong for a product route: a client says "club `f387e99c-...`", never a `d41.divA.a1.c1234` string. `ResourceGuard` now resolves `{source: 'param'|'query', key: 'orgUnitId'}` through a new `AuthzService.resolveScope()` (thin wrapper over `AccessRepository.pathOf`, 404 on an unknown unit) — exactly the shape CLAUDE.md §5 originally specified. Routes that omit `locate` keep today's raw-path behavior, so Slice 7's inspector endpoints are untouched and their existing tests must keep passing unchanged.
+
+**Scoping decisions:**
+
+- **`Meeting` is deliberately bare.** `system-design.md`'s full entity (agenda, roles, speech slots, theme, venue, format, lifecycle states, checklists) is out of scope — M1 needs a record to hang authorization on, not meeting operations (that's a later milestone). Fields: `id, clubUnitId, programYearId, scheduledAt, createdBy, createdAt`. No status/lifecycle column.
+- **Routes are club-scoped in the URL** (`/v1/clubs/:clubUnitId/meetings`, `/v1/clubs/:clubUnitId/role-assignments`), not by a bare resource id, specifically so the guard can resolve scope from a path param _before_ touching the database for the target row — the strongest form of "query-level denial, not filtered-after-fetch": a sibling-club request is refused with zero meeting-table reads.
+- **`meeting.meeting` gains a `create` action** (Slice 3 seeded only `read`/`update`) and `club_vpe` is granted it — the one seed change this slice needs, transcribed from `system-design.md` §7.5, same as every prior grant.
+- **No GET route for `identity.role_assignment`.** The ship gate's negative-scope proof is the meeting read ("a member of another club cannot see **it**" — the meeting, the noun the sentence is about); adding a symmetric read-denial test for role assignments would be a second, redundant proof of the same guard mechanism.
+- **List endpoint included** (`GET /v1/clubs/:clubUnitId/meetings`) even though not named in the ship criteria, because `rbac-design.md` §4.3 calls list endpoints "the part people get wrong" (`FR-AUTHZ-8`) and it costs nothing extra here: the query is `WHERE club_unit_id = :clubUnitId`, and `:clubUnitId` is only ever the guard-approved value — there is no code path where it could leak another club's rows.
+
+**Files:**
+
+- Modify: `apps/api/src/common/authz/resource-scope.decorator.ts`, `resource.guard.ts`, `authz.service.ts` (+ spec)
+- Modify: `packages/db/prisma/schema.prisma` (`Meeting` model), `packages/db/src/seed.ts` (`meeting.meeting:create`, `club_vpe` grant), new migration
+- Create: `apps/api/src/modules/meeting/{meeting.module,meeting.repository,meeting.controller}.ts`
+- Modify: `apps/api/src/modules/identity/identity.module.ts` (add controller); Create: `apps/api/src/modules/identity/identity.controller.ts`
+- Modify: `packages/contracts/src/identity.ts` (`createRoleAssignmentRequestSchema`); Create: `packages/contracts/src/meeting.ts`
+- Create: `apps/api/test/integration/meeting.repository.int-spec.ts`, `ship-gate.int-spec.ts`
+
+**Interfaces:**
+
+```ts
+// resource-scope.decorator.ts
+export interface ResourceScopeMeta {
+  resource: string;
+  action: Action;
+  /** Resolve scope from an org-unit id in the request, instead of a raw ltree path. Omit to keep the legacy `?scope=<path>` behavior (Slice 7's inspector). */
+  locate?: { source: 'param' | 'query'; key: string };
+}
+export const ResourceScope = (resource: string, action: Action, locate?: ResourceScopeMeta['locate']) => ...;
+```
+
+```ts
+// authz.service.ts addition
+resolveScope(orgUnitId: string): Promise<string>; // pathOf(), 404 (NotFoundException) if the unit doesn't exist
+```
+
+```ts
+// packages/contracts/src/meeting.ts
+export const meeting = z.object({
+  id: z.uuid(),
+  clubUnitId: z.uuid(),
+  programYearId: z.string().min(1),
+  scheduledAt: z.iso.datetime(),
+  createdBy: z.uuid(),
+  createdAt: z.iso.datetime(),
+});
+export const createMeetingRequestSchema = z
+  .object({
+    programYearId: z.string().min(1),
+    scheduledAt: z.iso.datetime(),
+  })
+  .strict();
+```
+
+```ts
+// packages/contracts/src/identity.ts addition
+export const createRoleAssignmentRequestSchema = z
+  .object({
+    personId: z.uuid(),
+    role: z.string().min(1),
+    programYearId: z.string().min(1),
+    termStart: z.iso.date(),
+    termEnd: z.iso.date(),
+  })
+  .strict();
+```
+
+**TDD steps:**
+
+- [ ] **Step 1: `@ResourceScope` locate + `AuthzService.resolveScope()`**
+
+  Red (`authz.service.spec.ts` addition): `resolveScope('unknown-id')` rejects with `NotFoundException`; a real id resolves to the path `AccessRepository.pathOf` would return (mock the repository). A `resource.guard`-level test (new `resource.guard.spec.ts`, mocking `AuthzService`): a route with `locate: {source:'param', key:'clubUnitId'}` calls `resolveScope(request.params.clubUnitId)` and feeds the result to `authorize()`; a route with no `locate` still reads `request.query.scope` raw (today's behavior, unchanged).
+
+  Green:
+
+  ```ts
+  // authz.service.ts addition
+  async resolveScope(orgUnitId: string): Promise<string> {
+    try {
+      return await this.accessRepository.pathOf(orgUnitId);
+    } catch {
+      throw new NotFoundException('Org unit not found');
+    }
+  }
+  ```
+
+  ```ts
+  // resource.guard.ts — the scope line only
+  const scope = meta.locate
+    ? await this.authz.resolveScope(
+        (meta.locate.source === 'param' ? request.params : request.query)?.[meta.locate.key] ?? '',
+      )
+    : (request.params?.['scope'] ?? request.query?.['scope'] ?? '');
+  ```
+
+  Rerun — green. **Rerun Slice 7's `access-inspector-http.int-spec.ts` unchanged** — its routes declare no `locate`, so this must still pass byte-for-byte with no test edits.
+
+- [ ] **Step 2: `Meeting` schema + seed**
+
+  Red — extend `access.seed.int-spec.ts` (or a new assertion): `meeting.meeting`'s `allowedActions` includes `create`; `club_vpe`'s grants include `{resource:'meeting.meeting', action:'create', effect:'allow'}`; `club_president` does **not** hold it.
+
+  Green — `prisma migrate dev --create-only`, hand-review (strip any spurious ltree `DROP INDEX`, per the standing correction), `prisma migrate deploy`:
+
+  ```prisma
+  model Meeting {
+    id              String      @id @default(uuid()) @db.Uuid
+    clubUnitId      String      @map("club_unit_id") @db.Uuid
+    clubUnit        OrgUnit     @relation(fields: [clubUnitId], references: [id])
+    programYearId   String      @map("program_year_id")
+    programYear     ProgramYear @relation(fields: [programYearId], references: [id])
+    scheduledAt     DateTime    @map("scheduled_at")
+    createdBy       String      @map("created_by") @db.Uuid
+    createdByPerson Person      @relation(fields: [createdBy], references: [id])
+    createdAt       DateTime    @default(now()) @map("created_at")
+
+    @@map("meeting")
+  }
+  ```
+
+  Plus reverse relations on `OrgUnit`, `ProgramYear`, `Person`. In `seed.ts`: `meeting.meeting.allowedActions` gains `'create'`; `club_vpe.grants` gains `{ resource: 'meeting.meeting', action: 'create' }`.
+
+  Rerun — green.
+
+- [ ] **Step 3: `MeetingRepository` + `MeetingModule`**
+
+  Red (`meeting.repository.int-spec.ts`): `create` persists a row scoped to its club; `findById` returns it; `findByClub` returns only that club's meetings, not a sibling club's.
+
+  Green — plain Prisma CRUD, `@Inject(PRISMA_CLIENT)` from the start (no bug to rediscover this time — Slices 7/8 already proved the pattern).
+
+  Rerun — green.
+
+- [ ] **Step 4: `MeetingController`**
+
+  Red — folded into Step 6's end-to-end test (a dedicated controller-only test would just re-exercise Step 1–3's already-green paths).
+
+  Green:
+
+  ```ts
+  @Controller('clubs/:clubUnitId/meetings')
+  export class MeetingController {
+    constructor(private readonly meetings: MeetingRepository) {}
+
+    @Post()
+    @ResourceScope('meeting.meeting', 'create', { source: 'param', key: 'clubUnitId' })
+    async create(
+      @Param('clubUnitId', new ZodValidationPipe(z.uuid())) clubUnitId: string,
+      @CurrentUser() principal: Principal,
+      @Body(new ZodValidationPipe(createMeetingRequestSchema)) body: CreateMeetingRequest,
+    ): Promise<MeetingResponse> {
+      return this.meetings.create({
+        clubUnitId,
+        programYearId: body.programYearId,
+        scheduledAt: new Date(body.scheduledAt),
+        createdBy: principal.userId,
+      });
+    }
+
+    @Get()
+    @ResourceScope('meeting.meeting', 'read', { source: 'param', key: 'clubUnitId' })
+    async list(
+      @Param('clubUnitId', new ZodValidationPipe(z.uuid())) clubUnitId: string,
+    ): Promise<MeetingResponse[]> {
+      return this.meetings.findByClub(clubUnitId);
+    }
+
+    @Get(':meetingId')
+    @ResourceScope('meeting.meeting', 'read', { source: 'param', key: 'clubUnitId' })
+    async findOne(
+      @Param('clubUnitId', new ZodValidationPipe(z.uuid())) clubUnitId: string,
+      @Param('meetingId', new ZodValidationPipe(z.uuid())) meetingId: string,
+    ): Promise<MeetingResponse> {
+      const found = await this.meetings.findById(meetingId);
+      if (!found || found.clubUnitId !== clubUnitId)
+        throw new NotFoundException('Meeting not found');
+      return found;
+    }
+  }
+  ```
+
+- [ ] **Step 5: `identity.controller.ts` — the VPE-assignment route**
+
+  Green (no separate red — same shape as Step 4, exercised by Step 6):
+
+  ```ts
+  @Controller('clubs/:clubUnitId/role-assignments')
+  export class IdentityController {
+    constructor(private readonly roleAssignments: RoleAssignmentRepository) {}
+
+    @Post()
+    @ResourceScope('identity.role_assignment', 'create', { source: 'param', key: 'clubUnitId' })
+    async assign(
+      @Param('clubUnitId', new ZodValidationPipe(z.uuid())) clubUnitId: string,
+      @CurrentUser() principal: Principal,
+      @Body(new ZodValidationPipe(createRoleAssignmentRequestSchema))
+      body: CreateRoleAssignmentRequest,
+    ): Promise<RoleAssignment> {
+      return this.roleAssignments.assign({
+        personId: body.personId,
+        orgUnitId: clubUnitId,
+        role: body.role,
+        programYearId: body.programYearId,
+        termStart: new Date(body.termStart),
+        termEnd: new Date(body.termEnd),
+        appointedBy: principal.userId,
+      });
+    }
+  }
+  ```
+
+- [ ] **Step 6: The M1 ship-gate test**
+
+  Red (`ship-gate.int-spec.ts`, real Postgres + Redis, real `AppModule`, `jose`-minted JWTs — same harness shape as Slices 7/8's HTTP specs):
+
+  1. Seed region → district → Club A, Club B; current program year; a President already active at Club A (bootstrapped directly via `RoleAssignmentRepository`, matching every prior test's pattern — appointing the _first_ officer isn't the thing under test).
+  2. `POST /v1/clubs/:clubAId/role-assignments` as the President, `{personId: karim.id, role: 'club_vpe', ...}` → **200**, Karim is now `club_vpe` at Club A.
+  3. `POST /v1/clubs/:clubAId/meetings` as Karim → **200**, meeting created.
+  4. `GET /v1/clubs/:clubAId/meetings/:meetingId` as Karim → 200, returns the meeting.
+  5. A Club B member (bootstrapped as `club_member` at Club B) hits `GET /v1/clubs/:clubAId/meetings/:meetingId` → **403** — the guard denies before `MeetingRepository.findById` ever runs.
+  6. The same Club B member hits `GET /v1/clubs/:clubAId/meetings` (list) → **403** — same guard, same zero-rows-touched property.
+  7. Karim's own `GET /v1/clubs/:clubAId/meetings` list → 200, contains exactly the one meeting.
+
+  Green — wire `MeetingModule`/`IdentityModule`'s new controller into their existing modules; nothing else to implement — this step is verification of Steps 1–5, run for real.
+
+  Rerun — green. Then the full gate: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`, plus `pnpm test:int`.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add apps/api/src/common/authz apps/api/src/modules/meeting apps/api/src/modules/identity packages/db packages/contracts/src/meeting.ts packages/contracts/src/identity.ts packages/contracts/src/index.ts apps/api/test/integration/meeting.repository.int-spec.ts apps/api/test/integration/ship-gate.int-spec.ts
+git commit -m "feat(meeting): meeting + VPE-assignment routes through the gate — M1 ship criterion"
+```
+
+---
+
+## Slice 10 — Authorisation matrix + doc updates
+
+Expanded to Slice 0–9 depth (files, interfaces, bite-sized TDD steps with full code) immediately before it is executed, against the now-proven foundation. Its deliverables, dependencies, and ship criteria are fixed in the roadmap table above; the canonical schema and algorithms it implements are `rbac-design.md` §3–§9 and `system-design.md` §5–§7, and the design decisions specific to this deployment are in `docs/superpowers/specs/2026-07-28-platform-tier-super-admin-design.md`.
 
 **Self-review (this plan vs the spec):**
 

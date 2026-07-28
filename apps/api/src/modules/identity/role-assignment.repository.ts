@@ -103,4 +103,14 @@ export class RoleAssignmentRepository {
     });
     return rows.map(toRoleAssignment);
   }
+
+  /** The unit switcher's candidate list (Slice 6) — places actually appointed, not a scope-prefix walk. */
+  async findActiveOrgUnitIdsForPerson(personId: string): Promise<string[]> {
+    const rows = await this.db.roleAssignment.findMany({
+      where: { personId, status: 'active' },
+      select: { orgUnitId: true },
+      distinct: ['orgUnitId'],
+    });
+    return rows.map((r) => r.orgUnitId);
+  }
 }

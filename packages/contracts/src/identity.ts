@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { orgUnitType } from './org';
 
 export const personStatus = z.enum(['invited', 'active', 'disabled']);
 export type PersonStatus = z.infer<typeof personStatus>;
@@ -156,3 +157,12 @@ export const sessionResponseSchema = z.object({
   programYearId: z.string().nullable(),
 });
 export type SessionResponse = z.infer<typeof sessionResponseSchema>;
+
+/** Slice 6 (M2): the unit switcher's candidate list — a lean subset of `orgUnit`, not the full shape. */
+export const switchableUnit = z.object({
+  id: z.uuid(),
+  name: z.string().min(1),
+  type: orgUnitType,
+  path: z.string().min(1),
+});
+export type SwitchableUnit = z.infer<typeof switchableUnit>;

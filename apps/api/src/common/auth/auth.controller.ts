@@ -1,10 +1,11 @@
-import { Body, Controller, HttpCode, Post, Res } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Res } from '@nestjs/common';
 import {
   loginRequestSchema,
   switchUnitRequestSchema,
   type LoginRequest,
   type SwitchUnitRequest,
   type SessionResponse,
+  type SwitchableUnit,
 } from '@toastmasters/contracts';
 import { ZodValidationPipe } from '../pipes/zod-validation.pipe';
 import { CurrentUser } from './current-user.decorator';
@@ -47,5 +48,15 @@ export class AuthController {
     const { token, session } = await this.auth.switchUnit(principal, body.orgUnitId);
     res.cookie('session', token, this.session.cookieOptions());
     return session;
+  }
+
+  @Get('me')
+  async me(@CurrentUser() principal: Principal): Promise<SessionResponse> {
+    return this.auth.me(principal);
+  }
+
+  @Get('switchable-units')
+  async switchableUnits(@CurrentUser() principal: Principal): Promise<SwitchableUnit[]> {
+    return this.auth.switchableUnits(principal);
   }
 }

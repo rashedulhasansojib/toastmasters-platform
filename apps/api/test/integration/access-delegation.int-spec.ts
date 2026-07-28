@@ -280,4 +280,26 @@ describe('Delegation and unit-policy overrides (integration)', () => {
     });
     expect(withoutExpiry.expiresAt).toBeNull();
   });
+
+  it('findPlatformRoleOrgUnitIdsForPerson excludes org-unit-less platform roles', async () => {
+    const person = await people.create({
+      email: 'platform-switcher@example.com',
+      fullName: 'Platform Switcher',
+    });
+    await grantAdmin.grantPlatformRole({
+      personId: person.id,
+      role: 'unit_admin',
+      orgUnitId: clubId,
+      grantedBy: person.id,
+    });
+    await grantAdmin.grantPlatformRole({
+      personId: person.id,
+      role: 'system_admin',
+      orgUnitId: null,
+      grantedBy: person.id,
+    });
+
+    const unitIds = await grantAdmin.findPlatformRoleOrgUnitIdsForPerson(person.id);
+    expect(unitIds).toEqual([clubId]);
+  });
 });

@@ -258,6 +258,16 @@ export class GrantAdminRepository {
     });
   }
 
+  /** The unit switcher's candidate list (Slice 6) — org-unit-less platform roles (e.g. system_admin) contribute nothing here. */
+  async findPlatformRoleOrgUnitIdsForPerson(personId: string): Promise<string[]> {
+    const rows = await this.db.platformRoleAssignment.findMany({
+      where: { personId, orgUnitId: { not: null } },
+      select: { orgUnitId: true },
+      distinct: ['orgUnitId'],
+    });
+    return rows.map((r) => r.orgUnitId).filter((id): id is string => id != null);
+  }
+
   /** Same row-count invariant as revokePlatformRole's guard — reused by UnitPolicyService's last-admin check on self-deny. */
   async countActiveUnitAdmins(orgUnitId: string): Promise<number> {
     return this.db.platformRoleAssignment.count({

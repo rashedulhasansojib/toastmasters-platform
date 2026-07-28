@@ -62,6 +62,15 @@ describe('OrgUnitRepository (integration)', () => {
     expect(paths).toEqual(['r1.d41', 'r1.d41.c1234']);
   });
 
+  it('findByIds returns the matching units in one query, silently omitting unknown ids', async () => {
+    const region = await repo.findByPath('r1');
+    const district = await repo.findByPath('r1.d41');
+    const unknownId = '00000000-0000-0000-0000-000000000000';
+
+    const found = await repo.findByIds([region!.id, district!.id, unknownId]);
+    expect(found.map((u) => u.id).sort()).toEqual([region!.id, district!.id].sort());
+  });
+
   it('rejects a second region root at the database', async () => {
     // Pin the actual invariant (the unique partial index / Postgres
     // unique-violation code), not just "some error was thrown" — that

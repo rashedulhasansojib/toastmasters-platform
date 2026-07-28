@@ -48,11 +48,14 @@ function makeService(overrides: {
   memberships?: ClubMembership[];
   currentYear?: ProgramYear | null;
   orgUnit?: OrgUnit | null;
+  orgUnits?: OrgUnit[];
   verifies?: boolean;
+  roleUnitIds?: string[];
+  platformUnitIds?: string[];
 }) {
   const people = {
     findCredentialsByEmail: vi.fn().mockResolvedValue(overrides.credentials ?? null),
-    findById: vi.fn().mockResolvedValue(overrides.person ?? person()),
+    findById: vi.fn().mockResolvedValue('person' in overrides ? overrides.person : person()),
   };
   const clubMemberships = {
     findByPerson: vi.fn().mockResolvedValue(overrides.memberships ?? []),
@@ -62,12 +65,19 @@ function makeService(overrides: {
   };
   const orgUnits = {
     findById: vi.fn().mockResolvedValue(overrides.orgUnit ?? null),
+    findByIds: vi.fn().mockResolvedValue(overrides.orgUnits ?? []),
   };
   const passwords = {
     verify: vi.fn().mockResolvedValue(overrides.verifies ?? true),
   };
   const session = {
     issue: vi.fn().mockImplementation(async (claims) => `token-for-${JSON.stringify(claims)}`),
+  };
+  const roleAssignments = {
+    findActiveOrgUnitIdsForPerson: vi.fn().mockResolvedValue(overrides.roleUnitIds ?? []),
+  };
+  const grantAdmin = {
+    findPlatformRoleOrgUnitIdsForPerson: vi.fn().mockResolvedValue(overrides.platformUnitIds ?? []),
   };
 
   const service = new AuthService(
@@ -77,8 +87,20 @@ function makeService(overrides: {
     orgUnits as never,
     passwords as never,
     session as never,
+    roleAssignments as never,
+    grantAdmin as never,
   );
-  return { service, people, clubMemberships, programYears, orgUnits, passwords, session };
+  return {
+    service,
+    people,
+    clubMemberships,
+    programYears,
+    orgUnits,
+    passwords,
+    session,
+    roleAssignments,
+    grantAdmin,
+  };
 }
 
 describe('AuthService.login', () => {
@@ -198,5 +220,72 @@ describe('AuthService.switchUnit', () => {
     const { service } = makeService({ orgUnit: null });
     const principal = { userId: 'person-1', roles: [], scopes: [] };
     await expect(service.switchUnit(principal, 'nonexistent')).rejects.toThrow(NotFoundException);
+  });
+});
+
+describe('AuthService.me', () => {
+  it('returns the current session without issuing a new token', async () => {
+    const { service, session } = makeService({});
+    const principal = {
+      userId: 'person-1',
+      roles: [],
+      scopes: [],
+      activeUnitId: 'club-A',
+      programYearId: '2026-2027',
+      v: 4,
+    };
+
+    const result = await service.me(principal);
+    expect(result).toEqual({
+      personId: 'person-1',
+      fullName: 'Karim Hossain',
+      activeUnitId: 'club-A',
+      programYearId: '2026-2027',
+    });
+    expect(session.issue).not.toHaveBeenCalled();
+  });
+
+  it('rejects a principal whose person no longer exists', async () => {
+    const { service } = makeService({ person: null });
+    const principal = { userId: 'ghost', roles: [], scopes: [] };
+    await expect(service.me(principal)).rejects.toThrow(UnauthorizedException);
+  });
+});
+
+describe('AuthService.switchableUnits', () => {
+  it('combines role-assignment and platform-role units, deduplicated, in one findByIds call', async () => {
+    const unitA = {
+      id: 'club-A',
+      type: 'club',
+      parentId: 'd1',
+      path: 'r1.d1.cA',
+      depth: 2,
+      name: 'Club A',
+      code: 'cA',
+      status: 'active',
+      timezone: 'UTC',
+    } as OrgUnit;
+    const unitB = { ...unitA, id: 'club-B', code: 'cB', name: 'Club B', path: 'r1.d1.cB' };
+    const { service, orgUnits } = makeService({
+      roleUnitIds: ['club-A', 'club-B'],
+      platformUnitIds: ['club-B'], // overlaps with a role-assignment unit — must not duplicate
+      orgUnits: [unitA, unitB],
+    });
+    const principal = { userId: 'person-1', roles: [], scopes: [] };
+
+    const result = await service.switchableUnits(principal);
+    expect(orgUnits.findByIds).toHaveBeenCalledTimes(1);
+    const calledWith = orgUnits.findByIds.mock.calls[0]?.[0] as string[];
+    expect(calledWith.sort()).toEqual(['club-A', 'club-B']);
+    expect(result).toEqual([
+      { id: 'club-A', name: 'Club A', type: 'club', path: 'r1.d1.cA' },
+      { id: 'club-B', name: 'Club B', type: 'club', path: 'r1.d1.cB' },
+    ]);
+  });
+
+  it('returns [] for a person who holds no role anywhere', async () => {
+    const { service } = makeService({ roleUnitIds: [], platformUnitIds: [] });
+    const principal = { userId: 'person-1', roles: [], scopes: [] };
+    expect(await service.switchableUnits(principal)).toEqual([]);
   });
 });

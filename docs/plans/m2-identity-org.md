@@ -1027,31 +1027,35 @@ git commit -m "feat(access): audit every grant-mutating write path, not just bre
 
 **TDD steps:**
 
-- [ ] **Step 1: `RoleAssignmentRepository.findActiveOrgUnitIdsForPerson`**
+- [x] **Step 1: `RoleAssignmentRepository.findActiveOrgUnitIdsForPerson`**
 
-  Failing test in `identity.repository.int-spec.ts`: a person with two active assignments at two different clubs, plus one ended assignment at a third — the method returns exactly the two active clubs' ids, deduplicated. Implement as a `distinct: ['orgUnitId']` query filtered on `status: 'active'`.
+  Implemented as planned: `distinct: ['orgUnitId']` filtered on `status: 'active'`. Test covers true dedup (two active _roles_ at the same club) as well as the ended-assignment exclusion, not just the two-distinct-clubs case the plan sketched.
 
-- [ ] **Step 2: `GrantAdminRepository.findPlatformRoleOrgUnitIdsForPerson`**
+- [x] **Step 2: `GrantAdminRepository.findPlatformRoleOrgUnitIdsForPerson`**
 
-  Failing test in `access-delegation.int-spec.ts`: a `unit_admin` at a club and a `system_admin` (org-unit-less) for the same person — returns only the club id, `system_admin`'s `null` excluded.
+  Implemented as planned.
 
-- [ ] **Step 3: `OrgUnitRepository.findByIds`**
+- [x] **Step 3: `OrgUnitRepository.findByIds`**
 
-  Failing test in `org.repository.int-spec.ts`: three known ids return three units in one query; an unknown id among them is silently omitted, not an error (matches `findById`'s existing null-not-throw convention).
+  Implemented as planned — `WHERE id = ANY(...)`, matching the file's existing raw-SQL convention for every other query (the `ltree` `path` column means this repository never uses Prisma's query builder).
 
-- [ ] **Step 4: `AuthService.me()` and `GET /v1/auth/me`**
+- [x] **Step 4: `AuthService.me()` and `GET /v1/auth/me`**
 
-  Failing integration test in `auth-http.int-spec.ts`: logged-in request returns 200 with the session's current `personId`/`fullName`/`activeUnitId`/`programYearId`; no cookie header on the response (a pure read, unlike login/switch-unit); an unauthenticated request gets 401 from the existing global `JwtAuthGuard` — no new guard logic needed.
+  Implemented as planned. `AuthModule` gained `AccessModule` to its imports (for `GrantAdminRepository`, needed by Step 5's `switchableUnits()`, added in the same pass since both land on the same constructor).
 
-- [ ] **Step 5: `AuthService.switchableUnits()` and `GET /v1/auth/switchable-units`**
+  **A repeat of Slice 5's packaging gotcha:** `pnpm typecheck` failed with "Module has no exported member `SwitchableUnit`" even though the schema was correct — `packages/contracts` is also consumed as built output, and adding a new export requires rebuilding it (`pnpm --filter @toastmasters/contracts build`), not just saving the source file. Two slices in a row now; worth internalizing as a standing step whenever a `packages/*` public surface changes, not something to rediscover each time.
 
-  Failing integration test in `auth-http.int-spec.ts`: a person with an active role at club A and a `unit_admin` platform role at club B gets both back (`{id, name, type, path}` each); a person with neither gets `[]`, not a 404.
+  **A second instance of the `??`-vs-explicit-`null` mock bug** (first seen in Slice 1's `invitation.service.spec.ts`): `auth.service.spec.ts`'s `makeService()` used `overrides.person ?? person()`, silently replacing an explicit `person: null` override with the default — breaking the "rejects a principal whose person no longer exists" test. Fixed with the same `'person' in overrides ? overrides.person : person()` pattern used there.
 
-- [ ] **Step 6: Full gate**
+- [x] **Step 5: `AuthService.switchableUnits()` and `GET /v1/auth/switchable-units`**
 
-  `pnpm lint && pnpm typecheck && pnpm test && pnpm build`, plus `pnpm test:int`.
+  Implemented as planned; the HTTP test additionally proves the negative documented in the plan's own scoping decision — a person with only a `ClubMembership` (no `RoleAssignment`) gets `[]`, confirming the endpoint doesn't fall back to membership as a source of switchable units.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 6: Full gate**
+
+  `pnpm lint && pnpm typecheck && pnpm test && pnpm build` — all green (72 unit tests, up from 68). `pnpm test:int` — 324/324 (up from 320).
+
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/contracts apps/api/src/modules/identity apps/api/src/modules/access apps/api/src/modules/org apps/api/src/common/auth apps/api/test

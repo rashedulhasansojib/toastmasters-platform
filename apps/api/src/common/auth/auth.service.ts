@@ -1,9 +1,11 @@
 import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import type { Person, SessionResponse } from '@toastmasters/contracts';
+import type { Person, SessionResponse, SwitchableUnit } from '@toastmasters/contracts';
 import { PersonRepository } from '../../modules/identity/person.repository';
 import { ClubMembershipRepository } from '../../modules/identity/club-membership.repository';
 import { ProgramYearRepository } from '../../modules/identity/program-year.repository';
+import { RoleAssignmentRepository } from '../../modules/identity/role-assignment.repository';
 import { OrgUnitRepository } from '../../modules/org/org.repository';
+import { GrantAdminRepository } from '../../modules/access/grant-admin.repository';
 import { PasswordService } from './password.service';
 import { SessionService } from './session.service';
 import type { SessionClaims } from './session.types';
@@ -33,6 +35,8 @@ export class AuthService {
     private readonly orgUnits: OrgUnitRepository,
     private readonly passwords: PasswordService,
     private readonly session: SessionService,
+    private readonly roleAssignments: RoleAssignmentRepository,
+    private readonly grantAdmin: GrantAdminRepository,
   ) {}
 
   async login(
@@ -84,5 +88,33 @@ export class AuthService {
     };
     const token = await this.session.issue(claims);
     return { token, session: toSessionResponse(person, claims) };
+  }
+
+  /** A pure read — no cookie is (re)issued. Slice 6 (M2): the unit switcher's "who am I" query. */
+  async me(principal: Principal): Promise<SessionResponse> {
+    const person = await this.people.findById(principal.userId);
+    if (!person) throw new UnauthorizedException('Invalid session');
+    return toSessionResponse(person, {
+      sub: principal.userId,
+      activeUnitId: principal.activeUnitId ?? null,
+      programYearId: principal.programYearId ?? null,
+      v: principal.v ?? person.permissionVersion,
+    });
+  }
+
+  /**
+   * Slice 6 (M2): candidate units for the switcher — places the person was
+   * actually appointed to (an active RoleAssignment, or a PlatformRoleAssignment
+   * bound to a specific unit), not a scope-prefix walk over everything
+   * effectiveGrants would technically cover.
+   */
+  async switchableUnits(principal: Principal): Promise<SwitchableUnit[]> {
+    const [roleUnitIds, platformUnitIds] = await Promise.all([
+      this.roleAssignments.findActiveOrgUnitIdsForPerson(principal.userId),
+      this.grantAdmin.findPlatformRoleOrgUnitIdsForPerson(principal.userId),
+    ]);
+    const unitIds = [...new Set([...roleUnitIds, ...platformUnitIds])];
+    const units = await this.orgUnits.findByIds(unitIds);
+    return units.map((u) => ({ id: u.id, name: u.name, type: u.type, path: u.path }));
   }
 }

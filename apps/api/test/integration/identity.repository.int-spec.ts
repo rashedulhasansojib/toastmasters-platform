@@ -195,6 +195,71 @@ describe('Identity repositories (integration)', () => {
       });
     });
 
+    it('findActiveOrgUnitIdsForPerson returns only active assignments, deduplicated', async () => {
+      const district = await orgUnits.findByPath('r1.d41');
+      const secondClub = await orgUnits.createChild({
+        parentId: district!.id,
+        type: 'club',
+        code: 'c-switch-2',
+        name: 'Club Switch Two',
+        timezone: 'Asia/Dhaka',
+      });
+      const thirdClub = await orgUnits.createChild({
+        parentId: district!.id,
+        type: 'club',
+        code: 'c-switch-3',
+        name: 'Club Switch Three',
+        timezone: 'Asia/Dhaka',
+      });
+      const person = await people.create({
+        email: 'switcher@example.com',
+        fullName: 'Switcher Person',
+      });
+
+      // Two active roles at the same club — the method must return that
+      // club's id once, not twice.
+      await roleAssignments.assign({
+        personId: person.id,
+        orgUnitId: clubId,
+        role: 'club_member',
+        programYearId,
+        termStart: new Date('2026-07-01'),
+        termEnd: new Date('2027-06-30'),
+        appointedBy: person.id,
+      });
+      await roleAssignments.assign({
+        personId: person.id,
+        orgUnitId: clubId,
+        role: 'club_secretary',
+        programYearId,
+        termStart: new Date('2026-07-01'),
+        termEnd: new Date('2027-06-30'),
+        appointedBy: person.id,
+      });
+      await roleAssignments.assign({
+        personId: person.id,
+        orgUnitId: secondClub.id,
+        role: 'club_member',
+        programYearId,
+        termStart: new Date('2026-07-01'),
+        termEnd: new Date('2027-06-30'),
+        appointedBy: person.id,
+      });
+      const ended = await roleAssignments.assign({
+        personId: person.id,
+        orgUnitId: thirdClub.id,
+        role: 'club_member',
+        programYearId,
+        termStart: new Date('2026-07-01'),
+        termEnd: new Date('2027-06-30'),
+        appointedBy: person.id,
+      });
+      await roleAssignments.end(ended.id, 'resigned', person.id);
+
+      const unitIds = await roleAssignments.findActiveOrgUnitIdsForPerson(person.id);
+      expect(unitIds.sort()).toEqual([clubId, secondClub.id].sort());
+    });
+
     it('end() writes a role_assignment_ended audit event, attributed to the given actor', async () => {
       const p = await people.create({
         email: 'audit-ended@example.com',

@@ -90,6 +90,16 @@ export class OrgUnitRepository {
     return rows[0] ? toOrgUnit(rows[0]) : null;
   }
 
+  /** The unit switcher's batch lookup (Slice 6) — one query, not one findById per unit. Unknown ids are silently omitted, matching findById's null-not-throw convention. */
+  async findByIds(ids: string[]): Promise<OrgUnit[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.db.$queryRaw<OrgUnitRow[]>`
+      SELECT id, type, parent_id, path::text AS path, depth, name, code, status, timezone
+      FROM org_unit WHERE id = ANY(${ids}::uuid[])
+    `;
+    return rows.map(toOrgUnit);
+  }
+
   async findSubtree(path: string): Promise<OrgUnit[]> {
     const rows = await this.db.$queryRaw<OrgUnitRow[]>`
       SELECT id, type, parent_id, path::text AS path, depth, name, code, status, timezone

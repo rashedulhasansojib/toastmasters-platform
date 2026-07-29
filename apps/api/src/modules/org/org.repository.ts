@@ -74,6 +74,131 @@ export class OrgUnitRepository {
     });
   }
 
+  /**
+   * Rename / retime, plus an audit row in the same transaction. `path`, `code`
+   * and `type` are untouched by design — see updateOrgUnitRequestSchema.
+   */
+  async update(
+    id: string,
+    changes: { name?: string; timezone?: string },
+    actorId: string,
+  ): Promise<OrgUnit> {
+    return this.db.$transaction(async (tx) => {
+      const before = (
+        await tx.$queryRaw<OrgUnitRow[]>`
+          SELECT id, type, parent_id, path::text AS path, depth, name, code, status, timezone
+          FROM org_unit WHERE id = ${id}::uuid
+        `
+      )[0];
+      if (!before) throw new Error(`Org unit ${id} not found`);
+
+      const rows = await tx.$queryRaw<OrgUnitRow[]>`
+        UPDATE org_unit
+        SET name = COALESCE(${changes.name ?? null}, name),
+            timezone = COALESCE(${changes.timezone ?? null}, timezone),
+            updated_at = now()
+        WHERE id = ${id}::uuid
+        RETURNING id, type, parent_id, path::text AS path, depth, name, code, status, timezone
+      `;
+
+      // Scoped to the *parent*, not the unit itself — audit_event is
+      // REVOKE UPDATE, DELETE, so a row pointing at this unit would be an
+      // immovable foreign key that permanently blocks the unit's own hard
+      // delete. Renaming a unit must not make it undeletable. The parent is
+      // still the right subtree for a path-prefix audit query, and
+      // `targetUnitId` keeps the precise subject. org_unit_deleted below
+      // does the same thing for the same reason.
+      await tx.auditEvent.create({
+        data: {
+          actorPersonId: actorId,
+          type: 'org_unit_updated',
+          resource: 'org.unit',
+          action: 'update',
+          orgUnitId: before.parent_id,
+          metadata: {
+            targetUnitId: id,
+            path: before.path,
+            before: { name: before.name, timezone: before.timezone },
+            after: { name: rows[0]!.name, timezone: rows[0]!.timezone },
+          },
+        },
+      });
+
+      return toOrgUnit(rows[0]!);
+    });
+  }
+
+  /**
+   * Counts the rows that would block a delete. Not exhaustive over all ~40
+   * OrgUnit relations — it names the ones an admin can actually act on, and
+   * the foreign keys are the real backstop for anything else (every relation
+   * in the schema is Restrict; only RoleTemplate.role cascades). An empty
+   * array therefore means "probably deletable", and the FK still has the
+   * final say inside `remove()`.
+   */
+  async deleteBlockers(id: string): Promise<Array<{ relation: string; count: number }>> {
+    const [children, memberships, roles, platformRoles, meetings, invitations, ledger, audit] =
+      await Promise.all([
+        this.db.$queryRaw<Array<{ n: bigint }>>`
+          SELECT count(*) AS n FROM org_unit WHERE parent_id = ${id}::uuid`,
+        this.db.clubMembership.count({ where: { clubUnitId: id } }),
+        this.db.roleAssignment.count({ where: { orgUnitId: id } }),
+        this.db.platformRoleAssignment.count({ where: { orgUnitId: id } }),
+        this.db.meeting.count({ where: { clubUnitId: id } }),
+        this.db.invitation.count({ where: { orgUnitId: id } }),
+        this.db.ledgerEntry.count({ where: { orgUnitId: id } }),
+        this.db.auditEvent.count({ where: { orgUnitId: id } }),
+      ]);
+
+    const counts: Array<{ relation: string; count: number }> = [
+      { relation: 'child units', count: Number(children[0]?.n ?? 0) },
+      { relation: 'club memberships', count: memberships },
+      { relation: 'role assignments', count: roles },
+      { relation: 'platform role assignments', count: platformRoles },
+      { relation: 'meetings', count: meetings },
+      { relation: 'invitations', count: invitations },
+      { relation: 'ledger entries', count: ledger },
+      { relation: 'audit events', count: audit },
+    ];
+    return counts.filter((c) => c.count > 0);
+  }
+
+  /**
+   * Hard delete, audited against the *parent* — the unit's own id is a dangling
+   * reference the instant the row goes, and audit_event.org_unit_id is a real
+   * foreign key. The deleted unit's identity is preserved in `metadata`.
+   */
+  async remove(id: string, actorId: string): Promise<void> {
+    await this.db.$transaction(async (tx) => {
+      const unit = (
+        await tx.$queryRaw<OrgUnitRow[]>`
+          SELECT id, type, parent_id, path::text AS path, depth, name, code, status, timezone
+          FROM org_unit WHERE id = ${id}::uuid
+        `
+      )[0];
+      if (!unit) throw new Error(`Org unit ${id} not found`);
+
+      await tx.auditEvent.create({
+        data: {
+          actorPersonId: actorId,
+          type: 'org_unit_deleted',
+          resource: 'org.unit',
+          action: 'delete',
+          orgUnitId: unit.parent_id,
+          metadata: {
+            deletedUnitId: unit.id,
+            path: unit.path,
+            name: unit.name,
+            code: unit.code,
+            type: unit.type,
+          },
+        },
+      });
+
+      await tx.$executeRaw`DELETE FROM org_unit WHERE id = ${id}::uuid`;
+    });
+  }
+
   async findByPath(path: string): Promise<OrgUnit | null> {
     const rows = await this.db.$queryRaw<OrgUnitRow[]>`
       SELECT id, type, parent_id, path::text AS path, depth, name, code, status, timezone

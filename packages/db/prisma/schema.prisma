@@ -913,6 +913,10 @@ enum AuditEventType {
   break_glass_mint
   restricted_read
   org_unit_reparented
+  org_unit_created
+  org_unit_updated
+  /// The unit is gone by the time this row is written, so it carries the *parent's* org_unit_id; the deleted unit's id, path and name live in `metadata`.
+  org_unit_deleted
   role_assignment_created
   role_assignment_ended
   person_grant_created

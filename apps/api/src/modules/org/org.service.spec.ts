@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import type { OrgUnit } from '@toastmasters/contracts';
 import type { Grant } from '../../common/authz/authz.types';
 import { OrgUnitService } from './org.service';
@@ -35,11 +35,18 @@ function makeService(
   overrides: {
     actorGrants?: Grant[];
     destinationScope?: string;
+    parent?: OrgUnit;
   } = {},
 ) {
   const orgUnits = {
     createChild: vi.fn().mockResolvedValue(orgUnit()),
     reparent: vi.fn().mockResolvedValue(undefined),
+    findById: vi
+      .fn()
+      .mockResolvedValue(
+        overrides.parent ??
+          orgUnit({ id: 'district-1', type: 'district', path: 'r1.d41', depth: 1, code: 'd41' }),
+      ),
   };
   const accessRepository = {
     effectiveGrants: vi.fn().mockResolvedValue(overrides.actorGrants ?? [grant()]),
@@ -51,7 +58,7 @@ function makeService(
 }
 
 describe('OrgUnitService.createChild', () => {
-  it('passes straight through to the repository', async () => {
+  it('delegates to the repository when the child is a deeper tier than the parent', async () => {
     const { service, orgUnits } = makeService();
     const input = {
       parentId: 'district-1',
@@ -63,6 +70,37 @@ describe('OrgUnitService.createChild', () => {
     const result = await service.createChild(input);
     expect(orgUnits.createChild).toHaveBeenCalledWith(input);
     expect(result.id).toBe('club-1');
+  });
+
+  it('rejects a child at or above the parent tier, without calling the repository', async () => {
+    const { service, orgUnits } = makeService({
+      parent: orgUnit({ id: 'club-1', type: 'club' }),
+    });
+    await expect(
+      service.createChild({
+        parentId: 'club-1',
+        type: 'district',
+        name: 'District under a club',
+        code: 'd99',
+        timezone: 'Asia/Dhaka',
+      }),
+    ).rejects.toThrow(BadRequestException);
+    expect(orgUnits.createChild).not.toHaveBeenCalled();
+  });
+
+  it('404s when the parent does not exist', async () => {
+    const { service, orgUnits } = makeService();
+    orgUnits.findById.mockResolvedValueOnce(null);
+    await expect(
+      service.createChild({
+        parentId: 'nope',
+        type: 'club',
+        name: 'Orphan',
+        code: 'c9',
+        timezone: 'Asia/Dhaka',
+      }),
+    ).rejects.toThrow(NotFoundException);
+    expect(orgUnits.createChild).not.toHaveBeenCalled();
   });
 });
 

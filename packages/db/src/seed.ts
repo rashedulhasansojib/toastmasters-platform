@@ -229,7 +229,12 @@ const RESOURCES: ResourceSeed[] = [
     resource: 'org.unit',
     context: 'org',
     label: 'Organisation unit',
-    allowedActions: ['create', 'update'],
+    // `delete` is reachable only by system_admin: unit_admin's role template
+    // lists create/update explicitly and nothing grants delete, so it arrives
+    // solely through system_admin's broad non-restricted synthesis. The
+    // service still refuses any unit that is not empty (CLAUDE.md §2
+    // decision: hard delete, only when empty).
+    allowedActions: ['create', 'update', 'delete'],
     clubScoped: false, // spans every tier: region, district, division, area, club
     sensitivity: 'normal',
   },

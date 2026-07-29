@@ -122,4 +122,109 @@ describe('Platform admin console HTTP surface (integration)', () => {
 
     await app.close();
   });
+
+  it('deletes an empty unit, 409s a non-empty one, and 403s a unit_admin', async () => {
+    const orgUnits = new OrgUnitRepository();
+    const people = new PersonRepository();
+    const access = new AccessRepository();
+    const grantAdmin = new GrantAdminRepository(undefined, access);
+
+    // Only one region root ever exists (org_unit_single_region_root).
+    const region = await orgUnits.findByPath('r1');
+    if (!region) throw new Error('Expected the region root created by the prior test');
+
+    const sysAdmin = await people.create({
+      email: 'delete-sysadmin@example.com',
+      fullName: 'Delete Sys Admin',
+    });
+    await grantAdmin.grantPlatformRole({
+      personId: sysAdmin.id,
+      role: 'system_admin',
+      orgUnitId: null,
+      grantedBy: sysAdmin.id,
+    });
+
+    const unitAdmin = await people.create({
+      email: 'delete-unitadmin@example.com',
+      fullName: 'Delete Unit Admin',
+    });
+    await grantAdmin.grantPlatformRole({
+      personId: unitAdmin.id,
+      role: 'unit_admin',
+      orgUnitId: region.id,
+      grantedBy: sysAdmin.id,
+    });
+
+    // A childless division, and a division that owns an area.
+    const empty = await orgUnits.createChild({
+      parentId: region.id,
+      type: 'division',
+      code: 'divempty',
+      name: 'Empty Division',
+      timezone: 'Asia/Dhaka',
+    });
+    const parentOfChild = await orgUnits.createChild({
+      parentId: region.id,
+      type: 'division',
+      code: 'divfull',
+      name: 'Full Division',
+      timezone: 'Asia/Dhaka',
+    });
+    await orgUnits.createChild({
+      parentId: parentOfChild.id,
+      type: 'area',
+      code: 'a1',
+      name: 'Area 1',
+      timezone: 'Asia/Dhaka',
+    });
+
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const app: INestApplication = moduleRef.createNestApplication();
+    app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
+    await app.init();
+
+    const jwtFor = (personId: string) =>
+      new SignJWT({ roles: [], scopes: [] })
+        .setProtectedHeader({ alg: 'HS256' })
+        .setSubject(personId)
+        .setExpirationTime('5m')
+        .sign(new TextEncoder().encode(secret));
+
+    // unit_admin holds org.unit create/update by template, but nothing grants
+    // it `delete` — so this is a default-deny, not a scope miss.
+    await request(app.getHttpServer())
+      .delete(`/v1/org-units/${empty.id}`)
+      .set('Authorization', `Bearer ${await jwtFor(unitAdmin.id)}`)
+      .expect(403);
+
+    const conflict = await request(app.getHttpServer())
+      .delete(`/v1/org-units/${parentOfChild.id}`)
+      .set('Authorization', `Bearer ${await jwtFor(sysAdmin.id)}`)
+      .expect(409);
+    expect(JSON.stringify(conflict.body)).toContain('child units');
+
+    // Regression: renaming writes an audit row, and audit_event is
+    // REVOKE UPDATE, DELETE. Scoping that row to the unit itself made the
+    // unit permanently undeletable — caught by driving the real API, not by
+    // the first version of this test.
+    await request(app.getHttpServer())
+      .patch(`/v1/org-units/${empty.id}`)
+      .set('Authorization', `Bearer ${await jwtFor(sysAdmin.id)}`)
+      .send({ name: 'Empty Division Renamed' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .delete(`/v1/org-units/${empty.id}`)
+      .set('Authorization', `Bearer ${await jwtFor(sysAdmin.id)}`)
+      .expect(200);
+    expect(await orgUnits.findById(empty.id)).toBeNull();
+
+    // The root is never deletable — the single-root index depends on it.
+    await request(app.getHttpServer())
+      .delete(`/v1/org-units/${region.id}`)
+      .set('Authorization', `Bearer ${await jwtFor(sysAdmin.id)}`)
+      .expect(409);
+
+    await app.close();
+  });
 });

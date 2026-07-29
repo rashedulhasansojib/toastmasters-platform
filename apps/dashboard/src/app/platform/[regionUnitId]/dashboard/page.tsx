@@ -1,6 +1,6 @@
-import type { OrgUnit } from '@toastmasters/contracts';
 import { getPlatformConsole } from '@/lib/platform';
 import { Card, CardContent } from '@/components/ui/card';
+import { OrgTreeManager } from '@/components/platform/OrgTreeManager';
 
 /**
  * The super-admin console. Reachable only by holders of
@@ -50,16 +50,11 @@ export default async function PlatformDashboardPage({
         </div>
 
         <Card>
-          <CardContent className="flex flex-col gap-1">
-            <UnitRow unit={region} isRoot />
-            {tree.length === 0 ? (
-              <p className="pt-2 text-sm text-muted-foreground">No units beneath the region yet.</p>
-            ) : (
-              // `tree` arrives ordered by ltree path, which is already a
-              // pre-order walk — indenting by depth is enough to render the
-              // hierarchy without building a nested structure.
-              tree.map((unit) => <UnitRow key={unit.id} unit={unit} />)
-            )}
+          <CardContent>
+            {/* `tree` arrives ordered by ltree path, which is already a
+                pre-order walk — indenting by depth is enough to render the
+                hierarchy without building a nested structure. */}
+            <OrgTreeManager region={region} tree={tree} />
           </CardContent>
         </Card>
       </section>
@@ -72,21 +67,6 @@ function Stat({ label, value }: { label: string; value: number }) {
     <div>
       <p className="text-2xl font-semibold">{value}</p>
       <p className="text-sm text-muted-foreground">{label}</p>
-    </div>
-  );
-}
-
-function UnitRow({ unit, isRoot = false }: { unit: OrgUnit; isRoot?: boolean }) {
-  return (
-    <div
-      className="flex items-center justify-between gap-3 py-1"
-      style={{ paddingLeft: `${unit.depth * 1.25}rem` }}
-    >
-      <span className={isRoot ? 'font-semibold' : 'font-medium'}>{unit.name}</span>
-      <span className="text-sm text-muted-foreground">
-        {unit.type} · {unit.code}
-        {unit.status !== 'active' && ` · ${unit.status}`}
-      </span>
     </div>
   );
 }

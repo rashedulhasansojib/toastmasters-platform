@@ -5,9 +5,15 @@ import {
   capabilityTokenVerification,
   checklistRun,
   checklistTemplate,
+  clubMemberSummary,
   meeting,
+  meetingAttendanceRosterEntry,
+  meetingGuest,
   meetingLiveRecord,
+  meetingResource,
   meetingRoleAssignment,
+  meetingTemplate,
+  pathwayPath,
   roleRotationSuggestion,
   speechSlot,
   type AgendaItem,
@@ -16,10 +22,16 @@ import {
   type CapabilityTokenVerification,
   type ChecklistRun,
   type ChecklistTemplate,
+  type ClubMemberSummary,
   type Meeting,
+  type MeetingAttendanceRosterEntry,
+  type MeetingGuest,
   type MeetingLiveRecord,
+  type MeetingResource,
   type MeetingRoleAssignment,
   type MeetingRoleKey,
+  type MeetingTemplate,
+  type PathwayPath,
   type RoleRotationSuggestion,
   type SpeechSlot,
 } from '@toastmasters/contracts';
@@ -108,6 +120,56 @@ export async function getBallots(clubUnitId: string, meetingId: string): Promise
   const response = await authedFetch(`/v1/clubs/${clubUnitId}/meetings/${meetingId}/ballots`);
   if (!response.ok) return [];
   return ballot.array().parse(await response.json());
+}
+
+export async function getMeetingGuests(
+  clubUnitId: string,
+  meetingId: string,
+): Promise<MeetingGuest[]> {
+  const response = await authedFetch(`/v1/clubs/${clubUnitId}/meetings/${meetingId}/guests`);
+  if (!response.ok) return [];
+  return meetingGuest.array().parse(await response.json());
+}
+
+/** M9 Slice 3: the Attendance tab's roster — active members joined to their latest attendance record. */
+export async function getAttendanceRoster(
+  clubUnitId: string,
+  meetingId: string,
+): Promise<MeetingAttendanceRosterEntry[]> {
+  const response = await authedFetch(`/v1/clubs/${clubUnitId}/meetings/${meetingId}/attendance`);
+  if (!response.ok) return [];
+  return meetingAttendanceRosterEntry.array().parse(await response.json());
+}
+
+/** M9 Slice 4: the Resources tab. */
+export async function getMeetingResources(
+  clubUnitId: string,
+  meetingId: string,
+): Promise<MeetingResource[]> {
+  const response = await authedFetch(`/v1/clubs/${clubUnitId}/meetings/${meetingId}/resources`);
+  if (!response.ok) return [];
+  return meetingResource.array().parse(await response.json());
+}
+
+/** M9 Slice 5: the club's reusable meeting templates. */
+export async function getMeetingTemplates(clubUnitId: string): Promise<MeetingTemplate[]> {
+  const response = await authedFetch(`/v1/clubs/${clubUnitId}/meeting-templates`);
+  if (!response.ok) return [];
+  return meetingTemplate.array().parse(await response.json());
+}
+
+/** M9: the seeded Pathways catalogue, for the agenda's path/project pickers. */
+export async function getPathways(clubUnitId: string): Promise<PathwayPath[]> {
+  const response = await authedFetch(`/v1/clubs/${clubUnitId}/pathways`);
+  if (!response.ok) return [];
+  return pathwayPath.array().parse(await response.json());
+}
+
+/** M9: the club roster behind every member picker on the meeting page. */
+export async function getClubMembers(clubUnitId: string): Promise<ClubMemberSummary[]> {
+  const response = await authedFetch(`/v1/clubs/${clubUnitId}/members`);
+  if (!response.ok) return [];
+  return clubMemberSummary.array().parse(await response.json());
 }
 
 /** M3 Slice 6: `@Public()` on the API — guests hit this with no session/account, so it goes through `callApi` directly rather than `authedFetch`, which would forward a cookie a guest never has. */

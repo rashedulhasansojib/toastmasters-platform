@@ -6,7 +6,7 @@ import { PencilIcon, ShuffleIcon, UserRoundCheckIcon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
-import { MoveGuestSheet } from './MoveGuestSheet';
+import { MoveGuestDialog } from './MoveGuestDialog';
 import { GuestFormDialog } from './GuestFormDialog';
 import { useGuestActions } from './useGuestActions';
 import { isRedacted } from './pipeline';
@@ -43,7 +43,7 @@ export function GuestDetailActions({ clubUnitId, guest }: { clubUnitId: string; 
             type="button"
             variant="outline"
             size="lg"
-            className="h-11 flex-1 sm:h-9 sm:flex-none"
+            className="h-11 flex-1 lg:h-9 lg:flex-none"
             onClick={() => setMoveOpen(true)}
             disabled={pending}
           >
@@ -55,7 +55,7 @@ export function GuestDetailActions({ clubUnitId, guest }: { clubUnitId: string; 
           type="button"
           variant="outline"
           size="lg"
-          className="h-11 flex-1 sm:h-9 sm:flex-none"
+          className="h-11 flex-1 lg:h-9 lg:flex-none"
           onClick={() => setEditOpen(true)}
         >
           <PencilIcon />
@@ -67,7 +67,7 @@ export function GuestDetailActions({ clubUnitId, guest }: { clubUnitId: string; 
         <Button
           type="button"
           size="lg"
-          className="h-11 sm:h-9"
+          className="h-11 lg:h-9"
           onClick={() => setConvertOpen(true)}
           disabled={pending}
         >
@@ -88,7 +88,7 @@ export function GuestDetailActions({ clubUnitId, guest }: { clubUnitId: string; 
         </div>
       )}
 
-      <MoveGuestSheet
+      <MoveGuestDialog
         guest={moveOpen ? guest : null}
         open={moveOpen}
         onOpenChange={setMoveOpen}
@@ -115,7 +115,7 @@ export function GuestDetailActions({ clubUnitId, guest }: { clubUnitId: string; 
             type="button"
             variant="outline"
             size="lg"
-            className="h-11 sm:h-9"
+            className="h-11 lg:h-9"
             onClick={() => setConvertOpen(false)}
           >
             Cancel
@@ -123,7 +123,7 @@ export function GuestDetailActions({ clubUnitId, guest }: { clubUnitId: string; 
           <Button
             type="button"
             size="lg"
-            className="h-11 sm:h-9"
+            className="h-11 lg:h-9"
             disabled={pending}
             onClick={() => {
               setConvertOpen(false);

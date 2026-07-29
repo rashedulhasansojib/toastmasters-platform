@@ -7,7 +7,7 @@ import { CalendarPlusIcon, MessageSquarePlusIcon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Sheet } from '@/components/ui/sheet';
+import { Dialog } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
@@ -49,7 +49,7 @@ export function LogActivity({
         type="button"
         variant="outline"
         size="lg"
-        className="h-11 flex-1 sm:h-9 sm:flex-none"
+        className="h-11 flex-1 lg:h-9 lg:flex-none"
         onClick={() => setContactOpen(true)}
       >
         <MessageSquarePlusIcon />
@@ -59,7 +59,7 @@ export function LogActivity({
         type="button"
         variant="outline"
         size="lg"
-        className="h-11 flex-1 sm:h-9 sm:flex-none"
+        className="h-11 flex-1 lg:h-9 lg:flex-none"
         onClick={() => setVisitOpen(true)}
         disabled={meetings.length === 0}
       >
@@ -67,7 +67,7 @@ export function LogActivity({
         Log visit
       </Button>
 
-      <Sheet
+      <Dialog
         open={contactOpen}
         onOpenChange={setContactOpen}
         title="Log contact"
@@ -80,9 +80,9 @@ export function LogActivity({
             onDone={() => setContactOpen(false)}
           />
         )}
-      </Sheet>
+      </Dialog>
 
-      <Sheet
+      <Dialog
         open={visitOpen}
         onOpenChange={setVisitOpen}
         title="Log visit"
@@ -96,7 +96,7 @@ export function LogActivity({
             onDone={() => setVisitOpen(false)}
           />
         )}
-      </Sheet>
+      </Dialog>
     </div>
   );
 }
@@ -144,7 +144,7 @@ function LogContactForm({
       <div className="flex flex-col gap-1.5">
         <Label>How did you reach them?</Label>
         <Select value={channel} onValueChange={(v) => setChannel(v as string)}>
-          <SelectTrigger className="h-11 sm:h-9">
+          <SelectTrigger className="h-11 lg:h-9">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -171,7 +171,7 @@ function LogContactForm({
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
-      <Button type="submit" size="lg" className="h-11 sm:h-9" disabled={submitting}>
+      <Button type="submit" size="lg" className="h-11 lg:h-9" disabled={submitting}>
         {submitting ? 'Saving…' : 'Log contact'}
       </Button>
     </form>
@@ -228,7 +228,7 @@ function LogVisitForm({
       <div className="flex flex-col gap-1.5">
         <Label>Which meeting?</Label>
         <Select value={meetingId} onValueChange={(v) => setMeetingId(v as string)}>
-          <SelectTrigger className="h-11 sm:h-9">
+          <SelectTrigger className="h-11 lg:h-9">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -243,7 +243,7 @@ function LogVisitForm({
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
-      <Button type="submit" size="lg" className="h-11 sm:h-9" disabled={submitting}>
+      <Button type="submit" size="lg" className="h-11 lg:h-9" disabled={submitting}>
         {submitting ? 'Saving…' : 'Log visit'}
       </Button>
     </form>

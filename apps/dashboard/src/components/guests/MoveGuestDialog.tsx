@@ -4,15 +4,19 @@ import type { Guest, GuestPipelineStatus } from '@toastmasters/contracts';
 import { CheckIcon, UserRoundCheckIcon } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
-import { Sheet } from '@/components/ui/sheet';
+import { Dialog } from '@/components/ui/dialog';
 import { MOVABLE_STATUSES, STATUS_ACCENT, STATUS_LABEL } from './pipeline';
 
 /**
  * The phone's answer to dragging a card between columns: tap the status, pick
- * the next one from a thumb-height list. Same three destinations the board's
- * drop targets allow, plus conversion, which is a different endpoint entirely.
+ * the next one. Same three destinations the board's drop targets allow, plus
+ * conversion, which is a different endpoint entirely.
+ *
+ * Uses the responsive dialog, so it reads as a bottom sheet under the thumb on
+ * a phone and a centred dialog on a laptop — rather than a drawer sliding up
+ * from the bottom of a 27" monitor.
  */
-export function MoveGuestSheet({
+export function MoveGuestDialog({
   guest,
   open,
   onOpenChange,
@@ -36,7 +40,7 @@ export function MoveGuestSheet({
   }
 
   return (
-    <Sheet
+    <Dialog
       open={open}
       onOpenChange={onOpenChange}
       title={guest.fullName}
@@ -52,7 +56,7 @@ export function MoveGuestSheet({
               disabled={pending || current}
               onClick={() => void select(status)}
               className={cn(
-                'flex min-h-12 items-center gap-3 rounded-lg px-3 text-left text-sm',
+                'flex min-h-12 items-center gap-3 rounded-lg px-3 text-left text-sm sm:min-h-10',
                 'active:bg-accent disabled:opacity-60 sm:hover:bg-accent',
                 current && 'bg-accent/60',
               )}
@@ -71,7 +75,7 @@ export function MoveGuestSheet({
           disabled={pending}
           onClick={() => void select('joined')}
           className={cn(
-            'flex min-h-12 items-center gap-3 rounded-lg px-3 text-left text-sm',
+            'flex min-h-12 items-center gap-3 rounded-lg px-3 text-left text-sm sm:min-h-10',
             'active:bg-accent disabled:opacity-60 sm:hover:bg-accent',
           )}
         >
@@ -86,6 +90,6 @@ export function MoveGuestSheet({
       </div>
 
       {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
-    </Sheet>
+    </Dialog>
   );
 }

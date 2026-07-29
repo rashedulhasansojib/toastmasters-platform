@@ -81,7 +81,7 @@ export function GuestCard({
           {guest.phone && (
             <a
               href={`tel:${guest.phone}`}
-              className="flex min-h-11 flex-1 items-center justify-center gap-1.5 text-muted-foreground active:bg-accent sm:hover:bg-accent sm:hover:text-foreground"
+              className="flex min-h-11 flex-1 items-center justify-center gap-1.5 lg:min-h-9 text-muted-foreground active:bg-accent sm:hover:bg-accent sm:hover:text-foreground"
             >
               <PhoneIcon className="size-3.5" />
               Call
@@ -92,7 +92,7 @@ export function GuestCard({
               href={wa}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex min-h-11 flex-1 items-center justify-center gap-1.5 text-muted-foreground active:bg-accent sm:hover:bg-accent sm:hover:text-foreground"
+              className="flex min-h-11 flex-1 items-center justify-center gap-1.5 lg:min-h-9 text-muted-foreground active:bg-accent sm:hover:bg-accent sm:hover:text-foreground"
             >
               <MessageCircleIcon className="size-3.5" />
               WhatsApp
@@ -101,7 +101,7 @@ export function GuestCard({
           {guest.email && (
             <a
               href={`mailto:${guest.email}`}
-              className="flex min-h-11 flex-1 items-center justify-center gap-1.5 text-muted-foreground active:bg-accent sm:hover:bg-accent sm:hover:text-foreground"
+              className="flex min-h-11 flex-1 items-center justify-center gap-1.5 lg:min-h-9 text-muted-foreground active:bg-accent sm:hover:bg-accent sm:hover:text-foreground"
             >
               <MailIcon className="size-3.5" />
               Email

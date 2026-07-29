@@ -152,7 +152,7 @@ function GuestForm({
         <Label htmlFor="guest-full-name">Full name</Label>
         <Input
           id="guest-full-name"
-          className="h-11 sm:h-9"
+          className="h-11 lg:h-9"
           value={fields.fullName}
           onChange={(e) => set('fullName', e.target.value)}
           disabled={editing}
@@ -173,7 +173,7 @@ function GuestForm({
             id="guest-phone"
             type="tel"
             inputMode="tel"
-            className="h-11 sm:h-9"
+            className="h-11 lg:h-9"
             value={fields.phone}
             onChange={(e) => set('phone', e.target.value)}
             autoComplete="tel"
@@ -185,7 +185,7 @@ function GuestForm({
             id="guest-whatsapp"
             type="tel"
             inputMode="tel"
-            className="h-11 sm:h-9"
+            className="h-11 lg:h-9"
             placeholder="Same as phone if blank"
             value={fields.whatsapp}
             onChange={(e) => set('whatsapp', e.target.value)}
@@ -199,7 +199,7 @@ function GuestForm({
           id="guest-email"
           type="email"
           inputMode="email"
-          className="h-11 sm:h-9"
+          className="h-11 lg:h-9"
           value={fields.email}
           onChange={(e) => set('email', e.target.value)}
           autoComplete="email"
@@ -212,7 +212,7 @@ function GuestForm({
           <Label htmlFor="guest-lead-source">Lead source</Label>
           <Input
             id="guest-lead-source"
-            className="h-11 sm:h-9"
+            className="h-11 lg:h-9"
             placeholder="e.g. Facebook post"
             value={fields.leadSource}
             onChange={(e) => set('leadSource', e.target.value)}
@@ -222,7 +222,7 @@ function GuestForm({
           <Label htmlFor="guest-preferred-role">Role they&apos;re curious about</Label>
           <Input
             id="guest-preferred-role"
-            className="h-11 sm:h-9"
+            className="h-11 lg:h-9"
             placeholder="e.g. Timer"
             value={fields.preferredRole}
             onChange={(e) => set('preferredRole', e.target.value)}
@@ -247,12 +247,12 @@ function GuestForm({
           type="button"
           variant="outline"
           size="lg"
-          className="h-11 sm:h-9"
+          className="h-11 lg:h-9"
           onClick={onCancel}
         >
           Cancel
         </Button>
-        <Button type="submit" size="lg" className="h-11 sm:h-9" disabled={submitting}>
+        <Button type="submit" size="lg" className="h-11 lg:h-9" disabled={submitting}>
           {submitting ? 'Saving…' : editing ? 'Save changes' : 'Add guest'}
         </Button>
       </div>

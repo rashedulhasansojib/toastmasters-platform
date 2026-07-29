@@ -7,10 +7,17 @@ import { KanbanIcon, ListIcon, PlusIcon, SearchIcon, UsersIcon } from 'lucide-re
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { GuestCard } from './GuestCard';
 import { GuestFormDialog } from './GuestFormDialog';
 import { GuestPipelineBoard } from './GuestPipelineBoard';
-import { MoveGuestSheet } from './MoveGuestSheet';
+import { MoveGuestDialog } from './MoveGuestDialog';
 import { useGuestActions } from './useGuestActions';
 import { PIPELINE_STATUSES, STATUS_ACCENT, STATUS_LABEL } from './pipeline';
 
@@ -26,6 +33,11 @@ type Filter = GuestPipelineStatus | 'all';
  * its status chip rather than a drag. The board is a wide-screen enhancement,
  * rendered only from `lg:` up; both views share one dataset and one write
  * path, so they can't drift.
+ *
+ * Mobile-first is not mobile-everywhere, though. From `lg:` the touch
+ * affordances step aside for desktop ones: the stage rail becomes a dropdown,
+ * the floating action button becomes a header button, controls drop to their
+ * natural height, and the grid widens instead of stretching phone-sized cards.
  */
 export function GuestsScreen({ clubUnitId, guests }: { clubUnitId: string; guests: Guest[] }) {
   const [query, setQuery] = useState('');
@@ -107,6 +119,28 @@ export function GuestsScreen({ clubUnitId, guests }: { clubUnitId: string; guest
           />
         </div>
 
+        {/* Desktop filters with a dropdown; the phone gets the stage rail below.
+            A row of pills is a touch pattern — on a laptop it just eats the
+            toolbar and reads as a stretched phone screen. */}
+        {view === 'list' && (
+          <Select
+            value={filter}
+            onValueChange={(v) => setFilter(v as Filter)}
+            aria-label="Filter by stage"
+          >
+            <SelectTrigger className="hidden w-44 shrink-0 lg:flex">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {chips.map(({ key, label, count }) => (
+                <SelectItem key={key} value={key}>
+                  {label} ({count})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
         {/* The board is a laptop affordance — no toggle on a phone at all. */}
         <div className="hidden shrink-0 items-center gap-0.5 rounded-lg border p-0.5 lg:flex">
           {(
@@ -148,7 +182,7 @@ export function GuestsScreen({ clubUnitId, guests }: { clubUnitId: string; guest
 
       {/* Stage rail + cards: the phone's whole pipeline, and the desktop list view. */}
       <div className={cn('flex flex-col gap-4', view === 'board' && 'lg:hidden')}>
-        <div className="-mx-4 overflow-x-auto px-4 sm:-mx-6 sm:px-6">
+        <div className="-mx-4 overflow-x-auto px-4 sm:-mx-6 sm:px-6 lg:hidden">
           <div className="flex w-max gap-2">
             {chips.map(({ key, label, count, accent }) => (
               <button
@@ -187,7 +221,7 @@ export function GuestsScreen({ clubUnitId, guests }: { clubUnitId: string; guest
             onAdd={openCreate}
           />
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:gap-2.5 xl:grid-cols-3 2xl:grid-cols-4">
             {visible.map((guest) => (
               <GuestCard
                 key={guest.id}
@@ -239,7 +273,7 @@ export function GuestsScreen({ clubUnitId, guests }: { clubUnitId: string; guest
         onOpenChange={setFormOpen}
       />
 
-      <MoveGuestSheet
+      <MoveGuestDialog
         guest={moveTarget}
         open={moveTarget !== null}
         onOpenChange={(open) => !open && setMoveTarget(null)}

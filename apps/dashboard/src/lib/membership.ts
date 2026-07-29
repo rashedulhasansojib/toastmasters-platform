@@ -1,49 +1,41 @@
 import {
-  prospect,
-  prospectVisit,
-  prospectCommunication,
+  guest,
+  guestVisit,
+  guestCommunication,
   publicMeetingSummary,
-  type Prospect,
-  type ProspectVisit,
-  type ProspectCommunication,
-  type ConvertProspectResponse,
+  type Guest,
+  type GuestVisit,
+  type GuestCommunication,
+  type ConvertGuestResponse,
   type PublicMeetingSummary,
 } from '@toastmasters/contracts';
 import { authedFetch, callApi } from './session-proxy';
 
-export async function listProspects(clubUnitId: string): Promise<Prospect[]> {
-  const response = await authedFetch(`/v1/clubs/${clubUnitId}/prospects`);
+export async function listGuests(clubUnitId: string): Promise<Guest[]> {
+  const response = await authedFetch(`/v1/clubs/${clubUnitId}/guests`);
   if (!response.ok) return [];
-  return prospect.array().parse(await response.json());
+  return guest.array().parse(await response.json());
 }
 
-export async function getProspect(
-  clubUnitId: string,
-  prospectId: string,
-): Promise<Prospect | null> {
-  const response = await authedFetch(`/v1/clubs/${clubUnitId}/prospects/${prospectId}`);
+export async function getGuest(clubUnitId: string, guestId: string): Promise<Guest | null> {
+  const response = await authedFetch(`/v1/clubs/${clubUnitId}/guests/${guestId}`);
   if (!response.ok) return null;
-  return prospect.parse(await response.json());
+  return guest.parse(await response.json());
 }
 
-export async function getProspectVisits(
-  clubUnitId: string,
-  prospectId: string,
-): Promise<ProspectVisit[]> {
-  const response = await authedFetch(`/v1/clubs/${clubUnitId}/prospects/${prospectId}/visits`);
+export async function getGuestVisits(clubUnitId: string, guestId: string): Promise<GuestVisit[]> {
+  const response = await authedFetch(`/v1/clubs/${clubUnitId}/guests/${guestId}/visits`);
   if (!response.ok) return [];
-  return prospectVisit.array().parse(await response.json());
+  return guestVisit.array().parse(await response.json());
 }
 
-export async function getProspectCommunications(
+export async function getGuestCommunications(
   clubUnitId: string,
-  prospectId: string,
-): Promise<ProspectCommunication[]> {
-  const response = await authedFetch(
-    `/v1/clubs/${clubUnitId}/prospects/${prospectId}/communications`,
-  );
+  guestId: string,
+): Promise<GuestCommunication[]> {
+  const response = await authedFetch(`/v1/clubs/${clubUnitId}/guests/${guestId}/communications`);
   if (!response.ok) return [];
-  return prospectCommunication.array().parse(await response.json());
+  return guestCommunication.array().parse(await response.json());
 }
 
 /** M4 Slice 10: public, no session — the guest lands here from a `guest_register` capability-token link. */
@@ -55,4 +47,4 @@ export async function getUpcomingMeetings(clubUnitId: string): Promise<PublicMee
   return publicMeetingSummary.array().parse(await response.json());
 }
 
-export type { ConvertProspectResponse };
+export type { ConvertGuestResponse };

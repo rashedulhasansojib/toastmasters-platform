@@ -32,7 +32,7 @@ export default defineConfig({
         'src/modules/access/unit-policy.service.ts',
         'src/modules/identity/invitation.service.ts',
         'src/modules/identity/invitation-rate-limiter.service.ts',
-        'src/modules/membership/prospect.service.ts',
+        'src/modules/membership/guest.service.ts',
         'src/modules/org/org.service.ts',
       ],
       exclude: [

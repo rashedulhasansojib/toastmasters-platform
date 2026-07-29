@@ -3,7 +3,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import type { Queue } from 'bullmq';
 import { DCP_PROJECTION_QUEUE } from './dcp-projection.processor';
 
-/** Nightly at 03:00 — after the prospect-retention job (02:00), before club-health-snapshot's monthly run. */
+/** Nightly at 03:00 — after the guest-retention job (02:00), before club-health-snapshot's monthly run. */
 @Injectable()
 export class DcpProjectionScheduler implements OnModuleInit {
   constructor(@InjectQueue(DCP_PROJECTION_QUEUE) private readonly queue: Queue) {}

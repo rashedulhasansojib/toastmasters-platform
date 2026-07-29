@@ -65,7 +65,7 @@ export class MeetingGuestController {
       email: body.email,
       phone: body.phone,
       notes: body.notes,
-      prospectId: body.prospectId,
+      guestId: body.guestId,
       addedBy: principal.userId,
     });
   }

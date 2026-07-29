@@ -65,7 +65,7 @@ export function buildNavSections(activeUnitId: string | null): NavSection[] {
           icon: Plus,
         },
       },
-      { href: `${clubBase}/prospects`, label: 'Prospects', icon: UserPlus },
+      { href: `${clubBase}/guests`, label: 'Guests', icon: UserPlus },
       { href: `${clubBase}/finance`, label: 'Finance', icon: Wallet },
       { href: `${clubBase}/library`, label: 'Library', icon: BookOpen },
       { href: `${clubBase}/inventory`, label: 'Inventory', icon: Package },

@@ -8,7 +8,7 @@ import { z } from 'zod';
 export const ledgerDirection = z.enum(['in', 'out']);
 export type LedgerDirection = z.infer<typeof ledgerDirection>;
 
-export const ledgerCounterpartyKind = z.enum(['member', 'prospect', 'vendor', 'district', 'other']);
+export const ledgerCounterpartyKind = z.enum(['member', 'guest', 'vendor', 'district', 'other']);
 export type LedgerCounterpartyKind = z.infer<typeof ledgerCounterpartyKind>;
 
 export const ledgerEntry = z.object({
@@ -131,7 +131,7 @@ export type ClubDuesSettings = z.infer<typeof clubDuesSettings>;
  * edited after issue; corrections are a credit note (a new, negative-total
  * invoice referencing this one), never a mutation of `lines`/`total`.
  */
-export const invoiceIssuedToKind = z.enum(['member', 'prospect', 'external']);
+export const invoiceIssuedToKind = z.enum(['member', 'guest', 'external']);
 export type InvoiceIssuedToKind = z.infer<typeof invoiceIssuedToKind>;
 
 export const invoiceStatus = z.enum(['draft', 'issued', 'partially_paid', 'paid', 'void']);

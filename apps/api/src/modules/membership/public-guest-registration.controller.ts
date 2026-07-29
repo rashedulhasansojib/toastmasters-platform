@@ -2,7 +2,7 @@ import { Body, Controller, Param, Post } from '@nestjs/common';
 import {
   publicGuestRegistrationRequestSchema,
   type PublicGuestRegistrationRequest,
-  type Prospect,
+  type Guest,
 } from '@toastmasters/contracts';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { Public } from '../../common/auth/public.decorator';
@@ -22,7 +22,7 @@ export class PublicGuestRegistrationController {
     @Param('token') token: string,
     @Body(new ZodValidationPipe(publicGuestRegistrationRequestSchema))
     body: PublicGuestRegistrationRequest,
-  ): Promise<Prospect> {
+  ): Promise<Guest> {
     return this.registration.register(token, body);
   }
 }

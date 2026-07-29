@@ -20,7 +20,7 @@ function toSpeechEvaluation(row: SpeechEvaluationRow): SpeechEvaluation {
     subjectKind: row.subjectKind,
     speechSlotId: row.speechSlotId,
     speakerPersonId: row.speakerPersonId,
-    speakerProspectId: row.speakerProspectId,
+    speakerGuestId: row.speakerGuestId,
     evaluatorPersonId: row.evaluatorPersonId,
     mode: row.mode,
     formScales: row.formScales as unknown as EvaluationFormScale[] | null,
@@ -45,7 +45,7 @@ export class SpeechEvaluationRepository {
     subjectKind: EvaluationSubjectKind;
     speechSlotId?: string;
     speakerPersonId?: string;
-    speakerProspectId?: string;
+    speakerGuestId?: string;
     evaluatorPersonId: string;
     mode: EvaluationMode;
     formScales?: EvaluationFormScale[];

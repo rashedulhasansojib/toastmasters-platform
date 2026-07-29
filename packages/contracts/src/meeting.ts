@@ -160,7 +160,7 @@ export const meetingRoleAssignmentStatus = z.enum([
 export type MeetingRoleAssignmentStatus = z.infer<typeof meetingRoleAssignmentStatus>;
 
 /**
- * M3 Slice 3 scoping: `guest` (§9.2) is deferred — it references a Prospect
+ * M3 Slice 3 scoping: `guest` (§9.2) is deferred — it references a Guest
  * row that doesn't exist until M4.
  */
 export const meetingRoleAssignee = z.discriminatedUnion('kind', [
@@ -529,8 +529,8 @@ export const castVoteRequestSchema = z.object({ candidatePersonId: z.uuid() }).s
 export type CastVoteRequest = z.infer<typeof castVoteRequestSchema>;
 
 /**
- * M9 Slice 2: the meeting Guest List. Either a Prospect-linked row (via
- * `prospectId`) or a manual entry with just name/email/phone/notes.
+ * M9 Slice 2: the meeting Guest List. Either a Guest-linked row (via
+ * `guestId`) or a manual entry with just name/email/phone/notes.
  * `present` is editable — flip it if the guest ends up not showing.
  */
 export const meetingGuest = z.object({
@@ -540,7 +540,7 @@ export const meetingGuest = z.object({
   email: z.string().nullable(),
   phone: z.string().nullable(),
   notes: z.string().nullable(),
-  prospectId: z.uuid().nullable(),
+  guestId: z.uuid().nullable(),
   present: z.boolean(),
   addedBy: z.uuid(),
   createdAt: z.iso.datetime(),
@@ -553,7 +553,7 @@ export const createMeetingGuestRequestSchema = z
     email: z.string().max(200).optional(),
     phone: z.string().max(50).optional(),
     notes: z.string().optional(),
-    prospectId: z.uuid().optional(),
+    guestId: z.uuid().optional(),
   })
   .strict();
 export type CreateMeetingGuestRequest = z.infer<typeof createMeetingGuestRequestSchema>;

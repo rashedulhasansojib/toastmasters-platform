@@ -23,7 +23,7 @@ import type {
   MeetingResource,
   MeetingRoleAssignment,
   PathwayPath,
-  Prospect,
+  Guest,
   SpeechSlot,
 } from '@toastmasters/contracts';
 import { Button } from '@/components/ui/button';
@@ -74,7 +74,8 @@ export type MeetingWorkspaceProps = {
   speechSlots: SpeechSlot[];
   pathways: PathwayPath[];
   guests: MeetingGuest[];
-  prospects: Prospect[];
+  /** The club's guest pipeline — distinct from this meeting's guest list above. */
+  clubGuests: Guest[];
   attendance: MeetingAttendanceRosterEntry[];
   resources: MeetingResource[];
   liveRecords: MeetingLiveRecord[];
@@ -249,7 +250,7 @@ export function MeetingWorkspace(props: MeetingWorkspaceProps) {
               clubUnitId={clubUnitId}
               meetingId={meeting.id}
               guests={props.guests}
-              prospects={props.prospects}
+              clubGuests={props.clubGuests}
             />
           )}
           {tab === 'attendance' && (

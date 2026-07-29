@@ -13,7 +13,7 @@ import {
   getRoleAssignments,
   getSpeechSlots,
 } from '@/lib/meetings';
-import { listProspects } from '@/lib/membership';
+import { listGuests } from '@/lib/membership';
 import { MeetingWorkspace } from '@/components/meetings/detail/MeetingWorkspace';
 
 /**
@@ -37,7 +37,7 @@ export default async function MeetingPage({
     speechSlots,
     pathways,
     guests,
-    prospects,
+    clubGuests,
     attendance,
     resources,
     liveRecords,
@@ -51,7 +51,7 @@ export default async function MeetingPage({
     getSpeechSlots(clubUnitId, meetingId),
     getPathways(clubUnitId),
     getMeetingGuests(clubUnitId, meetingId),
-    listProspects(clubUnitId),
+    listGuests(clubUnitId),
     getAttendanceRoster(clubUnitId, meetingId),
     getMeetingResources(clubUnitId, meetingId),
     getLiveRecords(clubUnitId, meetingId),
@@ -71,7 +71,7 @@ export default async function MeetingPage({
       speechSlots={speechSlots}
       pathways={pathways}
       guests={guests}
-      prospects={prospects}
+      clubGuests={clubGuests}
       attendance={attendance}
       resources={resources}
       liveRecords={liveRecords}

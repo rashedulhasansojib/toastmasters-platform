@@ -13,7 +13,7 @@ function toMeetingGuest(row: MeetingGuestRow): MeetingGuest {
     email: row.email,
     phone: row.phone,
     notes: row.notes,
-    prospectId: row.prospectId,
+    guestId: row.guestId,
     present: row.present,
     addedBy: row.addedBy,
     createdAt: row.createdAt.toISOString(),
@@ -30,7 +30,7 @@ export class MeetingGuestRepository {
     email?: string;
     phone?: string;
     notes?: string;
-    prospectId?: string;
+    guestId?: string;
     addedBy: string;
   }): Promise<MeetingGuest> {
     const row = await this.db.meetingGuest.create({
@@ -40,7 +40,7 @@ export class MeetingGuestRepository {
         email: input.email ?? null,
         phone: input.phone ?? null,
         notes: input.notes ?? null,
-        prospectId: input.prospectId ?? null,
+        guestId: input.guestId ?? null,
         addedBy: input.addedBy,
       },
     });

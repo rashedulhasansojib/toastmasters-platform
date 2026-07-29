@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { CheckCircle2, Circle, Trash2, UserPlus, Users } from 'lucide-react';
-import type { MeetingGuest, Prospect } from '@toastmasters/contracts';
+import type { MeetingGuest, Guest } from '@toastmasters/contracts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,12 +17,14 @@ export function GuestListTab({
   clubUnitId,
   meetingId,
   guests,
-  prospects,
+  clubGuests,
 }: {
   clubUnitId: string;
   meetingId: string;
+  /** This meeting's guest list. */
   guests: MeetingGuest[];
-  prospects: Prospect[];
+  /** The club's guest pipeline, to link a meeting guest to an existing record. */
+  clubGuests: Guest[];
 }) {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>('idle');
@@ -35,13 +37,13 @@ export function GuestListTab({
   const [phone, setPhone] = useState('');
   const [notes, setNotes] = useState('');
 
-  const linkedProspectIds = useMemo(
-    () => new Set(guests.map((g) => g.prospectId).filter(Boolean) as string[]),
+  const linkedGuestIds = useMemo(
+    () => new Set(guests.map((g) => g.guestId).filter(Boolean) as string[]),
     [guests],
   );
-  const availableProspects = useMemo(
-    () => prospects.filter((p) => !linkedProspectIds.has(p.id)),
-    [prospects, linkedProspectIds],
+  const availableGuests = useMemo(
+    () => clubGuests.filter((g) => !linkedGuestIds.has(g.id)),
+    [clubGuests, linkedGuestIds],
   );
 
   const presentCount = guests.filter((g) => g.present).length;
@@ -73,13 +75,13 @@ export function GuestListTab({
 
   function onAddFromPool(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const p = availableProspects.find((x) => x.id === poolSelection);
+    const p = availableGuests.find((x) => x.id === poolSelection);
     if (!p) {
-      setError('Pick a prospect');
+      setError('Pick a guest');
       return;
     }
     void submitCreate({
-      prospectId: p.id,
+      guestId: p.id,
       fullName: p.fullName,
       ...(p.email ? { email: p.email } : {}),
       ...(p.phone ? { phone: p.phone } : {}),
@@ -168,11 +170,11 @@ export function GuestListTab({
           className="flex flex-col gap-3 rounded-md border border-dashed border-border p-3"
         >
           <Label htmlFor="mg-pool" className="text-xs text-muted-foreground">
-            Pick a prospect from the pool
+            Pick a guest from the pool
           </Label>
-          {availableProspects.length === 0 ? (
+          {availableGuests.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No unattached prospects — every prospect is already on this guest list.
+              No unattached guests — every guest is already on this guest list.
             </p>
           ) : (
             <select
@@ -181,8 +183,8 @@ export function GuestListTab({
               onChange={(e) => setPoolSelection(e.target.value)}
               className="rounded-md border border-input bg-background px-3 py-2 text-sm"
             >
-              <option value="">Choose a prospect…</option>
-              {availableProspects.map((p) => (
+              <option value="">Choose a guest…</option>
+              {availableGuests.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.fullName}
                   {p.email ? ` — ${p.email}` : ''}
@@ -194,7 +196,7 @@ export function GuestListTab({
             <Button
               type="submit"
               size="sm"
-              disabled={isPending || availableProspects.length === 0 || !poolSelection}
+              disabled={isPending || availableGuests.length === 0 || !poolSelection}
             >
               Add to list
             </Button>
@@ -288,7 +290,7 @@ export function GuestListTab({
 
       {guests.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-          No guests yet. Add from the prospect pool or manually.
+          No guests yet. Add from the guest pool or manually.
         </div>
       ) : (
         <ul className="flex flex-col gap-2">
@@ -316,7 +318,7 @@ export function GuestListTab({
                 <div className="flex-1 min-w-0">
                   <div className="flex flex-wrap items-baseline gap-2">
                     <span className="text-sm font-medium">{g.fullName}</span>
-                    {g.prospectId && (
+                    {g.guestId && (
                       <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                         from pool
                       </span>

@@ -68,7 +68,7 @@ model OrgUnit {
   checklistRuns          ChecklistRun[]
   agendaTemplates        AgendaTemplate[]
   meetingTemplates       MeetingTemplate[]
-  prospects              Prospect[]
+  guests              Guest[]
   ledgerEntries          LedgerEntry[]
   duesRecords            DuesRecord[]
   invoices               Invoice[]
@@ -142,10 +142,10 @@ model Person {
   meetingLiveRecords        MeetingLiveRecord[]
   ballotsCreated            Ballot[]
   votesReceived             Vote[]              @relation("VoteCandidate")
-  prospectsCreated          Prospect[]          @relation("ProspectCreatedBy")
-  convertedFromProspects    Prospect[]          @relation("ProspectConvertedToPerson")
-  prospectVisitsLogged      ProspectVisit[]
-  prospectCommunicationsLogged ProspectCommunication[]
+  guestsCreated          Guest[]          @relation("GuestCreatedBy")
+  convertedFromGuests    Guest[]          @relation("GuestConvertedToPerson")
+  guestVisitsLogged      GuestVisit[]
+  guestCommunicationsLogged GuestCommunication[]
   ledgerEntriesRecorded     LedgerEntry[]
   duesRecords               DuesRecord[]
   installmentPlans          InstallmentPlan[] @relation("InstallmentPlanPerson")
@@ -350,7 +350,7 @@ model Meeting {
   capabilityTokens CapabilityToken[]
   liveRecords     MeetingLiveRecord[]
   ballots         Ballot[]
-  prospectVisits  ProspectVisit[]
+  guestVisits  GuestVisit[]
   contentPlanItems ContentPlanItem[]
   inventoryMovements InventoryMovement[]
   speechEvaluations SpeechEvaluation[]
@@ -395,7 +395,7 @@ enum BallotEligibility {
  * `all_present` consumer, per the Slice 6 primitive) is deferred; only
  * authenticated club members vote in this slice.
  * `candidates` is a Json snapshot — member-only PersonRef for now, no
- * ProspectRef candidates until M4.
+ * GuestRef candidates until M4.
  */
 model Ballot {
   id          String            @id @default(uuid()) @db.Uuid
@@ -545,7 +545,7 @@ enum MeetingRoleKey {
 
 /**
  * M3 Slice 3 scoping: `guest` (assignee.kind === "guest", §9.2) is deferred —
- * it references a Prospect row that doesn't exist until M4. Only member and
+ * it references a Guest row that doesn't exist until M4. Only member and
  * cross_club assignees, which reference models that already exist, ship now.
  */
 enum MeetingRoleAssigneeKind {
@@ -938,7 +938,7 @@ model AuditEvent {
 }
 
 /** M4 Slice 1: system-design.md §11.1. Club-local, non-authenticating, VPM-owned. `deleteAfter` is server-computed at create — CLAUDE.md §2 decision 4 (180 days) — and enforced by a later slice's nightly job, not aspirational. */
-model Prospect {
+model Guest {
   id                  String                 @id @default(uuid()) @db.Uuid
   orgUnitId           String                 @map("org_unit_id") @db.Uuid
   orgUnit             OrgUnit                @relation(fields: [orgUnitId], references: [id])
@@ -950,52 +950,52 @@ model Prospect {
   bio                 String?
   leadSource          String?                @map("lead_source")
   preferredRole       String?                @map("preferred_role")
-  pipelineStatus      ProspectPipelineStatus @default(new) @map("pipeline_status")
+  pipelineStatus      GuestPipelineStatus @default(new) @map("pipeline_status")
   convertedToPersonId String?                @map("converted_to_person_id") @db.Uuid
-  convertedToPerson   Person?                @relation("ProspectConvertedToPerson", fields: [convertedToPersonId], references: [id])
+  convertedToPerson   Person?                @relation("GuestConvertedToPerson", fields: [convertedToPersonId], references: [id])
   convertedAt         DateTime?              @map("converted_at")
   deleteAfter         DateTime               @map("delete_after")
   createdBy           String                 @map("created_by") @db.Uuid
-  createdByPerson     Person                 @relation("ProspectCreatedBy", fields: [createdBy], references: [id])
+  createdByPerson     Person                 @relation("GuestCreatedBy", fields: [createdBy], references: [id])
   createdAt           DateTime               @default(now()) @map("created_at")
-  visits              ProspectVisit[]
-  communications      ProspectCommunication[]
+  visits              GuestVisit[]
+  communications      GuestCommunication[]
   meetingGuests       MeetingGuest[]
   /// M4 Slice 3: set by the nightly retention job once PII is redacted — CLAUDE.md §2 decision 4.
   /// Anonymises (fullName/email/phone/whatsapp/photoUrl/bio) rather than deleting the row, so
-  /// ProspectVisit/ProspectCommunication history and lead-source aggregates stay intact — same
+  /// GuestVisit/GuestCommunication history and lead-source aggregates stay intact — same
   /// "correct with a new fact, don't destroy the old one" reasoning as append-only ledger rows.
   piiRedactedAt       DateTime?              @map("pii_redacted_at")
   speechEvaluations   SpeechEvaluation[]
 
-  @@map("prospect")
+  @@map("guest")
 }
 
-enum ProspectPipelineStatus {
+enum GuestPipelineStatus {
   new
   contacted
   interested
   not_interested
   joined
 
-  @@map("prospect_pipeline_status")
+  @@map("guest_pipeline_status")
 }
 
-enum ProspectCommunicationChannel {
+enum GuestCommunicationChannel {
   call
   message
   email
   in_person
   other
 
-  @@map("prospect_communication_channel")
+  @@map("guest_communication_channel")
 }
 
-/** M4 Slice 2: system-design.md §11.1's `visits` array, modelled as its own append-only table (same reasoning as MeetingLiveRecord/Vote) rather than a Json array on Prospect. */
-model ProspectVisit {
+/** M4 Slice 2: system-design.md §11.1's `visits` array, modelled as its own append-only table (same reasoning as MeetingLiveRecord/Vote) rather than a Json array on Guest. */
+model GuestVisit {
   id             String   @id @default(uuid()) @db.Uuid
-  prospectId     String   @map("prospect_id") @db.Uuid
-  prospect       Prospect @relation(fields: [prospectId], references: [id])
+  guestId     String   @map("guest_id") @db.Uuid
+  guest       Guest @relation(fields: [guestId], references: [id])
   meetingId      String   @map("meeting_id") @db.Uuid
   meeting        Meeting  @relation(fields: [meetingId], references: [id])
   attendedAt     DateTime @map("attended_at")
@@ -1003,34 +1003,34 @@ model ProspectVisit {
   loggedByPerson Person   @relation(fields: [loggedBy], references: [id])
   createdAt      DateTime @default(now()) @map("created_at")
 
-  @@unique([prospectId, meetingId])
-  @@map("prospect_visit")
+  @@unique([guestId, meetingId])
+  @@map("guest_visit")
 }
 
-/** M4 Slice 2: system-design.md §11.1's `communications` array — a VPM's dated note log, same reasoning as ProspectVisit. */
-model ProspectCommunication {
+/** M4 Slice 2: system-design.md §11.1's `communications` array — a VPM's dated note log, same reasoning as GuestVisit. */
+model GuestCommunication {
   id             String                       @id @default(uuid()) @db.Uuid
-  prospectId     String                       @map("prospect_id") @db.Uuid
-  prospect       Prospect                     @relation(fields: [prospectId], references: [id])
-  channel        ProspectCommunicationChannel
+  guestId     String                       @map("guest_id") @db.Uuid
+  guest       Guest                     @relation(fields: [guestId], references: [id])
+  channel        GuestCommunicationChannel
   note           String
   loggedBy       String                       @map("logged_by") @db.Uuid
   loggedByPerson Person                       @relation(fields: [loggedBy], references: [id])
   loggedAt       DateTime                     @default(now()) @map("logged_at")
 
-  @@map("prospect_communication")
+  @@map("guest_communication")
 }
 
 /**
  * M9 Slice 2: the legacy meeting-page Guest List — a per-meeting roster.
- * Rows are either (a) linked to a Prospect from the pool via `prospectId`,
+ * Rows are either (a) linked to a Guest from the pool via `guestId`,
  * or (b) a manual entry with just name/email/phone/notes. The `present`
  * flag reflects who actually showed up; correcting a mistaken entry is a
  * DELETE, not an audit event — this is a live meeting-day tool.
  *
- * ProspectVisit stays separate: it is the append-only pipeline record
+ * GuestVisit stays separate: it is the append-only pipeline record
  * ("this lead attended a meeting") and is only ever created via a
- * Prospect-linked guest. A manual guest never becomes a ProspectVisit —
+ * Guest-linked guest. A manual guest never becomes a GuestVisit —
  * they are not in the pipeline.
  */
 model MeetingGuest {
@@ -1041,14 +1041,14 @@ model MeetingGuest {
   email         String?   @db.VarChar(200)
   phone         String?   @db.VarChar(50)
   notes         String?
-  prospectId    String?   @map("prospect_id") @db.Uuid
-  prospect      Prospect? @relation(fields: [prospectId], references: [id])
+  guestId    String?   @map("guest_id") @db.Uuid
+  guest      Guest? @relation(fields: [guestId], references: [id])
   present       Boolean   @default(true)
   addedBy       String    @map("added_by") @db.Uuid
   addedByPerson Person    @relation(fields: [addedBy], references: [id])
   createdAt     DateTime  @default(now()) @map("created_at")
 
-  @@unique([meetingId, prospectId])
+  @@unique([meetingId, guestId])
   @@index([meetingId])
   @@map("meeting_guest")
 }
@@ -1155,7 +1155,7 @@ enum LedgerDirection {
 
 enum LedgerCounterpartyKind {
   member
-  prospect
+  guest
   vendor
   district
   other
@@ -1251,7 +1251,7 @@ model DuesRecord {
 
 enum InvoiceIssuedToKind {
   member
-  prospect
+  guest
   external
 
   @@map("invoice_issued_to_kind")
@@ -1769,7 +1769,7 @@ model DcpProjection {
  * M6 Slice 4: system-design.md §19.4. Club-level aggregate — never member
  * detail (FR-OVS-3). Immutable once written by the monthly worker job.
  * `attendanceAvg` is nullable: no member-level attendance fact exists
- * anywhere in the schema (M3 built guest attendance via `ProspectVisit`
+ * anywhere in the schema (M3 built guest attendance via `GuestVisit`
  * and role fulfillment via `MeetingRoleAssignment`, but never a per-member
  * attendance record) — null here is an honest "not tracked yet", not a
  * fabricated zero. See the M6 plan doc.
@@ -1968,8 +1968,8 @@ model SpeechEvaluation {
   speechSlot             SpeechSlot?           @relation(fields: [speechSlotId], references: [id])
   speakerPersonId        String?               @map("speaker_person_id") @db.Uuid
   speakerPerson          Person?               @relation("EvaluationSpeaker", fields: [speakerPersonId], references: [id])
-  speakerProspectId      String?               @map("speaker_prospect_id") @db.Uuid
-  speakerProspect        Prospect?             @relation(fields: [speakerProspectId], references: [id])
+  speakerGuestId      String?               @map("speaker_guest_id") @db.Uuid
+  speakerGuest        Guest?             @relation(fields: [speakerGuestId], references: [id])
   evaluatorPersonId      String                @map("evaluator_person_id") @db.Uuid
   evaluatorPerson        Person                @relation("EvaluationEvaluator", fields: [evaluatorPersonId], references: [id])
   mode                   EvaluationMode

@@ -58,7 +58,7 @@ export class CapabilityTokenService {
    * M4 Slice 10: same validity check as `verify()`, but returns the full row
    * (notably `createdBy`, the issuing officer) for callers that need more
    * than the narrow public `CapabilityTokenVerification` contract shape —
-   * e.g. attributing a publicly-submitted `Prospect.createdBy` to the
+   * e.g. attributing a publicly-submitted `Guest.createdBy` to the
    * officer who opened that guest-registration channel.
    */
   async findValid(

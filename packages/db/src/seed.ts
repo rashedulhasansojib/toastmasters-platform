@@ -120,7 +120,7 @@ const RESOURCES: ResourceSeed[] = [
   },
   {
     // M9 Slice 2: per-meeting guest roster. Not `restricted` — same PII
-    // exposure class as `membership.prospect` (already club-scoped, no
+    // exposure class as `membership.guest` (already club-scoped, no
     // financial/evaluation-grade data).
     resource: 'meeting.guest',
     context: 'meeting',
@@ -231,12 +231,12 @@ const RESOURCES: ResourceSeed[] = [
     // M4 Slice 1: system-design.md §11.1. PII but not `restricted` — the four
     // named restricted resources (finance.ledger, education.evaluation,
     // membership.health_signal, platform.audit) are a deliberately short
-    // list; a prospect is already club-scoped and time-boxed by
+    // list; a guest is already club-scoped and time-boxed by
     // `deleteAfter`, which is a materially different exposure than a
     // ledger amount or an evaluation.
-    resource: 'membership.prospect',
+    resource: 'membership.guest',
     context: 'membership',
-    label: 'Prospect',
+    label: 'Guest',
     allowedActions: ['read', 'create', 'update'],
     clubScoped: true,
     sensitivity: 'normal',
@@ -657,7 +657,7 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
     ],
   },
   {
-    // M4 Slice 1: the prospect pipeline's owner — system-design.md §11.1
+    // M4 Slice 1: the guest pipeline's owner — system-design.md §11.1
     // ("Guests are club-local, non-authenticating, VPM-owned").
     role: 'club_vpm',
     tier: 'club',
@@ -666,9 +666,9 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
     isSingleton: true,
     label: 'Vice President Membership',
     grants: [
-      { resource: 'membership.prospect', action: 'read' },
-      { resource: 'membership.prospect', action: 'create' },
-      { resource: 'membership.prospect', action: 'update' },
+      { resource: 'membership.guest', action: 'read' },
+      { resource: 'membership.guest', action: 'create' },
+      { resource: 'membership.guest', action: 'update' },
       { resource: 'meeting.meeting', action: 'read' },
       { resource: 'meeting.guest', action: 'read' },
       { resource: 'meeting.guest', action: 'create' },

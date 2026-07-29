@@ -154,7 +154,7 @@ describe('M9 Slice 2: meeting guest list (integration)', () => {
       .expect(201);
     expect(created.body.fullName).toBe('Alex Guest');
     expect(created.body.present).toBe(true);
-    expect(created.body.prospectId).toBeNull();
+    expect(created.body.guestId).toBeNull();
     const guestId = created.body.id;
 
     const list = await request(app.getHttpServer())

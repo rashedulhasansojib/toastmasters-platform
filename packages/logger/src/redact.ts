@@ -29,7 +29,7 @@ export const redactPaths: string[] = [
   '*.tokenHash',
   '*.tiMemberNumber',
 
-  // Prospect / Person PII (CLAUDE.md §2 decision 4 lists these six)
+  // Guest / Person PII (CLAUDE.md §2 decision 4 lists these six)
   '*.fullName',
   '*.phone',
   '*.whatsapp',

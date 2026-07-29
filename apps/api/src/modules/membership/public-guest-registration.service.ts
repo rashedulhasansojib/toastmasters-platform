@@ -1,14 +1,14 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import type { Prospect, PublicGuestRegistrationRequest } from '@toastmasters/contracts';
+import type { Guest, PublicGuestRegistrationRequest } from '@toastmasters/contracts';
 import { MeetingRepository } from '../meeting/meeting.repository';
 import { CapabilityTokenService } from '../meeting/capability-token.service';
-import { ProspectRepository } from './prospect.repository';
-import { computeDeleteAfter } from './prospect.service';
+import { GuestRepository } from './guest.repository';
+import { computeDeleteAfter } from './guest.service';
 
 /**
  * M4 Slice 10: the guest-join form behind a `guest_register` capability
  * token — CLAUDE.md §1's single guest-interaction primitive, not a bare
- * public `clubUnitId` write. `Prospect.createdBy` (NOT NULL — every prospect
+ * public `clubUnitId` write. `Guest.createdBy` (NOT NULL — every guest
  * traces to an accountable person) is attributed to the officer who issued
  * the token, since the actual submitter has no `Person` row.
  */
@@ -17,10 +17,10 @@ export class PublicGuestRegistrationService {
   constructor(
     private readonly tokens: CapabilityTokenService,
     private readonly meetings: MeetingRepository,
-    private readonly prospects: ProspectRepository,
+    private readonly guests: GuestRepository,
   ) {}
 
-  async register(rawToken: string, input: PublicGuestRegistrationRequest): Promise<Prospect> {
+  async register(rawToken: string, input: PublicGuestRegistrationRequest): Promise<Guest> {
     const token = await this.tokens.findValid(rawToken);
     if (!token) {
       throw new NotFoundException('Invalid or expired token');
@@ -33,7 +33,7 @@ export class PublicGuestRegistrationService {
       throw new NotFoundException('Meeting not found');
     }
 
-    return this.prospects.create({
+    return this.guests.create({
       orgUnitId: meeting.clubUnitId,
       fullName: input.fullName,
       email: input.email,

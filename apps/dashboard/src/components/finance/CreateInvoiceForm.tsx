@@ -22,7 +22,7 @@ export function CreateInvoiceForm({
 }) {
   const router = useRouter();
   const [duesRecordIds, setDuesRecordIds] = useState('');
-  const [issuedToKind, setIssuedToKind] = useState<'member' | 'prospect' | 'external'>('member');
+  const [issuedToKind, setIssuedToKind] = useState<'member' | 'guest' | 'external'>('member');
   const [issuedToName, setIssuedToName] = useState('');
   const [issuedToEmail, setIssuedToEmail] = useState('');
   const [dueOn, setDueOn] = useState('');
@@ -89,7 +89,7 @@ export function CreateInvoiceForm({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="member">Member</SelectItem>
-            <SelectItem value="prospect">Prospect</SelectItem>
+            <SelectItem value="guest">Guest</SelectItem>
             <SelectItem value="external">External</SelectItem>
           </SelectContent>
         </Select>

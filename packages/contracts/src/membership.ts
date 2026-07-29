@@ -6,16 +6,16 @@ import { person, clubMembership } from './identity';
  * non-authenticating, VPM-owned. `deleteAfter` is server-computed at create
  * (CLAUDE.md §2 decision 4 — 180 days), never client-supplied.
  */
-export const prospectPipelineStatus = z.enum([
+export const guestPipelineStatus = z.enum([
   'new',
   'contacted',
   'interested',
   'not_interested',
   'joined',
 ]);
-export type ProspectPipelineStatus = z.infer<typeof prospectPipelineStatus>;
+export type GuestPipelineStatus = z.infer<typeof guestPipelineStatus>;
 
-export const prospect = z.object({
+export const guest = z.object({
   id: z.uuid(),
   orgUnitId: z.uuid(),
   fullName: z.string().min(1),
@@ -26,7 +26,7 @@ export const prospect = z.object({
   bio: z.string().nullable(),
   leadSource: z.string().nullable(),
   preferredRole: z.string().nullable(),
-  pipelineStatus: prospectPipelineStatus,
+  pipelineStatus: guestPipelineStatus,
   convertedToPersonId: z.uuid().nullable(),
   convertedAt: z.iso.datetime().nullable(),
   deleteAfter: z.iso.datetime(),
@@ -34,9 +34,9 @@ export const prospect = z.object({
   createdAt: z.iso.datetime(),
   piiRedactedAt: z.iso.datetime().nullable(),
 });
-export type Prospect = z.infer<typeof prospect>;
+export type Guest = z.infer<typeof guest>;
 
-export const createProspectRequestSchema = z
+export const createGuestRequestSchema = z
   .object({
     fullName: z.string().min(1),
     email: z.email().optional(),
@@ -48,13 +48,13 @@ export const createProspectRequestSchema = z
     preferredRole: z.string().min(1).optional(),
   })
   .strict();
-export type CreateProspectRequest = z.infer<typeof createProspectRequestSchema>;
+export type CreateGuestRequest = z.infer<typeof createGuestRequestSchema>;
 
 /**
  * Excludes `new` (the create-time default) and `joined` (conversion-only,
  * set by a later slice's handler — never a direct client update).
  */
-export const updateProspectRequestSchema = z
+export const updateGuestRequestSchema = z
   .object({
     pipelineStatus: z.enum(['contacted', 'interested', 'not_interested']).optional(),
     email: z.email().optional(),
@@ -66,26 +66,26 @@ export const updateProspectRequestSchema = z
     preferredRole: z.string().min(1).optional(),
   })
   .strict();
-export type UpdateProspectRequest = z.infer<typeof updateProspectRequestSchema>;
+export type UpdateGuestRequest = z.infer<typeof updateGuestRequestSchema>;
 
 /** M4 Slice 2: system-design.md §11.1's `visits`/`communications` arrays, as their own append-only tables. */
-export const prospectVisit = z.object({
+export const guestVisit = z.object({
   id: z.uuid(),
-  prospectId: z.uuid(),
+  guestId: z.uuid(),
   meetingId: z.uuid(),
   attendedAt: z.iso.datetime(),
   loggedBy: z.uuid(),
   createdAt: z.iso.datetime(),
 });
-export type ProspectVisit = z.infer<typeof prospectVisit>;
+export type GuestVisit = z.infer<typeof guestVisit>;
 
-export const createProspectVisitRequestSchema = z
+export const createGuestVisitRequestSchema = z
   .object({
     meetingId: z.uuid(),
     attendedAt: z.iso.datetime(),
   })
   .strict();
-export type CreateProspectVisitRequest = z.infer<typeof createProspectVisitRequestSchema>;
+export type CreateGuestVisitRequest = z.infer<typeof createGuestVisitRequestSchema>;
 
 /**
  * M4 Slice 10: the public guest-join form. CLAUDE.md §1: "Never make a
@@ -105,34 +105,26 @@ export const publicGuestRegistrationRequestSchema = z
   .strict();
 export type PublicGuestRegistrationRequest = z.infer<typeof publicGuestRegistrationRequestSchema>;
 
-export const prospectCommunicationChannel = z.enum([
-  'call',
-  'message',
-  'email',
-  'in_person',
-  'other',
-]);
-export type ProspectCommunicationChannel = z.infer<typeof prospectCommunicationChannel>;
+export const guestCommunicationChannel = z.enum(['call', 'message', 'email', 'in_person', 'other']);
+export type GuestCommunicationChannel = z.infer<typeof guestCommunicationChannel>;
 
-export const prospectCommunication = z.object({
+export const guestCommunication = z.object({
   id: z.uuid(),
-  prospectId: z.uuid(),
-  channel: prospectCommunicationChannel,
+  guestId: z.uuid(),
+  channel: guestCommunicationChannel,
   note: z.string(),
   loggedBy: z.uuid(),
   loggedAt: z.iso.datetime(),
 });
-export type ProspectCommunication = z.infer<typeof prospectCommunication>;
+export type GuestCommunication = z.infer<typeof guestCommunication>;
 
-export const createProspectCommunicationRequestSchema = z
+export const createGuestCommunicationRequestSchema = z
   .object({
-    channel: prospectCommunicationChannel,
+    channel: guestCommunicationChannel,
     note: z.string().min(1),
   })
   .strict();
-export type CreateProspectCommunicationRequest = z.infer<
-  typeof createProspectCommunicationRequestSchema
->;
+export type CreateGuestCommunicationRequest = z.infer<typeof createGuestCommunicationRequestSchema>;
 
 /**
  * M4 Slice 4: system-design.md §11.1's conversion — "create-or-attach `Person`
@@ -140,10 +132,10 @@ export type CreateProspectCommunicationRequest = z.infer<
  * tells the caller whether this matched an existing account (dual membership)
  * or minted a brand-new one.
  */
-export const convertProspectResponseSchema = z.object({
-  prospect,
+export const convertGuestResponseSchema = z.object({
+  guest,
   person,
   clubMembership,
   wasExistingPerson: z.boolean(),
 });
-export type ConvertProspectResponse = z.infer<typeof convertProspectResponseSchema>;
+export type ConvertGuestResponse = z.infer<typeof convertGuestResponseSchema>;

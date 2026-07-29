@@ -42,7 +42,7 @@ export class ClubHealthSnapshotProcessor extends WorkerHost {
       });
 
       const guestCount = meetingIds.length
-        ? await db.prospectVisit.count({ where: { meetingId: { in: meetingIds } } })
+        ? await db.guestVisit.count({ where: { meetingId: { in: meetingIds } } })
         : 0;
 
       const roleAssignments = meetingIds.length

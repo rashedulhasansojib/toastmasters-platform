@@ -1,9 +1,11 @@
-import { Body, Controller, Get, NotFoundException, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, NotFoundException, Param, Patch, Post } from '@nestjs/common';
 import { z } from 'zod';
 import {
   createMeetingRequestSchema,
+  updateMeetingRequestSchema,
   type CreateMeetingRequest,
   type Meeting,
+  type UpdateMeetingRequest,
 } from '@toastmasters/contracts';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { ResourceScope } from '../../common/authz/resource-scope.decorator';
@@ -38,6 +40,36 @@ export class MeetingController {
       programYearId: body.programYearId,
       scheduledAt: new Date(body.scheduledAt),
       createdBy: principal.userId,
+      title: body.title,
+      theme: body.theme,
+      venue: body.venue,
+      meetingNumber: body.meetingNumber,
+      wordOfDay: body.wordOfDay,
+      tableTopicQuestions: body.tableTopicQuestions,
+      joinUrl: body.joinUrl,
+    });
+  }
+
+  /** Partial update of descriptive metadata + scheduledAt. Never touches status — that has its own guarded transitions. */
+  @Patch(':meetingId')
+  @ResourceScope('meeting.meeting', 'update', { source: 'param', key: 'clubUnitId' })
+  async update(
+    @Param('clubUnitId', uuidPipe) clubUnitId: string,
+    @Param('meetingId', uuidPipe) meetingId: string,
+    @Body(new ZodValidationPipe(updateMeetingRequestSchema)) body: UpdateMeetingRequest,
+  ): Promise<Meeting> {
+    await this.assertMeetingInClub(clubUnitId, meetingId);
+    return this.meetings.update(meetingId, {
+      ...(body.title !== undefined ? { title: body.title } : {}),
+      ...(body.theme !== undefined ? { theme: body.theme } : {}),
+      ...(body.venue !== undefined ? { venue: body.venue } : {}),
+      ...(body.meetingNumber !== undefined ? { meetingNumber: body.meetingNumber } : {}),
+      ...(body.wordOfDay !== undefined ? { wordOfDay: body.wordOfDay } : {}),
+      ...(body.tableTopicQuestions !== undefined
+        ? { tableTopicQuestions: body.tableTopicQuestions }
+        : {}),
+      ...(body.joinUrl !== undefined ? { joinUrl: body.joinUrl } : {}),
+      ...(body.scheduledAt !== undefined ? { scheduledAt: new Date(body.scheduledAt) } : {}),
     });
   }
 

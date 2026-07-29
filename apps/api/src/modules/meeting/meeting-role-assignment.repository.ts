@@ -78,6 +78,24 @@ export class MeetingRoleAssignmentRepository {
     return toMeetingRoleAssignment(row);
   }
 
+  async findById(id: string): Promise<MeetingRoleAssignment | null> {
+    const row = await this.db.meetingRoleAssignment.findUnique({ where: { id } });
+    return row ? toMeetingRoleAssignment(row) : null;
+  }
+
+  /**
+   * M9: withdraw a role proposal.
+   *
+   * Only ever called for a `proposed` assignment — the controller enforces
+   * that. A proposal nobody has answered is planning scratch, not a fact,
+   * so removing it loses nothing. Once the assignee has *answered*
+   * (confirmed/declined) or the meeting has closed (fulfilled/no_show) the
+   * row is history and must be superseded by a status change instead.
+   */
+  async deleteProposed(id: string): Promise<void> {
+    await this.db.meetingRoleAssignment.delete({ where: { id } });
+  }
+
   async findByMeeting(meetingId: string): Promise<MeetingRoleAssignment[]> {
     const rows = await this.db.meetingRoleAssignment.findMany({
       where: { meetingId },

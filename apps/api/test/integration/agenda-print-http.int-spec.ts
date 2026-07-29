@@ -14,8 +14,17 @@ import { PersonRepository } from '../../src/modules/identity/person.repository';
 import { RoleAssignmentRepository } from '../../src/modules/identity/role-assignment.repository';
 import { MeetingRepository } from '../../src/modules/meeting/meeting.repository';
 
-/** M3 Slice 12: printable agenda (self-contained HTML — see the controller's own scoping note on why no PDF library yet). Reuses meeting.agenda_item:read — no new resource, no dedicated 403 test. */
-describe('M3 Slice 12: printable agenda (integration)', () => {
+/**
+ * M3 Slice 12 / M9: printable agenda (self-contained HTML — see the
+ * controller's own scoping note on why no PDF library yet).
+ *
+ * M9 changed what it prints: the agenda is now *derived* from the role
+ * assignments and prepared speakers (the legacy portal's model) rather than
+ * transcribed from hand-entered line items, so this asserts the fixed
+ * running order and the people slotted into it. Reuses
+ * meeting.speech_slot:read — no new resource.
+ */
+describe('M3 Slice 12 / M9: printable agenda (integration)', () => {
   let stopDb: () => Promise<void>;
   let stopRedis: () => Promise<void>;
   let app: INestApplication;
@@ -107,9 +116,9 @@ describe('M3 Slice 12: printable agenda (integration)', () => {
 
     const token = await jwtFor(vpeId);
     await request(app.getHttpServer())
-      .post(`/v1/clubs/${clubId}/meetings/${meetingId}/agenda-items`)
+      .post(`/v1/clubs/${clubId}/meetings/${meetingId}/role-assignments`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ title: 'Table Topics', plannedDurationSeconds: 600, roleKey: 'table_topics_master' })
+      .send({ roleKey: 'table_topics_master', assignee: { kind: 'member', personId: vpeId } })
       .expect(201);
   });
 
@@ -119,7 +128,7 @@ describe('M3 Slice 12: printable agenda (integration)', () => {
     await stopRedis();
   });
 
-  it('renders a print-ready HTML agenda with the item and its role', async () => {
+  it('derives the fixed running order and slots the assigned role holder in', async () => {
     const token = await jwtFor(vpeId);
     const res = await request(app.getHttpServer())
       .get(`/v1/clubs/${clubId}/meetings/${meetingId}/agenda/print`)
@@ -127,8 +136,32 @@ describe('M3 Slice 12: printable agenda (integration)', () => {
       .expect(200);
 
     expect(res.headers['content-type']).toContain('text/html');
-    expect(res.text).toContain('Table Topics');
-    expect(res.text).toContain('table_topics_master');
-    expect(res.text).toContain('10 min');
+
+    // The fixed running order, derived rather than entered.
+    expect(res.text).toContain('Sergeant at Arms opens the floor');
+    expect(res.text).toContain('TMOE introduces the Table Topic Master');
+    expect(res.text).toContain('Meeting Conclusion');
+
+    // The assigned Table Topics Master is resolved to a name, not an id.
+    expect(res.text).toContain('VPE Eleven');
+    expect(res.text).not.toContain(vpeId);
+
+    // Times run from the meeting's start (18:00Z), not from a stored column.
+    expect(res.text).toContain('6:00 PM');
+  });
+
+  it('404s a meeting that belongs to another club', async () => {
+    const token = await jwtFor(vpeId);
+    const otherClubId = '00000000-0000-0000-0000-0000000000ff';
+    await request(app.getHttpServer())
+      .get(`/v1/clubs/${otherClubId}/meetings/${meetingId}/agenda/print`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect((res) => {
+        // Denied before the row is reachable: 403 from the scope guard, or
+        // 404 once scope passes but the meeting isn't in that club.
+        if (![403, 404].includes(res.status)) {
+          throw new Error(`expected 403 or 404, got ${res.status}`);
+        }
+      });
   });
 });

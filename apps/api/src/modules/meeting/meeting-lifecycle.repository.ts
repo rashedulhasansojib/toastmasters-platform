@@ -1,9 +1,28 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { getPrisma, type PrismaClient } from '@toastmasters/db';
-import type { Meeting, MeetingStatus } from '@toastmasters/contracts';
+import {
+  tableTopicQuestion,
+  wordOfDay,
+  type Meeting,
+  type MeetingStatus,
+  type TableTopicQuestion,
+  type WordOfDay,
+} from '@toastmasters/contracts';
 import { PRISMA_CLIENT } from '../../common/db/prisma-client.token';
 
 type MeetingRow = Awaited<ReturnType<PrismaClient['meeting']['update']>>;
+
+function parseWordOfDay(value: unknown): WordOfDay | null {
+  if (value == null) return null;
+  const parsed = wordOfDay.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function parseTableTopicQuestions(value: unknown): TableTopicQuestion[] | null {
+  if (value == null) return null;
+  const parsed = tableTopicQuestion.array().safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
 
 function toMeeting(row: MeetingRow): Meeting {
   return {
@@ -12,6 +31,13 @@ function toMeeting(row: MeetingRow): Meeting {
     programYearId: row.programYearId,
     scheduledAt: row.scheduledAt.toISOString(),
     status: row.status,
+    title: row.title,
+    theme: row.theme,
+    venue: row.venue,
+    meetingNumber: row.meetingNumber,
+    wordOfDay: parseWordOfDay(row.wordOfDay),
+    tableTopicQuestions: parseTableTopicQuestions(row.tableTopicQuestions),
+    joinUrl: row.joinUrl,
     createdBy: row.createdBy,
     createdAt: row.createdAt.toISOString(),
   };

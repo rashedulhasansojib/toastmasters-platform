@@ -1,11 +1,23 @@
-import { Body, Controller, Get, NotFoundException, Param, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  NotFoundException,
+  Param,
+  Patch,
+  Post,
+} from '@nestjs/common';
 import { z } from 'zod';
 import {
   createSpeechSlotRequestSchema,
   decideSpeechSlotRequestSchema,
+  updateSpeechSlotRequestSchema,
   type CreateSpeechSlotRequest,
   type DecideSpeechSlotRequest,
   type SpeechSlot,
+  type UpdateSpeechSlotRequest,
 } from '@toastmasters/contracts';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { ResourceScope } from '../../common/authz/resource-scope.decorator';
@@ -47,6 +59,9 @@ export class SpeechSlotController {
       projectCode: body.projectCode,
       plannedDurationSeconds: body.plannedDurationSeconds,
       requestedBy: principal.userId,
+      speakerPersonId: body.speakerPersonId,
+      evaluatorPersonId: body.evaluatorPersonId,
+      notes: body.notes,
     });
   }
 
@@ -74,5 +89,45 @@ export class SpeechSlotController {
       throw new NotFoundException('Speech slot not found');
     }
     return this.speechSlots.decide(speechSlotId, body.status);
+  }
+  /**
+   * M9: edit the slot from the agenda's Prepared Speakers block — speaker,
+   * evaluator, title, path/project, duration, notes, running order.
+   *
+   * Gated on `update`, not `approve`: rewriting the agenda is ordinary
+   * editing, whereas approving a member's request is the distinct decision
+   * the `approve` action exists for (CLAUDE.md §5).
+   */
+  @Patch(':speechSlotId/details')
+  @ResourceScope('meeting.speech_slot', 'update', { source: 'param', key: 'clubUnitId' })
+  async update(
+    @Param('clubUnitId', uuidPipe) clubUnitId: string,
+    @Param('meetingId', uuidPipe) meetingId: string,
+    @Param('speechSlotId', uuidPipe) speechSlotId: string,
+    @Body(new ZodValidationPipe(updateSpeechSlotRequestSchema)) body: UpdateSpeechSlotRequest,
+  ): Promise<SpeechSlot> {
+    await this.assertMeetingInClub(clubUnitId, meetingId);
+    await this.assertSlotInMeeting(meetingId, speechSlotId);
+    return this.speechSlots.update(speechSlotId, body);
+  }
+
+  @Delete(':speechSlotId')
+  @HttpCode(204)
+  @ResourceScope('meeting.speech_slot', 'update', { source: 'param', key: 'clubUnitId' })
+  async remove(
+    @Param('clubUnitId', uuidPipe) clubUnitId: string,
+    @Param('meetingId', uuidPipe) meetingId: string,
+    @Param('speechSlotId', uuidPipe) speechSlotId: string,
+  ): Promise<void> {
+    await this.assertMeetingInClub(clubUnitId, meetingId);
+    await this.assertSlotInMeeting(meetingId, speechSlotId);
+    await this.speechSlots.delete(speechSlotId);
+  }
+
+  private async assertSlotInMeeting(meetingId: string, speechSlotId: string): Promise<void> {
+    const slot = await this.speechSlots.findById(speechSlotId);
+    if (!slot || slot.meetingId !== meetingId) {
+      throw new NotFoundException('Speech slot not found');
+    }
   }
 }

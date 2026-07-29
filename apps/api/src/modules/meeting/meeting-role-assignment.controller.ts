@@ -1,7 +1,10 @@
 import {
   Body,
+  ConflictException,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   NotFoundException,
   Param,
   Patch,
@@ -102,5 +105,34 @@ export class MeetingRoleAssignmentController {
   ): Promise<RoleRotationSuggestion[]> {
     await this.assertMeetingInClub(clubUnitId, meetingId);
     return this.rotation.suggest({ clubUnitId, meetingId, roleKey });
+  }
+  /**
+   * M9: withdraw a role proposal, so the agenda's role grid can be
+   * reassigned to someone else.
+   *
+   * Restricted to `proposed` — an assignment the assignee has already
+   * answered, or one the meeting close-out has settled, is history and is
+   * superseded via PATCH, never removed. A non-proposed target is a 409,
+   * not a silent no-op.
+   */
+  @Delete(':roleAssignmentId')
+  @HttpCode(204)
+  @ResourceScope('meeting.role', 'update', { source: 'param', key: 'clubUnitId' })
+  async withdraw(
+    @Param('clubUnitId', uuidPipe) clubUnitId: string,
+    @Param('meetingId', uuidPipe) meetingId: string,
+    @Param('roleAssignmentId', uuidPipe) roleAssignmentId: string,
+  ): Promise<void> {
+    await this.assertMeetingInClub(clubUnitId, meetingId);
+    const assignment = await this.roleAssignments.findById(roleAssignmentId);
+    if (!assignment || assignment.meetingId !== meetingId) {
+      throw new NotFoundException('Role assignment not found');
+    }
+    if (assignment.status !== 'proposed') {
+      throw new ConflictException(
+        'Only a proposed assignment can be withdrawn; decline it instead.',
+      );
+    }
+    await this.roleAssignments.deleteProposed(roleAssignmentId);
   }
 }

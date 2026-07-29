@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { getPrisma } from '@toastmasters/db';
+import { IdentityModule } from '../identity/identity.module';
 import { PRISMA_CLIENT } from '../../common/db/prisma-client.token';
 import { MeetingRepository } from './meeting.repository';
 import { MeetingController } from './meeting.controller';
@@ -26,8 +27,18 @@ import { BallotController } from './ballot.controller';
 import { MeetingLifecycleRepository } from './meeting-lifecycle.repository';
 import { AgendaPrintController } from './agenda-print.controller';
 import { PublicMeetingController } from './public-meeting.controller';
+import { MeetingGuestRepository } from './meeting-guest.repository';
+import { MeetingGuestController } from './meeting-guest.controller';
+import { MeetingAttendanceRepository } from './meeting-attendance.repository';
+import { MeetingAttendanceController } from './meeting-attendance.controller';
+import { MeetingResourceRepository } from './meeting-resource.repository';
+import { MeetingResourceController } from './meeting-resource.controller';
+import { MeetingTemplateRepository } from './meeting-template.repository';
+import { MeetingTemplateController } from './meeting-template.controller';
+import { PathwayCatalogController } from './pathway-catalog.controller';
 
 @Module({
+  imports: [IdentityModule],
   providers: [
     { provide: PRISMA_CLIENT, useFactory: () => getPrisma() },
     MeetingRepository,
@@ -43,6 +54,10 @@ import { PublicMeetingController } from './public-meeting.controller';
     RoleRotationRepository,
     AgendaTemplateRepository,
     BallotRepository,
+    MeetingGuestRepository,
+    MeetingAttendanceRepository,
+    MeetingResourceRepository,
+    MeetingTemplateRepository,
   ],
   controllers: [
     MeetingController,
@@ -57,6 +72,11 @@ import { PublicMeetingController } from './public-meeting.controller';
     BallotController,
     AgendaPrintController,
     PublicMeetingController,
+    MeetingGuestController,
+    MeetingAttendanceController,
+    MeetingResourceController,
+    MeetingTemplateController,
+    PathwayCatalogController,
   ],
   exports: [
     MeetingRepository,

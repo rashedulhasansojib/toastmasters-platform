@@ -91,6 +91,9 @@ describe('Authorisation matrix (generated from role_template × resource_catalog
     { resource: 'education.record', actions: ['read', 'create', 'update', 'approve'] },
     { resource: 'education.mentorship', actions: ['read', 'create', 'update'] },
     { resource: 'education.onboarding', actions: ['read', 'create', 'update'] },
+    { resource: 'governance.excom_meeting', actions: ['read', 'create', 'update'] },
+    { resource: 'governance.motion', actions: ['read', 'create', 'update'] },
+    { resource: 'governance.minutes', actions: ['read', 'create', 'update', 'approve'] },
   ];
   // area_director/division_director (tier area/division, scopeRule
   // self_subtree) aren't exercised here — this fixture only builds a

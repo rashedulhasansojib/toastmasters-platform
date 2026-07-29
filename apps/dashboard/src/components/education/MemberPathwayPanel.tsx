@@ -1,9 +1,17 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
+import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
-import type { ClubEducationProgressRow, PathwayPath } from '@toastmasters/contracts';
+import type {
+  ClubEducationProgressRow,
+  PathwayPath,
+  SpeechApprovalStatus,
+} from '@toastmasters/contracts';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 
 /** One line of the member's path: a catalogue project, plus what they have delivered against it. */
 interface ProjectRow {
@@ -12,6 +20,9 @@ interface ProjectRow {
   name: string;
   speechTitle: string | null;
   completedAt: string | null;
+  approvalId: string | null;
+  approvalStatus: SpeechApprovalStatus | null;
+  approvedAt: string | null;
 }
 
 function buildProjectRows(
@@ -30,12 +41,162 @@ function buildProjectRows(
         name: project.name,
         speechTitle: delivery?.speechTitle ?? null,
         completedAt: delivery?.deliveredAt ?? null,
+        approvalId: delivery?.approvalId ?? null,
+        approvalStatus: delivery?.approvalStatus ?? null,
+        approvedAt: delivery?.approvedAt ?? null,
       };
     });
 }
 
 function Placeholder() {
   return <span className="text-muted-foreground/60">--</span>;
+}
+
+/**
+ * The pill the reader recognises at a glance. Approved is green (the good
+ * state, the one that counts), Pending amber (waiting on someone), Denied
+ * red (the negative decision, not just "missing"). Undelivered projects
+ * show nothing — the completion-date column already carries "not yet".
+ */
+function ApprovalPill({ status }: { status: SpeechApprovalStatus | null }) {
+  if (status === null) return null;
+  const label = status === 'requested' ? 'Pending' : status === 'approved' ? 'Approved' : 'Denied';
+  const tone =
+    status === 'approved'
+      ? 'bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300'
+      : status === 'denied'
+        ? 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300'
+        : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300';
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap',
+        tone,
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+/**
+ * Two buttons and (on Deny) an inline reason input. Only rendered when the
+ * caller can act (VPE) and the row is still `requested`. Once a decision
+ * lands, we do a `router.refresh()` to re-fetch the roster — server
+ * component boundaries are the source of truth.
+ */
+function ApprovalActions({
+  clubUnitId,
+  approvalId,
+  onDone,
+}: {
+  clubUnitId: string;
+  approvalId: string;
+  onDone: () => void;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [denying, setDenying] = useState(false);
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  async function approve() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/clubs/${clubUnitId}/education/approvals/${approvalId}/approve`,
+        {
+          method: 'POST',
+        },
+      );
+      if (!res.ok) {
+        setError('Could not approve.');
+        return;
+      }
+      onDone();
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitDeny(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/clubs/${clubUnitId}/education/approvals/${approvalId}/deny`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: reason.trim() }),
+      });
+      if (!res.ok) {
+        setError('Could not deny.');
+        return;
+      }
+      setDenying(false);
+      setReason('');
+      onDone();
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (denying) {
+    return (
+      <form onSubmit={submitDeny} className="mt-2 flex flex-col gap-1.5">
+        <Input
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Reason for denial"
+          required
+          minLength={1}
+          disabled={busy}
+          aria-label="Reason for denial"
+          className="h-8 text-xs"
+        />
+        <div className="flex items-center gap-2">
+          <Button type="submit" size="sm" variant="destructive" disabled={busy || !reason.trim()}>
+            Confirm deny
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setDenying(false);
+              setReason('');
+              setError(null);
+            }}
+            disabled={busy}
+          >
+            Cancel
+          </Button>
+        </div>
+        {error && <p className="text-xs text-destructive">{error}</p>}
+      </form>
+    );
+  }
+
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-2">
+      <Button type="button" size="sm" onClick={approve} disabled={busy}>
+        Approve
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={() => setDenying(true)}
+        disabled={busy}
+      >
+        Deny
+      </Button>
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </div>
+  );
 }
 
 /**
@@ -48,14 +209,23 @@ function Placeholder() {
  * closed meeting for that project (the same evidence the level counter is
  * built from); an undelivered project shows a dash rather than a fabricated
  * date.
+ *
+ * M11 Slice 2: each delivered row carries the VPE approval status. A VPE
+ * caller can approve or deny a pending row inline; other roles see the pill
+ * but no buttons — permission logic stays on the server, this is only the
+ * affordance gate.
  */
 export function MemberPathwayPanel({
+  clubUnitId,
   row,
   pathways,
+  canApprove,
   onClose,
 }: {
+  clubUnitId: string;
   row: ClubEducationProgressRow | null;
   pathways: PathwayPath[];
+  canApprove: boolean;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -126,7 +296,8 @@ export function MemberPathwayPanel({
             </p>
           ) : (
             <>
-              {/* Desktop: the four-column table. */}
+              {/* Desktop: the five-column table (Level, Project, Speech
+                  Title, Completion Date, Approval status). */}
               <table className="hidden w-full border-separate border-spacing-0 text-sm sm:table">
                 <thead>
                   <tr>
@@ -150,9 +321,15 @@ export function MemberPathwayPanel({
                     </th>
                     <th
                       scope="col"
-                      className="border-b border-border py-2 pl-3 text-left text-xs font-medium whitespace-nowrap text-muted-foreground"
+                      className="border-b border-border px-3 py-2 text-left text-xs font-medium whitespace-nowrap text-muted-foreground"
                     >
                       Completion Date
+                    </th>
+                    <th
+                      scope="col"
+                      className="border-b border-border py-2 pl-3 text-left text-xs font-medium whitespace-nowrap text-muted-foreground"
+                    >
+                      Approval
                     </th>
                   </tr>
                 </thead>
@@ -168,19 +345,33 @@ export function MemberPathwayPanel({
                       <td className="border-b border-border px-3 py-3 align-top">
                         {project.speechTitle ?? <Placeholder />}
                       </td>
-                      <td className="border-b border-border py-3 pl-3 align-top whitespace-nowrap">
+                      <td className="border-b border-border px-3 py-3 align-top whitespace-nowrap">
                         {project.completedAt ? (
                           new Date(project.completedAt).toLocaleDateString()
                         ) : (
                           <Placeholder />
                         )}
                       </td>
+                      <td className="border-b border-border py-3 pl-3 align-top">
+                        <div className="flex flex-col gap-1">
+                          <ApprovalPill status={project.approvalStatus} />
+                          {canApprove &&
+                            project.approvalStatus === 'requested' &&
+                            project.approvalId && (
+                              <ApprovalActions
+                                clubUnitId={clubUnitId}
+                                approvalId={project.approvalId}
+                                onDone={() => {}}
+                              />
+                            )}
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
 
-              {/* Mobile: the same rows stacked, so four columns never squeeze
+              {/* Mobile: the same rows stacked, so five columns never squeeze
                   a project name down to one word per line. */}
               <ul className="flex flex-col gap-3 sm:hidden">
                 {projectRows.map((project) => (
@@ -188,8 +379,13 @@ export function MemberPathwayPanel({
                     key={project.projectCode}
                     className="rounded-lg border border-border px-3 py-3"
                   >
-                    <p className="text-xs text-muted-foreground">Level {project.level}</p>
-                    <p className="mt-0.5 font-medium">{project.name}</p>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-xs text-muted-foreground">Level {project.level}</p>
+                        <p className="mt-0.5 font-medium">{project.name}</p>
+                      </div>
+                      <ApprovalPill status={project.approvalStatus} />
+                    </div>
                     <dl className="mt-2 flex flex-col gap-1 text-xs">
                       <div className="flex gap-2">
                         <dt className="w-28 shrink-0 text-muted-foreground">Speech Title</dt>
@@ -206,6 +402,13 @@ export function MemberPathwayPanel({
                         </dd>
                       </div>
                     </dl>
+                    {canApprove && project.approvalStatus === 'requested' && project.approvalId && (
+                      <ApprovalActions
+                        clubUnitId={clubUnitId}
+                        approvalId={project.approvalId}
+                        onDone={() => {}}
+                      />
+                    )}
                   </li>
                 ))}
               </ul>

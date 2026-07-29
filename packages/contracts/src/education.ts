@@ -317,25 +317,12 @@ export const clubEducationProgressLevel = z.object({
 export type ClubEducationProgressLevel = z.infer<typeof clubEducationProgressLevel>;
 
 /**
- * A catalogue project the member has actually delivered on this path — the
- * earliest approved slot on a closed meeting. Re-deliveries do not appear:
- * the drawer shows the speech that first satisfied the project, not every
- * time the Ice Breaker got repeated for practice.
- */
-export const clubEducationProgressDelivery = z.object({
-  projectCode: z.string(),
-  speechTitle: z.string(),
-  deliveredAt: z.iso.datetime(),
-});
-export type ClubEducationProgressDelivery = z.infer<typeof clubEducationProgressDelivery>;
-
-/**
  * M11 Slice 1: VPE education-credit approval for a delivered speech.
  *
  * Auto-requested on meeting close for every approved SpeechSlot with a
  * resolvable speaker (see the auto-create hook in the meeting lifecycle).
- * Never hand-created; VPE only ever transitions this row between
- * `requested`, `approved`, and `denied` in later slices.
+ * Never hand-created; VPE transitions this row from `requested` to either
+ * `approved` or `denied` via the Slice 2 endpoints — no other paths.
  */
 export const speechApprovalStatus = z.enum(['requested', 'approved', 'denied']);
 export type SpeechApprovalStatus = z.infer<typeof speechApprovalStatus>;
@@ -359,6 +346,50 @@ export const speechApproval = z.object({
   createdAt: z.iso.datetime(),
 });
 export type SpeechApproval = z.infer<typeof speechApproval>;
+
+/**
+ * M11 Slice 2: filter the club's approvals list. Omitted returns every
+ * status — the drawer wants that, the notification bell (Slice 3) will
+ * pass `requested` to count pending only.
+ */
+export const listSpeechApprovalsQuerySchema = z
+  .object({ status: speechApprovalStatus.optional() })
+  .strict();
+export type ListSpeechApprovalsQuery = z.infer<typeof listSpeechApprovalsQuerySchema>;
+
+/** No body — the VPE clicks Approve; the decision is the endpoint. */
+export const approveSpeechApprovalRequestSchema = z.object({}).strict();
+export type ApproveSpeechApprovalRequest = z.infer<typeof approveSpeechApprovalRequestSchema>;
+
+/**
+ * A denial must state why — the reason is the audit trail. Never optional;
+ * an empty string is not a reason.
+ */
+export const denySpeechApprovalRequestSchema = z.object({ reason: z.string().min(1) }).strict();
+export type DenySpeechApprovalRequest = z.infer<typeof denySpeechApprovalRequestSchema>;
+
+/**
+ * A catalogue project the member has actually delivered on this path — the
+ * earliest approved slot on a closed meeting. Re-deliveries do not appear:
+ * the drawer shows the speech that first satisfied the project, not every
+ * time the Ice Breaker got repeated for practice.
+ */
+export const clubEducationProgressDelivery = z.object({
+  projectCode: z.string(),
+  speechTitle: z.string(),
+  deliveredAt: z.iso.datetime(),
+  /**
+   * M11 Slice 2: which auto-approval row this delivery corresponds to, and
+   * where it sits in the VPE review flow. All three are null when the
+   * delivery predates Slice 1's auto-request hook (a closed meeting from
+   * before the migration ran) — the UI reads that as "no approval on file",
+   * not as pending.
+   */
+  approvalId: z.uuid().nullable(),
+  approvalStatus: speechApprovalStatus.nullable(),
+  approvedAt: z.iso.datetime().nullable(),
+});
+export type ClubEducationProgressDelivery = z.infer<typeof clubEducationProgressDelivery>;
 
 export const clubEducationProgressRow = z.object({
   personId: z.uuid(),

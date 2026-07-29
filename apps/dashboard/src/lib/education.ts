@@ -1,6 +1,7 @@
 import {
   clubEducationProgressRow,
   educationRecord,
+  speechApproval,
   speechEvaluation,
   mentorshipPairing,
   mentorshipSuggestion,
@@ -8,6 +9,8 @@ import {
   onboardingProgress,
   type ClubEducationProgressRow,
   type EducationRecord,
+  type SpeechApproval,
+  type SpeechApprovalStatus,
   type SpeechEvaluation,
   type MentorshipPairing,
   type MentorshipSuggestion,
@@ -38,6 +41,22 @@ export async function listClubEducationProgress(
   if (response.status === 403 || response.status === 404) return null;
   if (!response.ok) return [];
   return clubEducationProgressRow.array().parse(await response.json());
+}
+
+/**
+ * M11 Slice 2: the club's speech-credit approvals. Returns `null` — not `[]`
+ * — when the caller lacks `education.approval:read`, so the drawer can hide
+ * the VPE-only Approve/Deny buttons without a separate capability probe.
+ */
+export async function listSpeechApprovals(
+  clubUnitId: string,
+  status?: SpeechApprovalStatus,
+): Promise<SpeechApproval[] | null> {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+  const response = await authedFetch(`/v1/clubs/${clubUnitId}/education/approvals${qs}`);
+  if (response.status === 403 || response.status === 404) return null;
+  if (!response.ok) return [];
+  return speechApproval.array().parse(await response.json());
 }
 
 export async function listMyEvaluations(clubUnitId: string): Promise<SpeechEvaluation[]> {

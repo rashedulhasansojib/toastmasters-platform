@@ -98,11 +98,20 @@ function SortButton({
  * empty club.
  */
 export function EducationProgressTable({
+  clubUnitId,
   rows,
   pathways,
+  canApprove,
 }: {
+  clubUnitId: string;
   rows: ClubEducationProgressRow[] | null;
   pathways: PathwayPath[];
+  /**
+   * M11 Slice 2: whether the caller holds `education.approval:approve` for
+   * this club — the drawer shows Approve/Deny buttons only when it does. The
+   * page derives this from the approvals-list endpoint's 200 vs 403 response.
+   */
+  canApprove: boolean;
 }) {
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('name');
@@ -290,7 +299,13 @@ export function EducationProgressTable({
 
       <p className="text-xs text-muted-foreground sm:hidden">Swipe the table to see all levels.</p>
 
-      <MemberPathwayPanel row={selected} pathways={pathways} onClose={() => setSelected(null)} />
+      <MemberPathwayPanel
+        clubUnitId={clubUnitId}
+        row={selected}
+        pathways={pathways}
+        canApprove={canApprove}
+        onClose={() => setSelected(null)}
+      />
     </div>
   );
 }

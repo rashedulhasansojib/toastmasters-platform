@@ -9,12 +9,13 @@ export class EducationProgressService {
   constructor(private readonly progress: EducationProgressRepository) {}
 
   async listByClub(clubUnitId: string): Promise<ClubEducationProgressRow[]> {
-    const [members, records, projects] = await Promise.all([
+    const [members, records, projects, approvals] = await Promise.all([
       this.progress.findClubMembers(clubUnitId),
       this.progress.findClubRecords(clubUnitId),
       this.progress.findCatalogProjects(),
+      this.progress.findApprovalsForClub(clubUnitId),
     ]);
     const deliveries = await this.progress.findDeliveries(members.map((m) => m.personId));
-    return buildClubEducationProgress({ members, records, projects, deliveries });
+    return buildClubEducationProgress({ members, records, projects, deliveries, approvals });
   }
 }

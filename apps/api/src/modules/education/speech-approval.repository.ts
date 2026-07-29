@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { getPrisma, type PrismaClient } from '@toastmasters/db';
-import type { SpeechApproval } from '@toastmasters/contracts';
+import type { SpeechApproval, SpeechApprovalStatus } from '@toastmasters/contracts';
 import { PRISMA_CLIENT } from '../../common/db/prisma-client.token';
 import type { AutoRequest, AutoRequestMeeting, AutoRequestSlot } from './speech-approval-requests';
 import { buildAutoRequests } from './speech-approval-requests';
@@ -94,5 +94,57 @@ export class SpeechApprovalRepository {
       orderBy: { requestedAt: 'desc' },
     });
     return rows.map(toSpeechApproval);
+  }
+
+  async findById(id: string): Promise<SpeechApproval | null> {
+    const row = await this.db.speechApproval.findUnique({ where: { id } });
+    return row ? toSpeechApproval(row) : null;
+  }
+
+  /**
+   * The club's approvals, optionally filtered by status. Ordered newest-first
+   * so the drawer and the (Slice 3) bell both read chronologically.
+   */
+  async listForClub(clubUnitId: string, status?: SpeechApprovalStatus): Promise<SpeechApproval[]> {
+    const rows = await this.db.speechApproval.findMany({
+      where: { clubUnitId, ...(status ? { status } : {}) },
+      orderBy: { requestedAt: 'desc' },
+    });
+    return rows.map(toSpeechApproval);
+  }
+
+  /**
+   * Atomic `requested → approved`. The `where` narrows on both id and the
+   * from-status, so two VPEs racing on the same row lose gracefully: the
+   * second `updateMany` returns count=0 and the caller sees the row already
+   * decided — no last-writer-wins overwrite of the approver or timestamp.
+   */
+  async approve(id: string, approverPersonId: string, at: Date): Promise<SpeechApproval | null> {
+    const result = await this.db.speechApproval.updateMany({
+      where: { id, status: 'requested' },
+      data: { status: 'approved', approvedAt: at, approvedBy: approverPersonId },
+    });
+    if (result.count === 0) return null;
+    return this.findById(id);
+  }
+
+  /** Atomic `requested → denied` with the reason captured for audit. */
+  async deny(
+    id: string,
+    denierPersonId: string,
+    at: Date,
+    reason: string,
+  ): Promise<SpeechApproval | null> {
+    const result = await this.db.speechApproval.updateMany({
+      where: { id, status: 'requested' },
+      data: {
+        status: 'denied',
+        deniedAt: at,
+        deniedBy: denierPersonId,
+        denialReason: reason,
+      },
+    });
+    if (result.count === 0) return null;
+    return this.findById(id);
   }
 }

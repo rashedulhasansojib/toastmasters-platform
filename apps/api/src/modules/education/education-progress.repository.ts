@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { getPrisma, type PrismaClient } from '@toastmasters/db';
 import { PRISMA_CLIENT } from '../../common/db/prisma-client.token';
 import type {
+  ProgressApproval,
   ProgressDelivery,
   ProgressMember,
   ProgressProject,
@@ -75,6 +76,7 @@ export class EducationProgressRepository {
         ],
       },
       select: {
+        id: true,
         title: true,
         pathCode: true,
         projectCode: true,
@@ -92,6 +94,26 @@ export class EducationProgressRepository {
       // meeting is `closed`, so `scheduledAt` is when it happened, not a
       // future intent.
       deliveredAt: row.meeting.scheduledAt,
+      speechSlotId: row.id,
+    }));
+  }
+
+  /**
+   * M11 Slice 2: the club's approvals, projected to just the fields the
+   * roster needs. Kept here (not on `SpeechApprovalRepository.listForClub`)
+   * so `buildClubEducationProgress` and its projection remain in one place
+   * — the API's list endpoint returns the full `SpeechApproval` shape.
+   */
+  async findApprovalsForClub(clubUnitId: string): Promise<ProgressApproval[]> {
+    const rows = await this.db.speechApproval.findMany({
+      where: { clubUnitId },
+      select: { id: true, speechSlotId: true, status: true, approvedAt: true },
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      speechSlotId: row.speechSlotId,
+      status: row.status,
+      approvedAt: row.approvedAt,
     }));
   }
 }

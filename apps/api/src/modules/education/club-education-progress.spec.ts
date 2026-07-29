@@ -5,6 +5,9 @@ import { buildClubEducationProgress } from './club-education-progress';
 const ANA = '11111111-1111-4111-8111-111111111111';
 const BEN = '22222222-2222-4222-8222-222222222222';
 const RECORD = '33333333-3333-4333-8333-333333333333';
+const SLOT1 = '44444444-4444-4444-8444-444444444444';
+const SLOT2 = '55555555-5555-4555-8555-555555555555';
+const APPROVAL1 = '66666666-6666-4666-8666-666666666666';
 
 function level(overrides: Partial<EducationRecordLevel> & { level: number }): EducationRecordLevel {
   return {
@@ -51,6 +54,7 @@ describe('buildClubEducationProgress', () => {
           projectCode: 'PM-ICE-BREAKER',
           speechTitle: 'Hello, Toastmasters',
           deliveredAt: new Date('2026-01-15T00:00:00.000Z'),
+          speechSlotId: SLOT1,
         },
         {
           personId: ANA,
@@ -58,8 +62,10 @@ describe('buildClubEducationProgress', () => {
           projectCode: 'PM-ICE-BREAKER',
           speechTitle: 'Hello again',
           deliveredAt: new Date('2026-03-01T00:00:00.000Z'),
+          speechSlotId: SLOT2,
         },
       ],
+      approvals: [],
     });
 
     expect(rows).toHaveLength(1);
@@ -74,6 +80,9 @@ describe('buildClubEducationProgress', () => {
         projectCode: 'PM-ICE-BREAKER',
         speechTitle: 'Hello, Toastmasters',
         deliveredAt: '2026-01-15T00:00:00.000Z',
+        approvalId: null,
+        approvalStatus: null,
+        approvedAt: null,
       },
     ]);
   });
@@ -84,6 +93,7 @@ describe('buildClubEducationProgress', () => {
       records: [],
       projects,
       deliveries: [],
+      approvals: [],
     });
 
     expect(rows).toHaveLength(1);
@@ -115,11 +125,98 @@ describe('buildClubEducationProgress', () => {
           projectCode: 'PM-ICE-BREAKER',
           speechTitle: "Ben's Ice Breaker",
           deliveredAt: new Date('2026-01-15T00:00:00.000Z'),
+          speechSlotId: SLOT1,
         },
       ],
+      approvals: [],
     });
 
     expect(rows[0]?.levels[0]).toMatchObject({ required: 2, delivered: 0 });
     expect(rows[0]?.deliveredProjects).toEqual([]);
+  });
+
+  it('carries the approval status and approvedAt onto the delivery row', () => {
+    // M11 Slice 2: the drawer needs to render Pending / Approved / Denied
+    // pills, so buildClubEducationProgress must fold the approval row onto
+    // the delivery. The join key is the speech slot id — one-to-one.
+    const rows = buildClubEducationProgress({
+      members: [{ personId: ANA, fullName: 'Ana Rahman' }],
+      records: [
+        {
+          id: RECORD,
+          personId: ANA,
+          pathCode: 'PM',
+          pathName: 'Presentation Mastery',
+          startedAt: new Date('2026-01-01T00:00:00.000Z'),
+          completedAt: null,
+          credential: null,
+          levels: [],
+        },
+      ],
+      projects,
+      deliveries: [
+        {
+          personId: ANA,
+          pathCode: 'PM',
+          projectCode: 'PM-ICE-BREAKER',
+          speechTitle: 'Hello, Toastmasters',
+          deliveredAt: new Date('2026-01-15T00:00:00.000Z'),
+          speechSlotId: SLOT1,
+        },
+      ],
+      approvals: [
+        {
+          id: APPROVAL1,
+          speechSlotId: SLOT1,
+          status: 'approved',
+          approvedAt: new Date('2026-01-20T00:00:00.000Z'),
+        },
+      ],
+    });
+
+    expect(rows[0]?.deliveredProjects[0]).toMatchObject({
+      approvalId: APPROVAL1,
+      approvalStatus: 'approved',
+      approvedAt: '2026-01-20T00:00:00.000Z',
+    });
+  });
+
+  it("leaves approval fields null when no SpeechApproval row exists for the delivery's slot", () => {
+    // The pre-migration case: a closed meeting from before Slice 1 has no
+    // approval row for its slots, so the drawer must render "no approval on
+    // file" rather than a bare "Pending" pill it can never act on.
+    const rows = buildClubEducationProgress({
+      members: [{ personId: ANA, fullName: 'Ana Rahman' }],
+      records: [
+        {
+          id: RECORD,
+          personId: ANA,
+          pathCode: 'PM',
+          pathName: 'Presentation Mastery',
+          startedAt: new Date('2026-01-01T00:00:00.000Z'),
+          completedAt: null,
+          credential: null,
+          levels: [],
+        },
+      ],
+      projects,
+      deliveries: [
+        {
+          personId: ANA,
+          pathCode: 'PM',
+          projectCode: 'PM-ICE-BREAKER',
+          speechTitle: 'Hello',
+          deliveredAt: new Date('2026-01-15T00:00:00.000Z'),
+          speechSlotId: SLOT1,
+        },
+      ],
+      approvals: [],
+    });
+
+    expect(rows[0]?.deliveredProjects[0]).toMatchObject({
+      approvalId: null,
+      approvalStatus: null,
+      approvedAt: null,
+    });
   });
 });

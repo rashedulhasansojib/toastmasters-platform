@@ -5,6 +5,7 @@ import {
   listMentorshipPairings,
   listOnboardingTracks,
   listOnboardingProgress,
+  listSpeechApprovals,
 } from '@/lib/education';
 import { getPathways } from '@/lib/meetings';
 import { getSession } from '@/lib/session';
@@ -23,18 +24,32 @@ export default async function ClubEducationPage({
   const session = await getSession();
   const programYearId = session?.programYearId ?? null;
 
-  const [progress, pathways, records, myEvaluations, pairings, tracks, onboardingProgress] =
-    await Promise.all([
-      listClubEducationProgress(clubUnitId),
-      // The seeded catalogue, for the per-member project list in the drawer.
-      // Reuses M9's read-only endpoint — no new backend surface.
-      getPathways(clubUnitId),
-      listEducationRecords(clubUnitId),
-      listMyEvaluations(clubUnitId),
-      listMentorshipPairings(clubUnitId),
-      listOnboardingTracks(clubUnitId),
-      listOnboardingProgress(clubUnitId),
-    ]);
+  const [
+    progress,
+    pathways,
+    records,
+    myEvaluations,
+    pairings,
+    tracks,
+    onboardingProgress,
+    approvals,
+  ] = await Promise.all([
+    listClubEducationProgress(clubUnitId),
+    // The seeded catalogue, for the per-member project list in the drawer.
+    // Reuses M9's read-only endpoint — no new backend surface.
+    getPathways(clubUnitId),
+    listEducationRecords(clubUnitId),
+    listMyEvaluations(clubUnitId),
+    listMentorshipPairings(clubUnitId),
+    listOnboardingTracks(clubUnitId),
+    listOnboardingProgress(clubUnitId),
+    // A non-null response means the caller holds `education.approval:read`
+    // — which VPE has and a plain member doesn't. That maps to the
+    // approve/deny grant too (both live on the VPE role template), so we
+    // reuse it as the flag rather than probing separately.
+    listSpeechApprovals(clubUnitId),
+  ]);
+  const canApprove = approvals !== null;
 
   return (
     // Wider than the shared `.page` container (40rem): eight columns of
@@ -50,7 +65,12 @@ export default async function ClubEducationPage({
         </p>
       </div>
 
-      <EducationProgressTable rows={progress} pathways={pathways} />
+      <EducationProgressTable
+        clubUnitId={clubUnitId}
+        rows={progress}
+        pathways={pathways}
+        canApprove={canApprove}
+      />
 
       <section className="flex flex-col gap-3">
         <h2>Level confirmation</h2>

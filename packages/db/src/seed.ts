@@ -221,6 +221,49 @@ const RESOURCES: ResourceSeed[] = [
     clubScoped: true,
     sensitivity: 'restricted',
   },
+  {
+    // M5 Slice 2/5: system-design.md §15.1/§7.5. Split from `library.item`
+    // because the matrix gives governance docs and media/links different
+    // grants — see the M5 plan doc's "two library resources" note. Not
+    // `restricted`: versioned and access-limited, but not in the same
+    // exposure class as a ledger amount or an evaluation.
+    resource: 'library.governance_document',
+    context: 'library',
+    label: 'Governance document',
+    allowedActions: ['read', 'create', 'update'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
+  {
+    // M5 Slice 2/5: everything in the library that isn't a governance
+    // document — media, links, notes, training/branding/meeting/finance/
+    // other categories.
+    resource: 'library.item',
+    context: 'library',
+    label: 'Library item',
+    allowedActions: ['read', 'create', 'update'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
+  {
+    // M5 Slice 4/5: system-design.md §15.4. Plans and records only (N5).
+    resource: 'library.content_plan',
+    context: 'library',
+    label: 'Content plan item',
+    allowedActions: ['read', 'create', 'update'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
+  {
+    // M5 Slice 3/5: system-design.md §14.2. `quantity` is derived, not
+    // stored — this resource gates both `InventoryItem` and its movements.
+    resource: 'operations.inventory',
+    context: 'operations',
+    label: 'Inventory item',
+    allowedActions: ['read', 'create', 'update'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
 ];
 
 // Grants transcribed verbatim from system-design.md §7.5 for the resources
@@ -249,6 +292,12 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'finance.report', action: 'update' },
       { resource: 'identity.role_assignment', action: 'create' },
       { resource: 'identity.role_assignment', action: 'update' },
+      { resource: 'library.governance_document', action: 'read' },
+      { resource: 'library.governance_document', action: 'create' },
+      { resource: 'library.governance_document', action: 'update' },
+      { resource: 'library.item', action: 'read' },
+      { resource: 'library.content_plan', action: 'read' },
+      { resource: 'operations.inventory', action: 'read' },
     ],
   },
   {
@@ -281,6 +330,8 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'meeting.ballot', action: 'approve' },
       { resource: 'meeting.vote', action: 'create' },
       { resource: 'identity.role_assignment', action: 'read' },
+      { resource: 'library.governance_document', action: 'read' },
+      { resource: 'library.item', action: 'read' },
     ],
   },
   {
@@ -308,6 +359,8 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'finance.report', action: 'update' },
       { resource: 'meeting.meeting', action: 'read' },
       { resource: 'identity.role_assignment', action: 'read' },
+      { resource: 'library.governance_document', action: 'read' },
+      { resource: 'operations.inventory', action: 'read' },
     ],
   },
   {
@@ -325,6 +378,9 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'membership.prospect', action: 'update' },
       { resource: 'meeting.meeting', action: 'read' },
       { resource: 'identity.role_assignment', action: 'read' },
+      { resource: 'library.governance_document', action: 'read' },
+      { resource: 'library.item', action: 'read' },
+      { resource: 'library.content_plan', action: 'read' },
     ],
   },
   {
@@ -350,11 +406,76 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'finance.dues', action: 'read', condition: 'own' },
       { resource: 'finance.invoice', action: 'read', condition: 'own' },
       { resource: 'finance.installment_plan', action: 'read', condition: 'own' },
+      { resource: 'library.item', action: 'read' },
     ],
     // finance.report is club-wide (opening/closing balances, member counts),
     // not per-member — it deliberately gets no `own`-condition grant here;
     // read access is Treasurer/President only, same as finance.ledger's
     // full (non-`own`) read.
+  },
+  {
+    // M5 Slice 5: system-design.md §7.5. Did not exist before M5 — no
+    // milestone needed the VP Public Relations module until the library and
+    // content planner shipped.
+    role: 'club_vppr',
+    tier: 'club',
+    unitTypes: ['club'],
+    scopeRule: 'self_unit',
+    isSingleton: true,
+    label: 'Vice President Public Relations',
+    grants: [
+      { resource: 'library.item', action: 'read' },
+      { resource: 'library.item', action: 'create' },
+      { resource: 'library.item', action: 'update' },
+      { resource: 'library.governance_document', action: 'read' },
+      { resource: 'library.content_plan', action: 'read' },
+      { resource: 'library.content_plan', action: 'create' },
+      { resource: 'library.content_plan', action: 'update' },
+      { resource: 'meeting.meeting', action: 'read' },
+    ],
+  },
+  {
+    // M5 Slice 5: system-design.md §7.5. Sergeant at Arms: meeting logistics
+    // and checklists (already granted via the pre-existing `meeting.checklist`
+    // resource — M3), inventory, club costs.
+    role: 'club_saa',
+    tier: 'club',
+    unitTypes: ['club'],
+    scopeRule: 'self_unit',
+    isSingleton: true,
+    label: 'Sergeant at Arms',
+    grants: [
+      { resource: 'operations.inventory', action: 'read' },
+      { resource: 'operations.inventory', action: 'create' },
+      { resource: 'operations.inventory', action: 'update' },
+      { resource: 'meeting.checklist', action: 'read' },
+      { resource: 'meeting.checklist', action: 'create' },
+      { resource: 'meeting.checklist', action: 'update' },
+      { resource: 'library.governance_document', action: 'read' },
+      { resource: 'library.item', action: 'read' },
+      { resource: 'meeting.meeting', action: 'read' },
+    ],
+  },
+  {
+    // M5 Slice 5: system-design.md §7.5. Governance-document custodian
+    // (minutes archival lands here properly in M8 — this role and its
+    // `library.governance_document` write exist from M5 so M8 has an owner
+    // to hand records to, not a retrofit).
+    role: 'club_secretary',
+    tier: 'club',
+    unitTypes: ['club'],
+    scopeRule: 'self_unit',
+    isSingleton: true,
+    label: 'Secretary',
+    grants: [
+      { resource: 'library.governance_document', action: 'read' },
+      { resource: 'library.governance_document', action: 'create' },
+      { resource: 'library.governance_document', action: 'update' },
+      { resource: 'library.item', action: 'read' },
+      { resource: 'meeting.checklist', action: 'read' },
+      { resource: 'meeting.meeting', action: 'read' },
+      { resource: 'identity.role_assignment', action: 'read' },
+    ],
   },
   // Platform roles: tier 'platform', not bound to a unit type. Zero grants —
   // see the Slice 3 plan's note on why these are deferred to Slices 4/6.

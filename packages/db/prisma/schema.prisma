@@ -74,6 +74,10 @@ model OrgUnit {
   invoiceSequences       InvoiceSequence[]
   installmentPlans       InstallmentPlan[]
   financialReports       FinancialReport[]
+  libraryItems           LibraryItem[]
+  contentPlanItems       ContentPlanItem[]
+  inventoryItems         InventoryItem[]
+  inventoryMovements     InventoryMovement[]
 
   @@map("org_unit")
 }
@@ -128,6 +132,10 @@ model Person {
   installmentPlansApproved  InstallmentPlan[] @relation("InstallmentPlanApprovedBy")
   financialReportsGenerated FinancialReport[] @relation("FinancialReportGeneratedBy")
   financialReportsApproved  FinancialReport[] @relation("FinancialReportApprovedBy")
+  libraryItemsUploaded      LibraryItem[]
+  contentPlanItemsAssigned  ContentPlanItem[]
+  inventoryItemsCustodied   InventoryItem[]
+  inventoryMovementsMade    InventoryMovement[]
 
   @@map("person")
 }
@@ -235,6 +243,8 @@ model ProgramYear {
   invoices        Invoice[]
   invoiceSequences InvoiceSequence[]
   financialReports FinancialReport[]
+  libraryItems     LibraryItem[]
+  contentPlanItems ContentPlanItem[]
 
   @@map("program_year")
 }
@@ -274,6 +284,8 @@ model Meeting {
   liveRecords     MeetingLiveRecord[]
   ballots         Ballot[]
   prospectVisits  ProspectVisit[]
+  contentPlanItems ContentPlanItem[]
+  inventoryMovements InventoryMovement[]
 
   @@map("meeting")
 }
@@ -956,6 +968,7 @@ model LedgerEntry {
   reversalOfEntryId String?                 @map("reversal_of_entry_id") @db.Uuid
   reversalOfEntry   LedgerEntry?            @relation("LedgerReversal", fields: [reversalOfEntryId], references: [id])
   reversals         LedgerEntry[]           @relation("LedgerReversal")
+  inventoryAcquisitions InventoryItem[]
 
   @@unique([reversalOfEntryId])
   @@map("ledger_entry")
@@ -1185,4 +1198,206 @@ model FinancialReport {
   snapshotUrl       String?                @map("snapshot_url")
 
   @@map("financial_report")
+}
+
+// ---------------------------------------------------------------------------
+// M5: Club operations — system-design.md §14, §15
+// ---------------------------------------------------------------------------
+
+enum LibraryItemKind {
+  document
+  media
+  link
+  note
+
+  @@map("library_item_kind")
+}
+
+enum LibraryItemCategory {
+  governance
+  training
+  branding
+  meeting
+  finance
+  media
+  external
+  other
+
+  @@map("library_item_category")
+}
+
+enum LibraryItemVisibility {
+  public
+  members
+  officers
+  role_scoped
+
+  @@map("library_item_visibility")
+}
+
+/**
+ * M5 Slice 2: system-design.md §15.1. One model for the document archive,
+ * media library, links and notes — filtered by `kind`/`category`, not four
+ * stores. Governance-category rows are versioned via `supersedesId`/
+ * `isCurrent`, never overwritten (I-17). Two `resource_catalog` rows
+ * (`library.governance_document`, `library.item`) authorize this one table —
+ * see the M5 plan doc's "two library resources, not one" note.
+ */
+model LibraryItem {
+  id               String                @id @default(uuid()) @db.Uuid
+  orgUnitId        String                @map("org_unit_id") @db.Uuid
+  orgUnit          OrgUnit               @relation(fields: [orgUnitId], references: [id])
+  kind             LibraryItemKind
+  title            String
+  description      String?
+  tags             String[]              @default([])
+  category         LibraryItemCategory
+  fileUrl          String?               @map("file_url")
+  fileMimeType     String?               @map("file_mime_type")
+  fileSizeBytes    Int?                  @map("file_size_bytes")
+  fileChecksum     String?               @map("file_checksum")
+  externalUrl      String?               @map("external_url")
+  body             String?
+  visibility       LibraryItemVisibility @default(officers)
+  visibleToRoles   String[]              @default([]) @map("visible_to_roles")
+  version          Int                   @default(1)
+  supersedesId     String?               @unique @map("supersedes_id") @db.Uuid
+  supersedes       LibraryItem?          @relation("LibraryItemVersion", fields: [supersedesId], references: [id])
+  supersededBy     LibraryItem?          @relation("LibraryItemVersion")
+  isCurrent        Boolean               @default(true) @map("is_current")
+  programYearId    String?               @map("program_year_id")
+  programYear      ProgramYear?          @relation(fields: [programYearId], references: [id])
+  reviewBy         DateTime?             @map("review_by") @db.Date
+  uploadedBy       String                @map("uploaded_by") @db.Uuid
+  uploadedByPerson Person                @relation(fields: [uploadedBy], references: [id])
+  uploadedAt       DateTime              @default(now()) @map("uploaded_at")
+  archivedAt       DateTime?             @map("archived_at")
+
+  @@index([orgUnitId, kind, category], map: "library_browse")
+  @@index([reviewBy], map: "library_review")
+  @@map("library_item")
+}
+
+enum ContentPlanChannel {
+  facebook
+  instagram
+  linkedin
+  website
+  newsletter
+  whatsapp
+  other
+
+  @@map("content_plan_channel")
+}
+
+enum ContentPlanStatus {
+  idea
+  drafting
+  ready
+  published
+  cancelled
+
+  @@map("content_plan_status")
+}
+
+/** M5 Slice 4: system-design.md §15.4. Plans and records only — never publishes (N5). */
+model ContentPlanItem {
+  id                 String             @id @default(uuid()) @db.Uuid
+  orgUnitId          String             @map("org_unit_id") @db.Uuid
+  orgUnit            OrgUnit            @relation(fields: [orgUnitId], references: [id])
+  programYearId      String             @map("program_year_id")
+  programYear        ProgramYear        @relation(fields: [programYearId], references: [id])
+  title              String
+  channel            ContentPlanChannel
+  scheduledFor       DateTime           @map("scheduled_for")
+  status             ContentPlanStatus  @default(idea)
+  copy               String?
+  assetIds           String[]           @default([]) @map("asset_ids")
+  linkedMeetingId    String?            @map("linked_meeting_id") @db.Uuid
+  linkedMeeting      Meeting?           @relation(fields: [linkedMeetingId], references: [id])
+  assignedToPersonId String?            @map("assigned_to_person_id") @db.Uuid
+  assignedToPerson   Person?            @relation(fields: [assignedToPersonId], references: [id])
+  publishedUrl       String?            @map("published_url")
+  publishedAt        DateTime?          @map("published_at")
+  leadSourceTag      String?            @map("lead_source_tag")
+  createdAt          DateTime           @default(now()) @map("created_at")
+
+  @@map("content_plan_item")
+}
+
+enum InventoryItemCategory {
+  banner
+  trophy
+  timer_device
+  stationery
+  equipment
+  book
+  signage
+  other
+
+  @@map("inventory_item_category")
+}
+
+enum InventoryItemCondition {
+  new
+  good
+  worn
+  damaged
+  lost
+
+  @@map("inventory_item_condition")
+}
+
+/** M5 Slice 3: system-design.md §14.2. `quantity` is deliberately not a column — see `InventoryMovement` (I-15). */
+model InventoryItem {
+  id                       String                  @id @default(uuid()) @db.Uuid
+  orgUnitId                String                  @map("org_unit_id") @db.Uuid
+  orgUnit                  OrgUnit                 @relation(fields: [orgUnitId], references: [id])
+  name                     String
+  category                 InventoryItemCategory
+  unit                     String
+  condition                InventoryItemCondition  @default(good)
+  location                 String?
+  custodianPersonId        String?                 @map("custodian_person_id") @db.Uuid
+  custodianPerson          Person?                 @relation(fields: [custodianPersonId], references: [id])
+  acquiredOn               DateTime?               @map("acquired_on") @db.Date
+  acquisitionLedgerEntryId String?                 @map("acquisition_ledger_entry_id") @db.Uuid
+  acquisitionLedgerEntry   LedgerEntry?            @relation(fields: [acquisitionLedgerEntryId], references: [id])
+  replacementCost          Decimal?                @map("replacement_cost") @db.Decimal(10, 2)
+  lastAuditedAt            DateTime?               @map("last_audited_at")
+  notes                    String?
+  movements                InventoryMovement[]
+
+  @@map("inventory_item")
+}
+
+enum InventoryMovementType {
+  acquire
+  checkout
+  return
+  dispose
+  adjust
+  audit
+
+  @@map("inventory_movement_type")
+}
+
+/** M5 Slice 3: append-only (REVOKE UPDATE, DELETE in the migration) — same principle as `LedgerEntry` (I-7). */
+model InventoryMovement {
+  id         String                 @id @default(uuid()) @db.Uuid
+  itemId     String                 @map("item_id") @db.Uuid
+  item       InventoryItem          @relation(fields: [itemId], references: [id])
+  orgUnitId  String                 @map("org_unit_id") @db.Uuid
+  orgUnit    OrgUnit                @relation(fields: [orgUnitId], references: [id])
+  type       InventoryMovementType
+  quantity   Int
+  byPersonId String                 @map("by_person_id") @db.Uuid
+  byPerson   Person                 @relation(fields: [byPersonId], references: [id])
+  meetingId  String?                @map("meeting_id") @db.Uuid
+  meeting    Meeting?               @relation(fields: [meetingId], references: [id])
+  at         DateTime               @default(now())
+  note       String?
+
+  @@index([itemId, at(sort: Desc)], map: "inv_movements")
+  @@map("inventory_movement")
 }

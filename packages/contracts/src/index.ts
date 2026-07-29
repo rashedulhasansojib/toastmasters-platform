@@ -5,3 +5,5 @@ export * from './access';
 export * from './meeting';
 export * from './membership';
 export * from './finance';
+export * from './library';
+export * from './operations';

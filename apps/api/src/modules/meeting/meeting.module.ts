@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { getPrisma } from '@toastmasters/db';
+import { EducationModule } from '../education/education.module';
 import { IdentityModule } from '../identity/identity.module';
 import { PRISMA_CLIENT } from '../../common/db/prisma-client.token';
 import { MeetingRepository } from './meeting.repository';
@@ -38,7 +39,7 @@ import { MeetingTemplateController } from './meeting-template.controller';
 import { PathwayCatalogController } from './pathway-catalog.controller';
 
 @Module({
-  imports: [IdentityModule],
+  imports: [IdentityModule, EducationModule],
   providers: [
     { provide: PRISMA_CLIENT, useFactory: () => getPrisma() },
     MeetingRepository,

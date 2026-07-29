@@ -90,6 +90,7 @@ describe('Authorisation matrix (generated from role_template × resource_catalog
     { resource: 'governance.club_success_plan', actions: ['read', 'create', 'update'] },
     { resource: 'education.record', actions: ['read', 'create', 'update', 'approve'] },
     { resource: 'education.progress', actions: ['read'] },
+    { resource: 'education.approval', actions: ['read', 'update', 'approve'] },
     { resource: 'education.mentorship', actions: ['read', 'create', 'update'] },
     { resource: 'education.onboarding', actions: ['read', 'create', 'update'] },
     { resource: 'governance.excom_meeting', actions: ['read', 'create', 'update'] },

@@ -19,7 +19,7 @@ describe('seedAccessVocabulary (integration)', () => {
     await seedAccessVocabulary(db);
 
     const resourceCount = await db.resourceCatalog.count();
-    expect(resourceCount).toBe(40);
+    expect(resourceCount).toBe(47);
   });
 
   it('marks exactly the four canonical resources as restricted', async () => {

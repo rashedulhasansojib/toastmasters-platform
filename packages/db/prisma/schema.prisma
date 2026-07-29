@@ -88,6 +88,7 @@ model OrgUnit {
   clubHealthSnapshots    ClubHealthSnapshot[]
   tickets                Ticket[]
   educationRecords       EducationRecord[]
+  speechApprovals        SpeechApproval[]
   speechEvaluations      SpeechEvaluation[]
   mentorshipPairings     MentorshipPairing[]
   mentorAvailabilities   MentorAvailability[]
@@ -181,6 +182,9 @@ model Person {
   meetingTemplatesCreated   MeetingTemplate[]
   speechSlotsAsSpeaker      SpeechSlot[]        @relation("SpeechSlotSpeaker")
   speechSlotsAsEvaluator    SpeechSlot[]        @relation("SpeechSlotEvaluator")
+  speechApprovalsForMe      SpeechApproval[]    @relation("SpeechApprovalPerson")
+  speechApprovalsApproved   SpeechApproval[]    @relation("SpeechApprovalApprover")
+  speechApprovalsDenied     SpeechApproval[]    @relation("SpeechApprovalDenier")
 
   @@map("person")
 }
@@ -605,6 +609,7 @@ model PathwayPath {
   projects   PathwayProject[]
   speechSlots SpeechSlot[]
   educationRecords EducationRecord[]
+  speechApprovals  SpeechApproval[]
 
   @@map("pathway_path")
 }
@@ -666,6 +671,7 @@ model SpeechSlot {
   status                 SpeechSlotStatus @default(requested)
   createdAt              DateTime         @default(now()) @map("created_at")
   evaluations            SpeechEvaluation[]
+  approval               SpeechApproval?
 
   @@map("speech_slot")
 }
@@ -1868,6 +1874,58 @@ model EducationRecord {
 
   @@unique([personId, clubUnitId, pathCode])
   @@map("education_record")
+}
+
+enum SpeechApprovalStatus {
+  requested
+  approved
+  denied
+
+  @@map("speech_approval_status")
+}
+
+/**
+ * M11 Slice 1: the missing link between "the speech happened" and "the
+ * speech counts for Pathways credit". Auto-requested on meeting close for
+ * every approved SpeechSlot whose speaker resolves; VPE explicitly
+ * approves (or denies) each delivery from the education drawer.
+ *
+ * `speechSlotId` is unique — one approval per delivered slot, so re-closing
+ * a meeting is idempotent. `clubUnitId`, `pathCode`, `projectCode`, `level`
+ * are snapshotted from the slot at request time so the approval reflects
+ * what was delivered even if the slot's fields drift later.
+ *
+ * Project completion and level completion are derived from this table, not
+ * stored: a project is complete when every catalogue project code has an
+ * approved speech; a level is complete when every catalogue project at
+ * that level has one.
+ */
+model SpeechApproval {
+  id            String               @id @default(uuid()) @db.Uuid
+  speechSlotId  String               @unique @map("speech_slot_id") @db.Uuid
+  speechSlot    SpeechSlot           @relation(fields: [speechSlotId], references: [id])
+  personId      String               @map("person_id") @db.Uuid
+  person        Person               @relation("SpeechApprovalPerson", fields: [personId], references: [id])
+  clubUnitId    String               @map("club_unit_id") @db.Uuid
+  clubUnit      OrgUnit              @relation(fields: [clubUnitId], references: [id])
+  pathCode      String               @map("path_code")
+  path          PathwayPath          @relation(fields: [pathCode], references: [pathCode])
+  projectCode   String               @map("project_code")
+  level         Int
+  status        SpeechApprovalStatus @default(requested)
+  requestedAt   DateTime             @map("requested_at")
+  approvedAt    DateTime?            @map("approved_at")
+  approvedBy    String?              @map("approved_by") @db.Uuid
+  approver      Person?              @relation("SpeechApprovalApprover", fields: [approvedBy], references: [id])
+  deniedAt      DateTime?            @map("denied_at")
+  deniedBy      String?              @map("denied_by") @db.Uuid
+  denier        Person?              @relation("SpeechApprovalDenier", fields: [deniedBy], references: [id])
+  denialReason  String?              @map("denial_reason")
+  createdAt     DateTime             @default(now()) @map("created_at")
+
+  @@index([clubUnitId, status])
+  @@index([personId, status])
+  @@map("speech_approval")
 }
 
 enum EvaluationSubjectKind {

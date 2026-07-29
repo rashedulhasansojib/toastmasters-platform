@@ -8,6 +8,7 @@ import { EducationRecordController } from './education-record.controller';
 import { EducationProgressRepository } from './education-progress.repository';
 import { EducationProgressService } from './education-progress.service';
 import { EducationProgressController } from './education-progress.controller';
+import { SpeechApprovalRepository } from './speech-approval.repository';
 import { SpeechEvaluationRepository } from './speech-evaluation.repository';
 import { SpeechEvaluationController } from './speech-evaluation.controller';
 import { MentorAvailabilityRepository } from './mentor-availability.repository';
@@ -26,6 +27,7 @@ import { OnboardingTrackController, OnboardingProgressController } from './onboa
     EducationRecordService,
     EducationProgressRepository,
     EducationProgressService,
+    SpeechApprovalRepository,
     SpeechEvaluationRepository,
     MentorAvailabilityRepository,
     MentorshipPairingRepository,
@@ -41,6 +43,6 @@ import { OnboardingTrackController, OnboardingProgressController } from './onboa
     OnboardingTrackController,
     OnboardingProgressController,
   ],
-  exports: [EducationRecordRepository],
+  exports: [EducationRecordRepository, SpeechApprovalRepository],
 })
 export class EducationModule {}

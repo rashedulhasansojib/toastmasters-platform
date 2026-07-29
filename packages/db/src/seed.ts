@@ -404,6 +404,18 @@ const RESOURCES: ResourceSeed[] = [
     sensitivity: 'normal',
   },
   {
+    // M11 Slice 1: VPE education-credit approval for a delivered speech.
+    // `approve` is the VPE-only "yes, this counts" action; `update` covers
+    // deny (state change `requested` → `denied`) so the six-action set
+    // (rbac-design.md §5) stays closed — no bespoke `deny` verb.
+    resource: 'education.approval',
+    context: 'education',
+    label: 'Speech education-credit approval',
+    allowedActions: ['read', 'update', 'approve'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
+  {
     // M7 Slice 3/6: system-design.md §10.3.
     resource: 'education.mentorship',
     context: 'education',
@@ -593,6 +605,9 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'education.record', action: 'update' },
       { resource: 'education.record', action: 'approve' },
       { resource: 'education.progress', action: 'read' },
+      { resource: 'education.approval', action: 'read' },
+      { resource: 'education.approval', action: 'update' },
+      { resource: 'education.approval', action: 'approve' },
       { resource: 'education.evaluation', action: 'read' },
       { resource: 'education.evaluation', action: 'create' },
       { resource: 'education.evaluation', action: 'update' },
@@ -705,6 +720,7 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'governance.club_success_plan', action: 'read' },
       { resource: 'education.record', action: 'read', condition: 'own' },
       { resource: 'education.record', action: 'update', condition: 'own' },
+      { resource: 'education.approval', action: 'read', condition: 'own' },
       { resource: 'education.evaluation', action: 'read', condition: 'own' },
       { resource: 'education.evaluation', action: 'create' },
       { resource: 'education.mentorship', action: 'read', condition: 'own' },

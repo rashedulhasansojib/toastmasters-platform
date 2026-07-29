@@ -329,6 +329,37 @@ export const clubEducationProgressDelivery = z.object({
 });
 export type ClubEducationProgressDelivery = z.infer<typeof clubEducationProgressDelivery>;
 
+/**
+ * M11 Slice 1: VPE education-credit approval for a delivered speech.
+ *
+ * Auto-requested on meeting close for every approved SpeechSlot with a
+ * resolvable speaker (see the auto-create hook in the meeting lifecycle).
+ * Never hand-created; VPE only ever transitions this row between
+ * `requested`, `approved`, and `denied` in later slices.
+ */
+export const speechApprovalStatus = z.enum(['requested', 'approved', 'denied']);
+export type SpeechApprovalStatus = z.infer<typeof speechApprovalStatus>;
+
+export const speechApproval = z.object({
+  id: z.uuid(),
+  speechSlotId: z.uuid(),
+  personId: z.uuid(),
+  clubUnitId: z.uuid(),
+  pathCode: z.string(),
+  projectCode: z.string(),
+  level: z.number().int().min(1).max(5),
+  status: speechApprovalStatus,
+  /** When the meeting closed — the same instant `SpeechEvaluation.submittedAt` sits near. */
+  requestedAt: z.iso.datetime(),
+  approvedAt: z.iso.datetime().nullable(),
+  approvedBy: z.uuid().nullable(),
+  deniedAt: z.iso.datetime().nullable(),
+  deniedBy: z.uuid().nullable(),
+  denialReason: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+});
+export type SpeechApproval = z.infer<typeof speechApproval>;
+
 export const clubEducationProgressRow = z.object({
   personId: z.uuid(),
   fullName: z.string(),

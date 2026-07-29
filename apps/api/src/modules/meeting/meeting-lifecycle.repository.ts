@@ -9,6 +9,7 @@ import {
   type WordOfDay,
 } from '@toastmasters/contracts';
 import { PRISMA_CLIENT } from '../../common/db/prisma-client.token';
+import { SpeechApprovalRepository } from '../education/speech-approval.repository';
 
 type MeetingRow = Awaited<ReturnType<PrismaClient['meeting']['update']>>;
 
@@ -55,7 +56,10 @@ function toMeeting(row: MeetingRow): Meeting {
  */
 @Injectable()
 export class MeetingLifecycleRepository {
-  constructor(@Inject(PRISMA_CLIENT) private readonly db: PrismaClient = getPrisma()) {}
+  constructor(
+    @Inject(PRISMA_CLIENT) private readonly db: PrismaClient = getPrisma(),
+    private readonly speechApprovals: SpeechApprovalRepository,
+  ) {}
 
   private async transition(
     meetingId: string,
@@ -109,6 +113,17 @@ export class MeetingLifecycleRepository {
         where: { meetingId, revokedAt: null },
         data: { revokedAt: new Date() },
       });
+
+      // M11 Slice 1: auto-request a VPE education-credit approval for every
+      // approved speech slot on this meeting. Runs inside the same tx so the
+      // meeting either persists its 'closed' state and the pending requests,
+      // or neither; the unique on speech_slot_id keeps this idempotent if
+      // the meeting were ever re-closed.
+      await this.speechApprovals.createManyForMeeting(
+        tx,
+        { clubUnitId: meeting.clubUnitId, scheduledAt: meeting.scheduledAt },
+        meetingId,
+      );
 
       const row = await tx.meeting.update({ where: { id: meetingId }, data: { status: 'closed' } });
       return toMeeting(row);

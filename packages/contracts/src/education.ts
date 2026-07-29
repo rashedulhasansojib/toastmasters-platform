@@ -308,8 +308,22 @@ export const clubEducationProgressLevel = z.object({
   level: z.number().int().min(1).max(5),
   /** Projects the seeded catalogue defines at this level of this path. */
   required: z.number().int().min(0),
-  /** Distinct catalogue projects the member has actually delivered at this level. */
+  /**
+   * Distinct catalogue projects that have been delivered AND cleared the VPE
+   * approval workflow (`SpeechApproval.status = 'approved'`). Pre-workflow
+   * deliveries whose slot has no `SpeechApproval` row on file are grandfathered
+   * in — they still count. M11 Slice 3 tightens this: a delivered-but-pending
+   * (or denied) project no longer moves the counter. See `pending` below for
+   * the queue the VPE needs to work on.
+   */
   delivered: z.number().int().min(0),
+  /**
+   * Distinct catalogue projects delivered at this level whose `SpeechApproval`
+   * is still `requested`. Level headers use this to render the amber "N pending
+   * VPE approval" tint. Never included in `delivered` — that would present a
+   * projection as if the VPE had already blessed it.
+   */
+  pending: z.number().int().min(0),
   memberMarkedCompleteAt: z.iso.datetime().nullable(),
   /** The only date that ever feeds the DCP projection (FR-EDU-3). */
   vpeConfirmedAt: z.iso.datetime().nullable(),
@@ -404,5 +418,13 @@ export const clubEducationProgressRow = z.object({
   levels: z.array(clubEducationProgressLevel),
   /** Per-project delivery detail for this row's path. Empty until a member both starts a path and delivers a project on it. */
   deliveredProjects: z.array(clubEducationProgressDelivery),
+  /**
+   * M11 Slice 3: number of deliveries on this row whose `SpeechApproval` is
+   * still `requested`. Drives the bell badge on the pinned name column — a
+   * VPE at a glance sees which members have work waiting on them. Never
+   * exposed on rows outside the caller's own club (the roster endpoint
+   * already gates that at `education.progress:read`).
+   */
+  pendingApprovalCount: z.number().int().min(0),
 });
 export type ClubEducationProgressRow = z.infer<typeof clubEducationProgressRow>;

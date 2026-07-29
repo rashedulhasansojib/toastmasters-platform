@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, Check, Lock, Search } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Bell, Check, Lock, Search } from 'lucide-react';
 import type {
   ClubEducationProgressLevel,
   ClubEducationProgressRow,
@@ -22,6 +22,11 @@ type SortDir = 'asc' | 'desc';
  * "—" means the seeded catalogue defines no projects at this level of this
  * path — a gap in reference data, not a member who has done nothing. Showing
  * "0 of 0" there would read as the latter, so the two states stay distinct.
+ *
+ * M11 Slice 3: `delivered` counts only VPE-approved speeches. A level with
+ * `pending > 0` tints amber even if the member hasn't marked it complete —
+ * a VPE glancing at the roster needs to see which cells have work waiting
+ * on them, not just which members have hit "done".
  */
 function LevelCell({ level }: { level: ClubEducationProgressLevel }) {
   if (level.vpeConfirmedAt) {
@@ -47,18 +52,46 @@ function LevelCell({ level }: { level: ClubEducationProgressLevel }) {
     );
   }
 
-  const awaiting = level.memberMarkedCompleteAt !== null;
+  const awaitingConfirm = level.memberMarkedCompleteAt !== null;
+  const awaitingApproval = level.pending > 0;
+  const amber = awaitingConfirm || awaitingApproval;
+  const tooltip = awaitingConfirm
+    ? 'Marked complete by the member — awaiting VPE confirmation'
+    : awaitingApproval
+      ? `${level.pending} ${level.pending === 1 ? 'speech' : 'speeches'} awaiting VPE approval`
+      : undefined;
   return (
     <span
       className={cn(
         'inline-block rounded-full px-2 py-0.5 text-xs whitespace-nowrap tabular-nums',
-        awaiting
+        amber
           ? 'bg-amber-100 font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-300'
           : 'text-muted-foreground',
       )}
-      title={awaiting ? 'Marked complete by the member — awaiting VPE confirmation' : undefined}
+      title={tooltip}
     >
       {level.delivered} of {level.required}
+    </span>
+  );
+}
+
+/**
+ * M11 Slice 3: the "N speeches waiting on the VPE" indicator on the pinned
+ * name column. Rendered next to every member's name (not just for the
+ * caller) — the roster is officer-only anyway (`education.progress:read`),
+ * so a VPE seeing all badges is the whole point. Non-VPE readers of the
+ * roster do not exist in the current grant model.
+ */
+function PendingBadge({ count }: { count: number }) {
+  if (count === 0) return null;
+  return (
+    <span
+      className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap text-amber-800 tabular-nums dark:bg-amber-950 dark:text-amber-300"
+      title={`${count} ${count === 1 ? 'speech' : 'speeches'} awaiting VPE approval`}
+    >
+      <Bell className="size-2.5" aria-hidden />
+      {count}
+      <span className="sr-only">{count === 1 ? 'speech' : 'speeches'} awaiting VPE approval</span>
     </span>
   );
 }
@@ -246,14 +279,17 @@ export function EducationProgressTable({
                     scope="row"
                     className="sticky left-0 z-10 border-r border-b border-border bg-background px-3 py-3 text-left font-medium group-last:border-b-0 group-hover:bg-muted sm:px-4"
                   >
-                    <button
-                      type="button"
-                      onClick={() => setSelected(row)}
-                      title={`Open ${row.fullName}'s Pathways progress`}
-                      className="block max-w-32 truncate text-left text-[var(--brand)] underline-offset-2 hover:underline sm:max-w-none"
-                    >
-                      {row.fullName}
-                    </button>
+                    <div className="flex items-center">
+                      <button
+                        type="button"
+                        onClick={() => setSelected(row)}
+                        title={`Open ${row.fullName}'s Pathways progress`}
+                        className="block max-w-32 truncate text-left text-[var(--brand)] underline-offset-2 hover:underline sm:max-w-none"
+                      >
+                        {row.fullName}
+                      </button>
+                      <PendingBadge count={row.pendingApprovalCount} />
+                    </div>
                   </th>
                   <td className="border-b border-border px-3 py-3 group-last:border-b-0 group-hover:bg-muted">
                     {row.pathName ? (

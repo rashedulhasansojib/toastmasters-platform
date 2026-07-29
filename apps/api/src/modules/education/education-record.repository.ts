@@ -1,11 +1,25 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { getPrisma, type PrismaClient } from '@toastmasters/db';
-import type { EducationRecord, EducationRecordLevel } from '@toastmasters/contracts';
+import type {
+  EducationRecord,
+  EducationRecordLevel,
+  SpeechApprovalStatus,
+} from '@toastmasters/contracts';
 import { PRISMA_CLIENT } from '../../common/db/prisma-client.token';
 
 type EducationRecordRow = Awaited<ReturnType<PrismaClient['educationRecord']['create']>>;
 type PathwayProjectRow = Awaited<ReturnType<PrismaClient['pathwayProject']['findMany']>>[number];
 type SpeechSlotRow = Awaited<ReturnType<PrismaClient['speechSlot']['findMany']>>[number];
+
+/**
+ * M11 Slice 3: the join key from a delivered slot to its `SpeechApproval`
+ * status. Only the fields the confirm-guard needs are pulled — the projector
+ * repository loads the full row for the roster.
+ */
+export interface SlotApproval {
+  speechSlotId: string;
+  status: SpeechApprovalStatus;
+}
 
 function toEducationRecord(row: EducationRecordRow): EducationRecord {
   return {
@@ -98,5 +112,20 @@ export class EducationRecordRepository {
         OR: [{ speakerPersonId: personId }, { speakerPersonId: null, requestedBy: personId }],
       },
     });
+  }
+
+  /**
+   * M11 Slice 3: the VPE-approval status for a set of delivered slot ids.
+   * `markLevelComplete` and `confirmLevel` gate on `status = 'approved'`;
+   * a slot with no `SpeechApproval` row on file is grandfathered (its
+   * delivery predates the M11 workflow) and simply isn't returned here.
+   */
+  async findApprovalsForSlots(slotIds: string[]): Promise<SlotApproval[]> {
+    if (slotIds.length === 0) return [];
+    const rows = await this.db.speechApproval.findMany({
+      where: { speechSlotId: { in: slotIds } },
+      select: { speechSlotId: true, status: true },
+    });
+    return rows.map((row) => ({ speechSlotId: row.speechSlotId, status: row.status }));
   }
 }

@@ -15,6 +15,7 @@ import { MeetingModule } from './modules/meeting/meeting.module';
 import { MembershipModule } from './modules/membership/membership.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { LibraryModule } from './modules/library/library.module';
+import { OperationsModule } from './modules/operations/operations.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { LibraryModule } from './modules/library/library.module';
     MembershipModule,
     FinanceModule,
     LibraryModule,
+    OperationsModule,
   ],
   // Global guard chain: authenticate first (JwtAuthGuard), then authorize
   // (ResourceGuard). Both honour @Public(). Default-deny everywhere else.

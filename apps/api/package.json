@@ -14,6 +14,7 @@
     "test:cov": "vitest run --coverage",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:int": "vitest run --config vitest.integration.config.ts",
+    "bootstrap:admin": "dotenv -e ../../.env -- tsx scripts/bootstrap-admin.ts",
     "clean": "rm -rf dist .turbo coverage"
   },
   "dependencies": {

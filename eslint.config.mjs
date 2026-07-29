@@ -63,7 +63,7 @@ export default tseslint.config(
 
   // Scripts and test harnesses may log.
   {
-    files: ['scripts/**', '**/*.spec.ts', '**/*.e2e-spec.ts'],
+    files: ['scripts/**', '**/scripts/**', '**/*.spec.ts', '**/*.e2e-spec.ts'],
     rules: { 'no-console': 'off' },
   },
 

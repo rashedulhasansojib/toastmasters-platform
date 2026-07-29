@@ -78,6 +78,14 @@ model OrgUnit {
   contentPlanItems       ContentPlanItem[]
   inventoryItems         InventoryItem[]
   inventoryMovements     InventoryMovement[]
+  areaVisitReportsAsArea AreaVisitReport[] @relation("AreaVisitReportArea")
+  areaVisitReportsAsClub AreaVisitReport[] @relation("AreaVisitReportClub")
+  presidentContactLogsAsArea PresidentContactLog[] @relation("PresidentContactLogArea")
+  presidentContactLogsAsClub PresidentContactLog[] @relation("PresidentContactLogClub")
+  clubSuccessPlans       ClubSuccessPlan[]
+  dcpProjections         DcpProjection[]
+  clubHealthSnapshots    ClubHealthSnapshot[]
+  tickets                Ticket[]
 
   @@map("org_unit")
 }
@@ -136,6 +144,12 @@ model Person {
   contentPlanItemsAssigned  ContentPlanItem[]
   inventoryItemsCustodied   InventoryItem[]
   inventoryMovementsMade    InventoryMovement[]
+  areaVisitReportsFiled     AreaVisitReport[]
+  presidentContactLogsMade  PresidentContactLog[]
+  clubSuccessPlansSubmitted ClubSuccessPlan[]
+  ticketsCreated            Ticket[]           @relation("TicketCreatedBy")
+  ticketsResolved           Ticket[]           @relation("TicketResolvedBy")
+  ticketCommentsMade        TicketComment[]
 
   @@map("person")
 }
@@ -245,6 +259,10 @@ model ProgramYear {
   financialReports FinancialReport[]
   libraryItems     LibraryItem[]
   contentPlanItems ContentPlanItem[]
+  areaVisitReports AreaVisitReport[]
+  presidentContactLogs PresidentContactLog[]
+  clubSuccessPlans ClubSuccessPlan[]
+  dcpProjections   DcpProjection[]
 
   @@map("program_year")
 }
@@ -1400,4 +1418,221 @@ model InventoryMovement {
 
   @@index([itemId, at(sort: Desc)], map: "inv_movements")
   @@map("inventory_movement")
+}
+
+// ---------------------------------------------------------------------------
+// M6: Area tier — system-design.md §13.4, §16
+// ---------------------------------------------------------------------------
+
+enum AreaVisitRound {
+  R1
+  R2
+
+  @@map("area_visit_round")
+}
+
+enum AreaVisitMode {
+  in_person
+  online
+
+  @@map("area_visit_mode")
+}
+
+enum AreaVisitReportStatus {
+  draft
+  submitted
+
+  @@map("area_visit_report_status")
+}
+
+/** M6 Slice 1: system-design.md §16.2. Club-scoped (clubUnitId is the scope key — the filing Area Director's grant authorizes via org-tree prefix inheritance, not a second scoping mechanism; see the M6 plan doc). */
+model AreaVisitReport {
+  id            String                 @id @default(uuid()) @db.Uuid
+  areaUnitId    String                 @map("area_unit_id") @db.Uuid
+  areaUnit      OrgUnit                @relation("AreaVisitReportArea", fields: [areaUnitId], references: [id])
+  clubUnitId    String                 @map("club_unit_id") @db.Uuid
+  clubUnit      OrgUnit                @relation("AreaVisitReportClub", fields: [clubUnitId], references: [id])
+  programYearId String                 @map("program_year_id")
+  programYear   ProgramYear            @relation(fields: [programYearId], references: [id])
+  round         AreaVisitRound
+  visitedAt     DateTime               @map("visited_at") @db.Date
+  visitMode     AreaVisitMode          @map("visit_mode")
+  byPersonId    String                 @map("by_person_id") @db.Uuid
+  byPerson      Person                 @relation(fields: [byPersonId], references: [id])
+  momentsOfTruth Json                  @map("moments_of_truth")
+  clubGoalsDiscussed String?           @map("club_goals_discussed")
+  supportRequestedFromDistrict String?  @map("support_requested_from_district")
+  status        AreaVisitReportStatus  @default(draft)
+  submittedAt   DateTime?              @map("submitted_at")
+
+  @@unique([clubUnitId, programYearId, round])
+  @@map("area_visit_report")
+}
+
+enum PresidentContactMethod {
+  call
+  message
+  meeting
+  email
+
+  @@map("president_contact_method")
+}
+
+/** M6 Slice 1: system-design.md §16.2. */
+model PresidentContactLog {
+  id            String                  @id @default(uuid()) @db.Uuid
+  areaUnitId    String                  @map("area_unit_id") @db.Uuid
+  areaUnit      OrgUnit                 @relation("PresidentContactLogArea", fields: [areaUnitId], references: [id])
+  clubUnitId    String                  @map("club_unit_id") @db.Uuid
+  clubUnit      OrgUnit                 @relation("PresidentContactLogClub", fields: [clubUnitId], references: [id])
+  programYearId String                  @map("program_year_id")
+  programYear   ProgramYear             @relation(fields: [programYearId], references: [id])
+  month         String
+  contactedAt   DateTime                @map("contacted_at")
+  byPersonId    String                  @map("by_person_id") @db.Uuid
+  byPerson      Person                  @relation(fields: [byPersonId], references: [id])
+  method        PresidentContactMethod
+  dcpDiscussed  Boolean                 @map("dcp_discussed")
+  note          String?
+
+  @@map("president_contact_log")
+}
+
+enum ClubSuccessPlanStatus {
+  draft
+  submitted
+  revised
+
+  @@map("club_success_plan_status")
+}
+
+/** M6 Slice 2: system-design.md §13.4. Renders against the nightly DcpProjection goal-by-goal on the President's dashboard. */
+model ClubSuccessPlan {
+  id            String                 @id @default(uuid()) @db.Uuid
+  clubUnitId    String                 @map("club_unit_id") @db.Uuid
+  clubUnit      OrgUnit                @relation(fields: [clubUnitId], references: [id])
+  programYearId String                 @map("program_year_id")
+  programYear   ProgramYear            @relation(fields: [programYearId], references: [id])
+  goalTargets   Json                   @map("goal_targets")
+  membershipTarget Int                 @map("membership_target")
+  strengths     String?
+  challenges    String?
+  contributors  Json                   @default("[]")
+  status        ClubSuccessPlanStatus  @default(draft)
+  submittedAt   DateTime?              @map("submitted_at")
+  submittedBy   String?                @map("submitted_by") @db.Uuid
+  submittedByPerson Person?            @relation(fields: [submittedBy], references: [id])
+  tiSubmissionConfirmedAt DateTime?    @map("ti_submission_confirmed_at")
+  reviews       Json                   @default("[]")
+
+  @@unique([clubUnitId, programYearId])
+  @@map("club_success_plan")
+}
+
+enum DcpProjectedLevel {
+  none
+  distinguished
+  select_distinguished
+  presidents_distinguished
+  smedley_distinguished
+
+  @@map("dcp_projected_level")
+}
+
+/** M6 Slice 3: system-design.md §16.3, FR-OVS-5. Recomputed in place nightly — a projection, not an append-only fact log. See the M6 plan doc's scope-sequencing note on goals 1-6/9 pending M7. */
+model DcpProjection {
+  id            String            @id @default(uuid()) @db.Uuid
+  clubUnitId    String            @map("club_unit_id") @db.Uuid
+  clubUnit      OrgUnit           @relation(fields: [clubUnitId], references: [id])
+  programYearId String            @map("program_year_id")
+  programYear   ProgramYear       @relation(fields: [programYearId], references: [id])
+  goals         Json
+  membershipQualifierMet Boolean  @map("membership_qualifier_met")
+  clubSuccessPlanQualifierMet Boolean @map("club_success_plan_qualifier_met")
+  projectedLevel DcpProjectedLevel @default(none) @map("projected_level")
+  computedAt    DateTime          @default(now()) @map("computed_at")
+
+  @@unique([clubUnitId, programYearId])
+  @@map("dcp_projection")
+}
+
+/**
+ * M6 Slice 4: system-design.md §19.4. Club-level aggregate — never member
+ * detail (FR-OVS-3). Immutable once written by the monthly worker job.
+ * `attendanceAvg` is nullable: no member-level attendance fact exists
+ * anywhere in the schema (M3 built guest attendance via `ProspectVisit`
+ * and role fulfillment via `MeetingRoleAssignment`, but never a per-member
+ * attendance record) — null here is an honest "not tracked yet", not a
+ * fabricated zero. See the M6 plan doc.
+ */
+model ClubHealthSnapshot {
+  id             String   @id @default(uuid()) @db.Uuid
+  clubUnitId     String   @map("club_unit_id") @db.Uuid
+  clubUnit       OrgUnit  @relation(fields: [clubUnitId], references: [id])
+  yearMonth      String   @map("year_month") // "2026-09"
+  meetingsHeld   Int      @map("meetings_held")
+  attendanceAvg  Decimal? @map("attendance_avg") @db.Decimal(5, 2)
+  memberCount    Int      @map("member_count")
+  guestCount     Int      @map("guest_count")
+  rolesFilledPct Decimal  @map("roles_filled_pct") @db.Decimal(5, 2)
+  speechesGiven  Int      @map("speeches_given")
+  computedAt     DateTime @default(now()) @map("computed_at")
+
+  @@unique([clubUnitId, yearMonth])
+  @@map("club_health_snapshot")
+}
+
+enum TicketSeverity {
+  low
+  medium
+  high
+
+  @@map("ticket_severity")
+}
+
+enum TicketStatus {
+  open
+  active
+  resolved
+
+  @@map("ticket_status")
+}
+
+/** M6 Slice 5: system-design.md §16.1, FR-OVS-1. `scopeUnitId` may be any org-tree unit, not only a club — not clubScoped in the resource catalog. `parties` tags roles as well as people so tickets survive the 1 July handover. */
+model Ticket {
+  id            String         @id @default(uuid()) @db.Uuid
+  scopeUnitId   String         @map("scope_unit_id") @db.Uuid
+  scopeUnit     OrgUnit        @relation(fields: [scopeUnitId], references: [id])
+  title         String
+  body          String
+  severity      TicketSeverity @default(medium)
+  status        TicketStatus   @default(open)
+  createdByPersonId String    @map("created_by_person_id") @db.Uuid
+  createdByPerson Person       @relation("TicketCreatedBy", fields: [createdByPersonId], references: [id])
+  parties       Json           @default("[]")
+  resolvedBy    String?        @map("resolved_by") @db.Uuid
+  resolvedByPerson Person?     @relation("TicketResolvedBy", fields: [resolvedBy], references: [id])
+  resolvedAt    DateTime?      @map("resolved_at")
+  resolutionNote String?       @map("resolution_note")
+  reopenedFromId String?       @unique @map("reopened_from_id") @db.Uuid
+  reopenedFrom  Ticket?        @relation("TicketReopen", fields: [reopenedFromId], references: [id])
+  reopenedInto  Ticket?        @relation("TicketReopen")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  comments      TicketComment[]
+
+  @@index([scopeUnitId], map: "ticket_scope")
+  @@map("ticket")
+}
+
+/** Append-only — REVOKE UPDATE, DELETE in the migration. */
+model TicketComment {
+  id         String   @id @default(uuid()) @db.Uuid
+  ticketId   String   @map("ticket_id") @db.Uuid
+  ticket     Ticket   @relation(fields: [ticketId], references: [id])
+  byPersonId String   @map("by_person_id") @db.Uuid
+  byPerson   Person   @relation(fields: [byPersonId], references: [id])
+  body       String
+  at         DateTime @default(now())
+
+  @@map("ticket_comment")
 }

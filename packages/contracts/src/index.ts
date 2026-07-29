@@ -7,3 +7,5 @@ export * from './membership';
 export * from './finance';
 export * from './library';
 export * from './operations';
+export * from './quality';
+export * from './governance';

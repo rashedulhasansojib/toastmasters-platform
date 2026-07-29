@@ -6,6 +6,12 @@ import { parseEnv, redisConnectionOptions, type Env } from '@toastmasters/config
 import { PROSPECT_RETENTION_QUEUE } from './processors/prospect-retention.processor';
 import { ProspectRetentionProcessor } from './processors/prospect-retention.processor';
 import { ProspectRetentionScheduler } from './processors/prospect-retention.scheduler';
+import { DCP_PROJECTION_QUEUE } from './processors/dcp-projection.processor';
+import { DcpProjectionProcessor } from './processors/dcp-projection.processor';
+import { DcpProjectionScheduler } from './processors/dcp-projection.scheduler';
+import { CLUB_HEALTH_SNAPSHOT_QUEUE } from './processors/club-health-snapshot.processor';
+import { ClubHealthSnapshotProcessor } from './processors/club-health-snapshot.processor';
+import { ClubHealthSnapshotScheduler } from './processors/club-health-snapshot.scheduler';
 
 // The worker is a long-running process; validate env once at module load.
 const env: Env = parseEnv();
@@ -25,7 +31,16 @@ const env: Env = parseEnv();
     }),
     BullModule.forRoot({ connection: redisConnectionOptions(env.REDIS_URL) }),
     BullModule.registerQueue({ name: PROSPECT_RETENTION_QUEUE }),
+    BullModule.registerQueue({ name: DCP_PROJECTION_QUEUE }),
+    BullModule.registerQueue({ name: CLUB_HEALTH_SNAPSHOT_QUEUE }),
   ],
-  providers: [ProspectRetentionProcessor, ProspectRetentionScheduler],
+  providers: [
+    ProspectRetentionProcessor,
+    ProspectRetentionScheduler,
+    DcpProjectionProcessor,
+    DcpProjectionScheduler,
+    ClubHealthSnapshotProcessor,
+    ClubHealthSnapshotScheduler,
+  ],
 })
 export class AppModule {}

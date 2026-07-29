@@ -82,7 +82,19 @@ describe('Authorisation matrix (generated from role_template × resource_catalog
     { resource: 'library.item', actions: ['read', 'create', 'update'] },
     { resource: 'library.content_plan', actions: ['read', 'create', 'update'] },
     { resource: 'operations.inventory', actions: ['read', 'create', 'update'] },
+    { resource: 'quality.area_visit_report', actions: ['read', 'create', 'update'] },
+    { resource: 'quality.president_contact_log', actions: ['read', 'create'] },
+    { resource: 'quality.dcp_projection', actions: ['read'] },
+    { resource: 'quality.health_snapshot', actions: ['read'] },
+    { resource: 'quality.ticket', actions: ['read', 'create', 'update'] },
+    { resource: 'governance.club_success_plan', actions: ['read', 'create', 'update'] },
   ];
+  // area_director/division_director (tier area/division, scopeRule
+  // self_subtree) aren't exercised here — this fixture only builds a
+  // region/district/club tree; adding area-tier coverage means a new area
+  // org unit, not a one-line addition to this array. Their grants are
+  // still real seeded data (M6 Slice 6), just not asserted by this
+  // generated matrix yet.
 
   /**
    * system_admin is derived specially, matching access.repository.ts's real

@@ -13,6 +13,7 @@ import { InvitationRateLimiter } from './invitation-rate-limiter.service';
 import { InvitationService } from './invitation.service';
 import { IdentityController } from './identity.controller';
 import { InvitationController } from './invitation.controller';
+import { ClubMemberController } from './club-member.controller';
 
 @Module({
   imports: [AccessModule, EmailModule],
@@ -31,7 +32,7 @@ import { InvitationController } from './invitation.controller';
     // is harmless.
     PasswordService,
   ],
-  controllers: [IdentityController, InvitationController],
+  controllers: [IdentityController, InvitationController, ClubMemberController],
   exports: [
     PersonRepository,
     ClubMembershipRepository,

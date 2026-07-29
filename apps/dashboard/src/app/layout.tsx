@@ -29,6 +29,8 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                   <Link href={`/clubs/${session.activeUnitId}/finance`}>Finance</Link>
                   <Link href={`/clubs/${session.activeUnitId}/library`}>Library</Link>
                   <Link href={`/clubs/${session.activeUnitId}/inventory`}>Inventory</Link>
+                  <Link href={`/clubs/${session.activeUnitId}/quality`}>Quality</Link>
+                  <Link href="/tickets">Tickets</Link>
                 </>
               )}
               <span>{session.fullName}</span>

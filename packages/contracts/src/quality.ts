@@ -218,3 +218,20 @@ export type CreateTicketCommentRequest = z.infer<typeof createTicketCommentReque
 
 export const resolveTicketRequestSchema = z.object({ note: z.string().min(1) }).strict();
 export type ResolveTicketRequest = z.infer<typeof resolveTicketRequestSchema>;
+
+/** M6 Slice 7: FR-OVS-6 — the Area dashboard leads with visit compliance (R1/R2 filed vs. the 75% threshold), not attendance. */
+export const areaDashboardClubStatus = z.object({
+  clubUnitId: z.uuid(),
+  clubName: z.string(),
+  r1Submitted: z.boolean(),
+  r2Submitted: z.boolean(),
+});
+export type AreaDashboardClubStatus = z.infer<typeof areaDashboardClubStatus>;
+
+export const areaDashboardResponse = z.object({
+  clubs: z.array(areaDashboardClubStatus),
+  totalClubs: z.number().int(),
+  r1CompliancePct: z.number(),
+  r2CompliancePct: z.number(),
+});
+export type AreaDashboardResponse = z.infer<typeof areaDashboardResponse>;

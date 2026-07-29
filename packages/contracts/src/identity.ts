@@ -51,6 +51,19 @@ export const clubMembership = z.object({
 });
 export type ClubMembership = z.infer<typeof clubMembership>;
 
+/**
+ * M9: the club's own roster, for member pickers on the meeting page.
+ * Deliberately narrower than `person` — a picker needs a name and an id,
+ * not email/phone/photo/TI number, and this is read by every club role.
+ */
+export const clubMemberSummary = z.object({
+  personId: z.uuid(),
+  fullName: z.string().min(1),
+  memberType: clubMemberType,
+  localStatus: clubMembershipLocalStatus,
+});
+export type ClubMemberSummary = z.infer<typeof clubMemberSummary>;
+
 export const roleAssignmentStatus = z.enum(['pending', 'active', 'ended', 'revoked']);
 export type RoleAssignmentStatus = z.infer<typeof roleAssignmentStatus>;
 

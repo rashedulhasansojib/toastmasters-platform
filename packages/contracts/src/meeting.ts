@@ -8,12 +8,39 @@ import { z } from 'zod';
 export const meetingStatus = z.enum(['draft', 'published', 'in_progress', 'closed', 'cancelled']);
 export type MeetingStatus = z.infer<typeof meetingStatus>;
 
+/**
+ * Descriptive fields carried over from the legacy portal. All nullable so
+ * draft meetings stay cheap to create; edited from the detail or create
+ * form. `wordOfDay` and `tableTopicQuestions` are JSON columns rather than
+ * side tables — they don't have relationships to other rows.
+ */
+export const wordOfDay = z.object({
+  word: z.string().max(80).default(''),
+  partOfSpeech: z.string().max(30).default(''),
+  meaning: z.string().max(500).default(''),
+  example: z.string().max(500).default(''),
+});
+export type WordOfDay = z.infer<typeof wordOfDay>;
+
+export const tableTopicQuestion = z.object({
+  text: z.string().min(1).max(500),
+  completed: z.boolean().default(false),
+});
+export type TableTopicQuestion = z.infer<typeof tableTopicQuestion>;
+
 export const meeting = z.object({
   id: z.uuid(),
   clubUnitId: z.uuid(),
   programYearId: z.string().min(1),
   scheduledAt: z.iso.datetime(),
   status: meetingStatus,
+  title: z.string().nullable(),
+  theme: z.string().nullable(),
+  venue: z.string().nullable(),
+  meetingNumber: z.number().int().nullable(),
+  wordOfDay: wordOfDay.nullable(),
+  tableTopicQuestions: z.array(tableTopicQuestion).nullable(),
+  joinUrl: z.string().nullable(),
   createdBy: z.uuid(),
   createdAt: z.iso.datetime(),
 });
@@ -30,9 +57,31 @@ export const createMeetingRequestSchema = z
   .object({
     programYearId: z.string().min(1),
     scheduledAt: z.iso.datetime(),
+    title: z.string().min(1).max(200).optional(),
+    theme: z.string().min(1).max(200).optional(),
+    venue: z.string().min(1).max(200).optional(),
+    meetingNumber: z.number().int().positive().optional(),
+    wordOfDay: wordOfDay.optional(),
+    tableTopicQuestions: z.array(tableTopicQuestion).optional(),
+    joinUrl: z.string().min(1).max(500).optional(),
   })
   .strict();
 export type CreateMeetingRequest = z.infer<typeof createMeetingRequestSchema>;
+
+/** M9: partial update of descriptive metadata. Never touches status/scheduledAt — those have lifecycle endpoints. */
+export const updateMeetingRequestSchema = z
+  .object({
+    title: z.string().max(200).nullable().optional(),
+    theme: z.string().max(200).nullable().optional(),
+    venue: z.string().max(200).nullable().optional(),
+    meetingNumber: z.number().int().positive().nullable().optional(),
+    wordOfDay: wordOfDay.nullable().optional(),
+    tableTopicQuestions: z.array(tableTopicQuestion).nullable().optional(),
+    joinUrl: z.string().max(500).nullable().optional(),
+    scheduledAt: z.iso.datetime().optional(),
+  })
+  .strict();
+export type UpdateMeetingRequest = z.infer<typeof updateMeetingRequestSchema>;
 
 /** M3 Slice 1: system-design.md §9.1's agendaItem[] — position is server-assigned, never client-supplied. */
 export const agendaItem = z.object({
@@ -90,10 +139,12 @@ export const meetingRoleKey = z.enum([
   'toastmaster',
   'general_evaluator',
   'table_topics_master',
+  'table_topics_evaluator',
   'timer',
   'ah_counter',
   'grammarian',
   'sergeant_at_arms',
+  'president',
   'speaker',
   'evaluator',
 ]);
@@ -171,16 +222,27 @@ export type RoleRotationSuggestion = z.infer<typeof roleRotationSuggestion>;
 export const speechSlotStatus = z.enum(['requested', 'approved', 'declined']);
 export type SpeechSlotStatus = z.infer<typeof speechSlotStatus>;
 
-/** M3 Slice 4: system-design.md §9.1's speechSlot[] — request/approval with path validation. */
+/**
+ * M3 Slice 4: system-design.md §9.1's speechSlot[] — request/approval with
+ * path validation. M9: also the agenda's "Prepared Speakers" block, so it
+ * carries the speaker/evaluator pairing and the running order.
+ *
+ * `speakerPersonId` null means the requester speaks — the self-service
+ * case. A VPE filing on someone's behalf sets it explicitly.
+ */
 export const speechSlot = z.object({
   id: z.uuid(),
   meetingId: z.uuid(),
+  position: z.number().int().nonnegative(),
   title: z.string().min(1),
   pathCode: z.string().min(1),
   projectCode: z.string().min(1),
   level: z.number().int().positive(),
   plannedDurationSeconds: z.number().int().positive(),
   requestedBy: z.uuid(),
+  speakerPersonId: z.uuid().nullable(),
+  evaluatorPersonId: z.uuid().nullable(),
+  notes: z.string().nullable(),
   status: speechSlotStatus,
   createdAt: z.iso.datetime(),
 });
@@ -193,9 +255,27 @@ export const createSpeechSlotRequestSchema = z
     pathCode: z.string().min(1),
     projectCode: z.string().min(1),
     plannedDurationSeconds: z.number().int().positive(),
+    speakerPersonId: z.uuid().optional(),
+    evaluatorPersonId: z.uuid().optional(),
+    notes: z.string().max(500).optional(),
   })
   .strict();
 export type CreateSpeechSlotRequest = z.infer<typeof createSpeechSlotRequestSchema>;
+
+/** M9: edit a slot in place from the agenda. `level` still follows the project, never the client. */
+export const updateSpeechSlotRequestSchema = z
+  .object({
+    title: z.string().min(1).optional(),
+    pathCode: z.string().min(1).optional(),
+    projectCode: z.string().min(1).optional(),
+    plannedDurationSeconds: z.number().int().positive().optional(),
+    speakerPersonId: z.uuid().nullable().optional(),
+    evaluatorPersonId: z.uuid().nullable().optional(),
+    notes: z.string().max(500).nullable().optional(),
+    position: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+export type UpdateSpeechSlotRequest = z.infer<typeof updateSpeechSlotRequestSchema>;
 
 export const decideSpeechSlotRequestSchema = z
   .object({
@@ -203,6 +283,29 @@ export const decideSpeechSlotRequestSchema = z
   })
   .strict();
 export type DecideSpeechSlotRequest = z.infer<typeof decideSpeechSlotRequestSchema>;
+
+/**
+ * M9: the seeded Pathways catalogue, exposed read-only so the agenda's
+ * speaker form can offer path/project pickers instead of free text. The
+ * legacy portal typed these as strings; here they resolve to the catalogue
+ * that also derives the speech's level and duration bounds.
+ */
+export const pathwayProject = z.object({
+  projectCode: z.string().min(1),
+  name: z.string().min(1),
+  level: z.number().int().positive(),
+  minMinutes: z.number().int().nonnegative(),
+  maxMinutes: z.number().int().positive(),
+});
+export type PathwayProject = z.infer<typeof pathwayProject>;
+
+export const pathwayPath = z.object({
+  pathCode: z.string().min(1),
+  name: z.string().min(1),
+  credential: z.string(),
+  projects: z.array(pathwayProject),
+});
+export type PathwayPath = z.infer<typeof pathwayPath>;
 
 export const checklistPhase = z.enum(['before', 'during', 'after']);
 export type ChecklistPhase = z.infer<typeof checklistPhase>;
@@ -424,3 +527,185 @@ export type CreateBallotRequest = z.infer<typeof createBallotRequestSchema>;
 
 export const castVoteRequestSchema = z.object({ candidatePersonId: z.uuid() }).strict();
 export type CastVoteRequest = z.infer<typeof castVoteRequestSchema>;
+
+/**
+ * M9 Slice 2: the meeting Guest List. Either a Prospect-linked row (via
+ * `prospectId`) or a manual entry with just name/email/phone/notes.
+ * `present` is editable — flip it if the guest ends up not showing.
+ */
+export const meetingGuest = z.object({
+  id: z.uuid(),
+  meetingId: z.uuid(),
+  fullName: z.string().min(1),
+  email: z.string().nullable(),
+  phone: z.string().nullable(),
+  notes: z.string().nullable(),
+  prospectId: z.uuid().nullable(),
+  present: z.boolean(),
+  addedBy: z.uuid(),
+  createdAt: z.iso.datetime(),
+});
+export type MeetingGuest = z.infer<typeof meetingGuest>;
+
+export const createMeetingGuestRequestSchema = z
+  .object({
+    fullName: z.string().min(1).max(200),
+    email: z.string().max(200).optional(),
+    phone: z.string().max(50).optional(),
+    notes: z.string().optional(),
+    prospectId: z.uuid().optional(),
+  })
+  .strict();
+export type CreateMeetingGuestRequest = z.infer<typeof createMeetingGuestRequestSchema>;
+
+export const updateMeetingGuestRequestSchema = z
+  .object({
+    fullName: z.string().min(1).max(200).optional(),
+    email: z.string().max(200).nullable().optional(),
+    phone: z.string().max(50).nullable().optional(),
+    notes: z.string().nullable().optional(),
+    present: z.boolean().optional(),
+  })
+  .strict();
+export type UpdateMeetingGuestRequest = z.infer<typeof updateMeetingGuestRequestSchema>;
+
+/**
+ * M9 Slice 3: member attendance. Append-only (NFR-4) — the client never
+ * PATCHes a row, it POSTs a correcting one, so there is no update schema.
+ */
+export const meetingAttendanceRecord = z.object({
+  id: z.uuid(),
+  meetingId: z.uuid(),
+  personId: z.uuid(),
+  present: z.boolean(),
+  recordedBy: z.uuid(),
+  recordedAt: z.iso.datetime(),
+});
+export type MeetingAttendanceRecord = z.infer<typeof meetingAttendanceRecord>;
+
+/**
+ * The roster the Attendance tab renders: the club's active members joined
+ * to the latest attendance record for each. `recordedAt` is null for a
+ * member nobody has marked yet — "not taken", distinct from "marked absent".
+ */
+export const meetingAttendanceRosterEntry = z.object({
+  personId: z.uuid(),
+  fullName: z.string(),
+  present: z.boolean(),
+  recordedAt: z.iso.datetime().nullable(),
+});
+export type MeetingAttendanceRosterEntry = z.infer<typeof meetingAttendanceRosterEntry>;
+
+export const recordMeetingAttendanceRequestSchema = z
+  .object({
+    entries: z.array(z.object({ personId: z.uuid(), present: z.boolean() })).min(1),
+  })
+  .strict();
+export type RecordMeetingAttendanceRequest = z.infer<typeof recordMeetingAttendanceRequestSchema>;
+
+/** M9 Slice 4: free-form per-meeting notes and links. */
+export const meetingResource = z.object({
+  id: z.uuid(),
+  meetingId: z.uuid(),
+  position: z.number().int().positive(),
+  title: z.string(),
+  description: z.string().nullable(),
+  createdBy: z.uuid(),
+  createdAt: z.iso.datetime(),
+});
+export type MeetingResource = z.infer<typeof meetingResource>;
+
+export const createMeetingResourceRequestSchema = z
+  .object({
+    title: z.string().min(1).max(200),
+    description: z.string().max(2000).optional(),
+  })
+  .strict();
+export type CreateMeetingResourceRequest = z.infer<typeof createMeetingResourceRequestSchema>;
+
+export const updateMeetingResourceRequestSchema = z
+  .object({
+    title: z.string().min(1).max(200).optional(),
+    description: z.string().max(2000).nullable().optional(),
+  })
+  .strict();
+export type UpdateMeetingResourceRequest = z.infer<typeof updateMeetingResourceRequestSchema>;
+
+/**
+ * M9 Slice 5: the legacy portal's reusable meeting template — default role
+ * assignments, theme, venue, start time, word of the day and table topics,
+ * i.e. everything "create meeting from template" copies onto the new
+ * meeting.
+ *
+ * Deliberately no agenda line items: a Toastmasters meeting's running order
+ * is fixed and derived from the roles and speakers (see the API's
+ * `agenda-schedule.ts`), so there is nothing per-meeting to template. Nor
+ * does it carry speakers — who speaks changes every week, which is exactly
+ * why the legacy portal emptied `speakers` when applying a template.
+ */
+export const meetingTemplateRole = z.object({
+  roleKey: meetingRoleKey,
+  personId: z.uuid(),
+});
+export type MeetingTemplateRole = z.infer<typeof meetingTemplateRole>;
+
+export const meetingTemplate = z.object({
+  id: z.uuid(),
+  clubUnitId: z.uuid(),
+  name: z.string(),
+  theme: z.string().nullable(),
+  venue: z.string().nullable(),
+  startTime: z.string().nullable(),
+  joinUrl: z.string().nullable(),
+  roles: z.array(meetingTemplateRole),
+  wordOfDay: wordOfDay.nullable(),
+  tableTopicQuestions: z.array(tableTopicQuestion).nullable(),
+  isActive: z.boolean(),
+  createdBy: z.uuid(),
+  createdAt: z.iso.datetime(),
+});
+export type MeetingTemplate = z.infer<typeof meetingTemplate>;
+
+const meetingTemplateBody = {
+  name: z.string().min(1).max(100),
+  theme: z.string().max(200).nullable().optional(),
+  venue: z.string().max(200).nullable().optional(),
+  /** `HH:mm` — the default start time a meeting made from this template opens at. */
+  startTime: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'startTime must be HH:mm')
+    .nullable()
+    .optional(),
+  joinUrl: z.string().max(500).nullable().optional(),
+  roles: z.array(meetingTemplateRole).optional(),
+  wordOfDay: wordOfDay.nullable().optional(),
+  tableTopicQuestions: z.array(tableTopicQuestion).nullable().optional(),
+};
+
+export const createMeetingTemplateRequestSchema = z.object(meetingTemplateBody).strict();
+export type CreateMeetingTemplateRequest = z.infer<typeof createMeetingTemplateRequestSchema>;
+
+export const updateMeetingTemplateRequestSchema = z
+  .object({ ...meetingTemplateBody, name: meetingTemplateBody.name.optional() })
+  .strict();
+export type UpdateMeetingTemplateRequest = z.infer<typeof updateMeetingTemplateRequestSchema>;
+
+/**
+ * Creating a meeting from a template. Everything the template carries is
+ * copied onto real rows server-side in one transaction — roles become
+ * `proposed` `MeetingRoleAssignment`s. The caller still supplies date/time
+ * and may override the meeting number, exactly like the legacy
+ * "Create & Build" dialog.
+ */
+export const createMeetingFromTemplateRequestSchema = z
+  .object({
+    templateId: z.uuid(),
+    programYearId: z.string().min(1),
+    scheduledAt: z.iso.datetime(),
+    meetingNumber: z.number().int().positive().optional(),
+    theme: z.string().min(1).max(200).optional(),
+  })
+  .strict();
+export type CreateMeetingFromTemplateRequest = z.infer<
+  typeof createMeetingFromTemplateRequestSchema
+>;

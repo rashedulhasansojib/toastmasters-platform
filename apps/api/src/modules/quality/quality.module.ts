@@ -5,6 +5,7 @@ import { OrgModule } from '../org/org.module';
 import { AreaVisitReportRepository } from './area-visit-report.repository';
 import { AreaVisitReportController } from './area-visit-report.controller';
 import { AreaDashboardController } from './area-dashboard.controller';
+import { DivisionDashboardController } from './division-dashboard.controller';
 import { PresidentContactLogRepository } from './president-contact-log.repository';
 import { PresidentContactLogController } from './president-contact-log.controller';
 import { DcpProjectionRepository } from './dcp-projection.repository';
@@ -27,6 +28,7 @@ import { TicketController } from './ticket.controller';
   controllers: [
     AreaVisitReportController,
     AreaDashboardController,
+    DivisionDashboardController,
     PresidentContactLogController,
     DcpProjectionController,
     ClubHealthSnapshotController,

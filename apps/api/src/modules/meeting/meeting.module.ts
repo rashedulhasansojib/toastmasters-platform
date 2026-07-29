@@ -58,6 +58,11 @@ import { PublicMeetingController } from './public-meeting.controller';
     AgendaPrintController,
     PublicMeetingController,
   ],
-  exports: [MeetingRepository, CapabilityTokenRepository, CapabilityTokenService],
+  exports: [
+    MeetingRepository,
+    CapabilityTokenRepository,
+    CapabilityTokenService,
+    MeetingRoleAssignmentRepository,
+  ],
 })
 export class MeetingModule {}

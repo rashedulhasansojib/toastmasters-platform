@@ -92,6 +92,9 @@ model OrgUnit {
   mentorAvailabilities   MentorAvailability[]
   onboardingTracks       OnboardingTrack[]
   onboardingProgress     OnboardingProgress[]
+  excomMeetings          ExComMeeting[]
+  minutes                Minutes[]
+  supportRequests        SupportRequest[]
 
   @@map("org_unit")
 }
@@ -164,6 +167,12 @@ model Person {
   mentorshipsAssigned       MentorshipPairing[] @relation("MentorshipAssignedBy")
   mentorAvailability        MentorAvailability[]
   onboardingProgress        OnboardingProgress[]
+  excomMeetingsCalled       ExComMeeting[]
+  motionsMoved              Motion[]             @relation("MotionMovedBy")
+  motionsSeconded           Motion[]             @relation("MotionSecondedBy")
+  minutesDrafted            Minutes[]            @relation("MinutesDraftedBy")
+  minutesApproved           Minutes[]            @relation("MinutesApprovedBy")
+  supportProfile            SupportProfile?
 
   @@map("person")
 }
@@ -278,6 +287,8 @@ model ProgramYear {
   clubSuccessPlans ClubSuccessPlan[]
   dcpProjections   DcpProjection[]
   mentorshipPairings MentorshipPairing[]
+  excomMeetings      ExComMeeting[]
+  minutes            Minutes[]
 
   @@map("program_year")
 }
@@ -320,6 +331,8 @@ model Meeting {
   contentPlanItems ContentPlanItem[]
   inventoryMovements InventoryMovement[]
   speechEvaluations SpeechEvaluation[]
+  minutes          Minutes[]
+  supportRequests  SupportRequest[]
 
   @@map("meeting")
 }
@@ -1310,6 +1323,8 @@ model LibraryItem {
   uploadedAt       DateTime              @default(now()) @map("uploaded_at")
   archivedAt       DateTime?             @map("archived_at")
 
+  minutesPublished Minutes[]
+
   @@index([orgUnitId, kind, category], map: "library_browse")
   @@index([reviewBy], map: "library_review")
   @@map("library_item")
@@ -1852,4 +1867,173 @@ model OnboardingProgress {
   nudgedAt    DateTime?       @map("nudged_at")
 
   @@map("onboarding_progress")
+}
+
+// ---------------------------------------------------------------------------
+// M8: Governance & oversight — system-design.md §13, §17
+// ---------------------------------------------------------------------------
+
+enum ExComMeetingStatus {
+  scheduled
+  in_progress
+  minuted
+  approved
+
+  @@map("excom_meeting_status")
+}
+
+/** M8 Slice 1: system-design.md §13.1, FR-GOV-1. */
+model ExComMeeting {
+  id            String             @id @default(uuid()) @db.Uuid
+  orgUnitId     String             @map("org_unit_id") @db.Uuid
+  orgUnit       OrgUnit            @relation(fields: [orgUnitId], references: [id])
+  programYearId String             @map("program_year_id")
+  programYear   ProgramYear        @relation(fields: [programYearId], references: [id])
+  heldAt        DateTime           @map("held_at")
+  location      String
+  calledBy      String             @map("called_by") @db.Uuid
+  calledByPerson Person            @relation(fields: [calledBy], references: [id])
+  attendees     Json               @default("[]")
+  quorumRule    String             @map("quorum_rule")
+  quorumMet     Boolean            @default(false) @map("quorum_met")
+  agenda        Json               @default("[]")
+  status        ExComMeetingStatus @default(scheduled)
+  createdAt     DateTime           @default(now()) @map("created_at")
+  motions       Motion[]
+  minutes       Minutes[]
+
+  @@map("excom_meeting")
+}
+
+enum MotionOutcome {
+  carried
+  failed
+  withdrawn
+  tabled
+  no_second
+
+  @@map("motion_outcome")
+}
+
+/**
+ * M8 Slice 2: system-design.md §13.2, FR-GOV-2. `vote.record` names each
+ * voter — attributable, the opposite of M3's anonymous `Vote.voterHash`
+ * award ballots. A `carried` motion with `effectiveFrom` can drive
+ * downstream action rather than sitting inert in a document.
+ */
+model Motion {
+  id                 String        @id @default(uuid()) @db.Uuid
+  excomMeetingId     String        @map("excom_meeting_id") @db.Uuid
+  excomMeeting       ExComMeeting  @relation(fields: [excomMeetingId], references: [id])
+  seq                Int
+  text               String
+  movedByPersonId    String        @map("moved_by_person_id") @db.Uuid
+  movedByPerson      Person        @relation("MotionMovedBy", fields: [movedByPersonId], references: [id])
+  secondedByPersonId String?       @map("seconded_by_person_id") @db.Uuid
+  secondedByPerson   Person?       @relation("MotionSecondedBy", fields: [secondedByPersonId], references: [id])
+  discussion         String?
+  vote               Json?
+  outcome            MotionOutcome @default(no_second)
+  effectiveFrom      DateTime?     @map("effective_from") @db.Date
+  supersedesMotionId String?       @unique @map("supersedes_motion_id") @db.Uuid
+  supersedesMotion   Motion?       @relation("MotionSupersede", fields: [supersedesMotionId], references: [id])
+  supersededBy       Motion?       @relation("MotionSupersede")
+  createdAt          DateTime      @default(now()) @map("created_at")
+
+  @@unique([excomMeetingId, seq])
+  @@map("motion")
+}
+
+enum MinutesSourceKind {
+  excom
+  club_meeting
+
+  @@map("minutes_source_kind")
+}
+
+enum MinutesVisibility {
+  officers
+  members
+  public
+
+  @@map("minutes_visibility")
+}
+
+/**
+ * M8 Slice 3: system-design.md §13.3, FR-GOV-3/4/5. Approved at the
+ * *following* meeting, then immutable — a correction is a new version via
+ * `supersedesId`, never an edit. `visibility` has deliberately no
+ * `@default` — open decision 9 (CLAUDE.md §2) is still unresolved; every
+ * draft must choose explicitly rather than the schema presuming an answer.
+ */
+model Minutes {
+  id                String            @id @default(uuid()) @db.Uuid
+  orgUnitId         String            @map("org_unit_id") @db.Uuid
+  orgUnit           OrgUnit           @relation(fields: [orgUnitId], references: [id])
+  programYearId     String            @map("program_year_id")
+  programYear       ProgramYear       @relation(fields: [programYearId], references: [id])
+  sourceKind        MinutesSourceKind @map("source_kind")
+  excomMeetingId    String?           @map("excom_meeting_id") @db.Uuid
+  excomMeeting      ExComMeeting?     @relation(fields: [excomMeetingId], references: [id])
+  clubMeetingId     String?           @map("club_meeting_id") @db.Uuid
+  clubMeeting       Meeting?          @relation(fields: [clubMeetingId], references: [id])
+  draftedBy         String            @map("drafted_by") @db.Uuid
+  draftedByPerson   Person            @relation("MinutesDraftedBy", fields: [draftedBy], references: [id])
+  draftedAt         DateTime          @default(now()) @map("drafted_at")
+  body              String
+  approvedAt        DateTime?         @map("approved_at")
+  approvedByPersonId String?          @map("approved_by_person_id") @db.Uuid
+  approvedByPerson  Person?           @relation("MinutesApprovedBy", fields: [approvedByPersonId], references: [id])
+  publishedAt       DateTime?         @map("published_at")
+  libraryItemId     String?           @map("library_item_id") @db.Uuid
+  libraryItem       LibraryItem?      @relation(fields: [libraryItemId], references: [id])
+  visibility        MinutesVisibility
+  version           Int               @default(1)
+  supersedesId      String?           @unique @map("supersedes_id") @db.Uuid
+  supersedes        Minutes?          @relation("MinutesVersion", fields: [supersedesId], references: [id])
+  supersededBy      Minutes?          @relation("MinutesVersion")
+
+  @@map("minutes")
+}
+
+/** M8 Slice 5: system-design.md §17, FR-SUP-1/2. Opt-in (default false), coarse geohash only — never raw coordinates. */
+model SupportProfile {
+  id                String   @id @default(uuid()) @db.Uuid
+  personId          String   @unique @map("person_id") @db.Uuid
+  person            Person   @relation(fields: [personId], references: [id])
+  isDiscoverable    Boolean  @default(false) @map("is_discoverable")
+  consentAt         DateTime? @map("consent_at")
+  consentVersion    String?  @map("consent_version")
+  locations         Json     @default("[]")
+  availableRoles    String[] @default([]) @map("available_roles")
+  mentorFor         String[] @default([]) @map("mentor_for")
+  maxTravelKm       Int?     @map("max_travel_km")
+  blackoutDates     Json     @default("[]") @map("blackout_dates")
+
+  @@map("support_profile")
+}
+
+enum SupportRequestStatus {
+  open
+  filled
+  expired
+  cancelled
+
+  @@map("support_request_status")
+}
+
+/** M8 Slice 5: system-design.md §17, FR-SUP-3. An accepted invite creates a `cross_club` MeetingRoleAssignment (M3) — function-scoped for that meeting only, no education credit. */
+model SupportRequest {
+  id               String                @id @default(uuid()) @db.Uuid
+  requestingUnitId String                @map("requesting_unit_id") @db.Uuid
+  requestingUnit   OrgUnit               @relation(fields: [requestingUnitId], references: [id])
+  meetingId        String                @map("meeting_id") @db.Uuid
+  meeting          Meeting               @relation(fields: [meetingId], references: [id])
+  roleKey          MeetingRoleKey        @map("role_key")
+  neededBy         DateTime              @map("needed_by")
+  invitees         Json                  @default("[]")
+  status           SupportRequestStatus  @default(open)
+  createdAt        DateTime              @default(now()) @map("created_at")
+
+  @@map("support_request")
 }

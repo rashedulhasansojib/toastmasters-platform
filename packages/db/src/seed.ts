@@ -350,6 +350,56 @@ const RESOURCES: ResourceSeed[] = [
     clubScoped: true,
     sensitivity: 'normal',
   },
+  {
+    // M8 Slice 1/6: system-design.md §13.1, FR-GOV-1.
+    resource: 'governance.excom_meeting',
+    context: 'governance',
+    label: 'ExCom meeting',
+    allowedActions: ['read', 'create', 'update'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
+  {
+    // M8 Slice 2/6: system-design.md §13.2, FR-GOV-2. Attributable votes —
+    // not restricted the way anonymous award ballots' underlying Vote rows
+    // are, since accountability is the whole point here.
+    resource: 'governance.motion',
+    context: 'governance',
+    label: 'Motion',
+    allowedActions: ['read', 'create', 'update'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
+  {
+    // M8 Slice 3/6: system-design.md §13.3, FR-GOV-3/4/5. `approve` is the
+    // "approved at the next meeting" action — the only write that ever
+    // makes a minutes row immutable.
+    resource: 'governance.minutes',
+    context: 'governance',
+    label: 'Minutes',
+    allowedActions: ['read', 'create', 'update', 'approve'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
+  {
+    // M8 Slice 5/6: system-design.md §17, FR-SUP-1. Self-service, no
+    // club-scoped grants needed — the controller has no @ResourceScope,
+    // same self-referential shape as tickets/mine.
+    resource: 'support.profile',
+    context: 'support',
+    label: 'Cross-club support profile',
+    allowedActions: ['read', 'create', 'update'],
+    clubScoped: false,
+    sensitivity: 'normal',
+  },
+  {
+    resource: 'support.request',
+    context: 'support',
+    label: 'Cross-club support request',
+    allowedActions: ['read', 'create', 'update'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
 ];
 
 // Grants transcribed verbatim from system-design.md §7.5 for the resources
@@ -398,6 +448,16 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'education.evaluation', action: 'read' },
       { resource: 'education.mentorship', action: 'read' },
       { resource: 'education.onboarding', action: 'read' },
+      { resource: 'governance.excom_meeting', action: 'read' },
+      { resource: 'governance.excom_meeting', action: 'create' },
+      { resource: 'governance.excom_meeting', action: 'update' },
+      { resource: 'governance.motion', action: 'read' },
+      { resource: 'governance.motion', action: 'create' },
+      { resource: 'governance.motion', action: 'update' },
+      { resource: 'governance.minutes', action: 'read' },
+      { resource: 'governance.minutes', action: 'approve' },
+      { resource: 'support.request', action: 'read' },
+      { resource: 'support.request', action: 'create' },
     ],
   },
   {
@@ -448,6 +508,11 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'education.onboarding', action: 'read' },
       { resource: 'education.onboarding', action: 'create' },
       { resource: 'education.onboarding', action: 'update' },
+      { resource: 'governance.excom_meeting', action: 'read' },
+      { resource: 'governance.motion', action: 'read' },
+      { resource: 'governance.minutes', action: 'read' },
+      { resource: 'support.request', action: 'read' },
+      { resource: 'support.request', action: 'create' },
     ],
   },
   {
@@ -503,6 +568,9 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'governance.club_success_plan', action: 'update' },
       { resource: 'education.mentorship', action: 'read' },
       { resource: 'education.onboarding', action: 'read' },
+      { resource: 'governance.excom_meeting', action: 'read' },
+      { resource: 'governance.motion', action: 'read' },
+      { resource: 'governance.minutes', action: 'read' },
     ],
   },
   {
@@ -537,6 +605,8 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'education.mentorship', action: 'read', condition: 'own' },
       { resource: 'education.onboarding', action: 'read', condition: 'own' },
       { resource: 'education.onboarding', action: 'update', condition: 'own' },
+      { resource: 'governance.minutes', action: 'read', condition: 'published' },
+      { resource: 'support.request', action: 'read' },
     ],
     // finance.report is club-wide (opening/closing balances, member counts),
     // not per-member — it deliberately gets no `own`-condition grant here;
@@ -563,6 +633,9 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'library.content_plan', action: 'update' },
       { resource: 'meeting.meeting', action: 'read' },
       { resource: 'governance.club_success_plan', action: 'read' },
+      { resource: 'governance.excom_meeting', action: 'read' },
+      { resource: 'governance.motion', action: 'read' },
+      { resource: 'governance.minutes', action: 'read' },
     ],
   },
   {
@@ -586,6 +659,9 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'library.item', action: 'read' },
       { resource: 'meeting.meeting', action: 'read' },
       { resource: 'governance.club_success_plan', action: 'read' },
+      { resource: 'governance.excom_meeting', action: 'read' },
+      { resource: 'governance.motion', action: 'read' },
+      { resource: 'governance.minutes', action: 'read' },
     ],
   },
   {
@@ -608,6 +684,15 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'meeting.meeting', action: 'read' },
       { resource: 'identity.role_assignment', action: 'read' },
       { resource: 'governance.club_success_plan', action: 'read' },
+      { resource: 'governance.excom_meeting', action: 'read' },
+      { resource: 'governance.excom_meeting', action: 'create' },
+      { resource: 'governance.excom_meeting', action: 'update' },
+      { resource: 'governance.motion', action: 'read' },
+      { resource: 'governance.motion', action: 'create' },
+      { resource: 'governance.motion', action: 'update' },
+      { resource: 'governance.minutes', action: 'read' },
+      { resource: 'governance.minutes', action: 'create' },
+      { resource: 'governance.minutes', action: 'update' },
     ],
   },
   {

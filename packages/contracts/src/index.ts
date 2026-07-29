@@ -10,3 +10,4 @@ export * from './operations';
 export * from './quality';
 export * from './governance';
 export * from './education';
+export * from './support';

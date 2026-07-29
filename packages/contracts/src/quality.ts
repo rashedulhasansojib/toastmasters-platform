@@ -235,3 +235,18 @@ export const areaDashboardResponse = z.object({
   r2CompliancePct: z.number(),
 });
 export type AreaDashboardResponse = z.infer<typeof areaDashboardResponse>;
+
+/** M8 Slice 4: same shape as areaDashboardResponse, one tier up — aggregates are per-area, never per-club (FR-OVS-3). */
+export const divisionDashboardAreaStatus = z.object({
+  areaUnitId: z.uuid(),
+  areaName: z.string(),
+  totalClubs: z.number().int(),
+  r1CompliancePct: z.number(),
+  r2CompliancePct: z.number(),
+});
+export type DivisionDashboardAreaStatus = z.infer<typeof divisionDashboardAreaStatus>;
+
+export const divisionDashboardResponse = z.object({
+  areas: z.array(divisionDashboardAreaStatus),
+});
+export type DivisionDashboardResponse = z.infer<typeof divisionDashboardResponse>;

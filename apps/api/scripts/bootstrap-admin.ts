@@ -90,11 +90,21 @@ function buildBootstrapSql({
   const e = sqlLiteral(email);
   const h = sqlLiteral(passwordHash);
   const n = sqlLiteral(fullName);
-  // Person: upsert on email. PlatformRoleAssignment: insert only if a
-  // matching (person, 'system_admin', NULL) row doesn't already exist.
-  // The schema's @@unique([personId, role, orgUnitId]) does not enforce
-  // uniqueness across NULLs (see schema.prisma:797), so idempotency is
-  // done through NOT EXISTS rather than ON CONFLICT.
+  // Every statement below is idempotent so the script can be re-run to
+  // reset dev state without stacking duplicates.
+  //
+  //   1. Person: upsert on email.
+  //   2. Global system_admin grant on that person (NOT EXISTS because
+  //      @@unique doesn't enforce uniqueness across NULLs in Postgres —
+  //      see the schema comment on PlatformRoleAssignment).
+  //   3. A region root (org_unit_single_region_root allows only one).
+  //   4. A Demo Club under that region — the switcher only shows units the
+  //      person is scoped into; without one, the sidebar's club section
+  //      never renders.
+  //   5. The 2026-2027 ProgramYear (the string the login flow returns).
+  //   6. A club-scoped system_admin grant so the club appears in
+  //      switchable-units — findPlatformRoleOrgUnitIdsForPerson filters
+  //      out NULL org_unit_id.
   return `
 WITH upserted AS (
   INSERT INTO "person" (id, email, password_hash, full_name, status, mfa_enabled, permission_version, created_at)
@@ -104,15 +114,56 @@ WITH upserted AS (
     full_name = EXCLUDED.full_name,
     status = 'active'
   RETURNING id
+),
+_global_grant AS (
+  INSERT INTO "platform_role_assignment" (id, person_id, role, org_unit_id, granted_by, granted_at)
+  SELECT gen_random_uuid(), u.id, 'system_admin', NULL, u.id, now()
+  FROM upserted u
+  WHERE NOT EXISTS (
+    SELECT 1 FROM "platform_role_assignment" pra
+    WHERE pra.person_id = u.id
+      AND pra.role = 'system_admin'
+      AND pra.org_unit_id IS NULL
+  )
+  RETURNING 1
+),
+_region_new AS (
+  INSERT INTO "org_unit" (id, type, parent_id, path, depth, name, code, status, timezone, updated_at)
+  SELECT gen_random_uuid(), 'region', NULL, 'r1'::ltree, 0, 'Region', 'R1', 'active', 'Asia/Dhaka', now()
+  WHERE NOT EXISTS (SELECT 1 FROM "org_unit" WHERE type = 'region')
+  RETURNING id, path
+),
+region AS (
+  SELECT id, path FROM _region_new
+  UNION ALL
+  SELECT id, path FROM "org_unit" WHERE type = 'region' LIMIT 1
+),
+_club_new AS (
+  INSERT INTO "org_unit" (id, type, parent_id, path, depth, name, code, status, timezone, updated_at)
+  SELECT gen_random_uuid(), 'club', r.id, (r.path::text || '.demo')::ltree, 1, 'Demo Club', 'DEMO', 'active', 'Asia/Dhaka', now()
+  FROM region r
+  WHERE NOT EXISTS (SELECT 1 FROM "org_unit" WHERE code = 'DEMO' AND type = 'club')
+  RETURNING id
+),
+club AS (
+  SELECT id FROM _club_new
+  UNION ALL
+  SELECT id FROM "org_unit" WHERE code = 'DEMO' AND type = 'club' LIMIT 1
+),
+_year AS (
+  INSERT INTO "program_year" (id, starts_on, ends_on, status)
+  VALUES ('2026-2027', DATE '2026-07-01', DATE '2027-06-30', 'current')
+  ON CONFLICT (id) DO NOTHING
+  RETURNING id
 )
 INSERT INTO "platform_role_assignment" (id, person_id, role, org_unit_id, granted_by, granted_at)
-SELECT gen_random_uuid(), u.id, 'system_admin', NULL, u.id, now()
-FROM upserted u
+SELECT gen_random_uuid(), u.id, 'system_admin', c.id, u.id, now()
+FROM upserted u, club c
 WHERE NOT EXISTS (
   SELECT 1 FROM "platform_role_assignment" pra
   WHERE pra.person_id = u.id
     AND pra.role = 'system_admin'
-    AND pra.org_unit_id IS NULL
+    AND pra.org_unit_id = c.id
 );
 `.trim();
 }

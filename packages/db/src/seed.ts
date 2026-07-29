@@ -42,6 +42,19 @@ const RESOURCES: ResourceSeed[] = [
     sensitivity: 'normal',
   },
   {
+    // M9: the club's own member roster — name + person id only, so the
+    // meeting page can offer a member picker instead of asking an officer
+    // to paste a UUID. Club-scoped and granted to club roles only; the
+    // oversight tiers (area/division/district) never receive it, because
+    // they see counts and projections, never member detail (FR-OVS-3).
+    resource: 'identity.club_member',
+    context: 'identity',
+    label: 'Club member roster',
+    allowedActions: ['read'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
+  {
     resource: 'meeting.meeting',
     context: 'meeting',
     label: 'Meeting',
@@ -106,10 +119,55 @@ const RESOURCES: ResourceSeed[] = [
     sensitivity: 'normal',
   },
   {
+    // M9 Slice 2: per-meeting guest roster. Not `restricted` — same PII
+    // exposure class as `membership.prospect` (already club-scoped, no
+    // financial/evaluation-grade data).
+    resource: 'meeting.guest',
+    context: 'meeting',
+    label: 'Meeting guest',
+    allowedActions: ['read', 'create', 'update', 'delete'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
+  {
     resource: 'meeting.vote',
     context: 'meeting',
     label: 'Meeting award vote',
     allowedActions: ['create'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
+  {
+    // M9 Slice 3: member headcount for one meeting. Append-only — a
+    // correction is a new `create`, never an `update`/`delete`, so those
+    // actions are deliberately absent from the catalogue as well as
+    // REVOKEd at the DB.
+    resource: 'meeting.attendance',
+    context: 'meeting',
+    label: 'Meeting attendance record',
+    allowedActions: ['read', 'create'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
+  {
+    // M9 Slice 4: free-form per-meeting notes/links. Distinct from
+    // `library.item` (the versioned, reviewed document store) — nothing
+    // here is a stored file, so it is not `restricted`.
+    resource: 'meeting.resource',
+    context: 'meeting',
+    label: 'Meeting resource note',
+    allowedActions: ['read', 'create', 'update', 'delete'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
+  {
+    // M9 Slice 5: reusable meeting template (roles + agenda + word of the
+    // day + table topics). Wider than `meeting.agenda_item`'s template,
+    // which covers agenda line items only.
+    resource: 'meeting.template',
+    context: 'meeting',
+    label: 'Meeting template',
+    allowedActions: ['read', 'create', 'update', 'delete'],
     clubScoped: true,
     sensitivity: 'normal',
   },
@@ -423,6 +481,10 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'meeting.ballot', action: 'create' },
       { resource: 'meeting.ballot', action: 'approve' },
       { resource: 'meeting.vote', action: 'create' },
+      { resource: 'meeting.guest', action: 'read' },
+      { resource: 'meeting.attendance', action: 'read' },
+      { resource: 'meeting.resource', action: 'read' },
+      { resource: 'meeting.template', action: 'read' },
       { resource: 'finance.ledger', action: 'read' },
       { resource: 'finance.report', action: 'read' },
       { resource: 'finance.report', action: 'update' },
@@ -458,6 +520,7 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'governance.minutes', action: 'approve' },
       { resource: 'support.request', action: 'read' },
       { resource: 'support.request', action: 'create' },
+      { resource: 'identity.club_member', action: 'read' },
     ],
   },
   {
@@ -489,6 +552,21 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'meeting.ballot', action: 'create' },
       { resource: 'meeting.ballot', action: 'approve' },
       { resource: 'meeting.vote', action: 'create' },
+      { resource: 'meeting.guest', action: 'read' },
+      { resource: 'meeting.guest', action: 'create' },
+      { resource: 'meeting.guest', action: 'update' },
+      { resource: 'meeting.guest', action: 'delete' },
+      // M9: the VPE owns the meeting page end to end.
+      { resource: 'meeting.attendance', action: 'read' },
+      { resource: 'meeting.attendance', action: 'create' },
+      { resource: 'meeting.resource', action: 'read' },
+      { resource: 'meeting.resource', action: 'create' },
+      { resource: 'meeting.resource', action: 'update' },
+      { resource: 'meeting.resource', action: 'delete' },
+      { resource: 'meeting.template', action: 'read' },
+      { resource: 'meeting.template', action: 'create' },
+      { resource: 'meeting.template', action: 'update' },
+      { resource: 'meeting.template', action: 'delete' },
       { resource: 'identity.role_assignment', action: 'read' },
       { resource: 'library.governance_document', action: 'read' },
       { resource: 'library.item', action: 'read' },
@@ -513,6 +591,7 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'governance.minutes', action: 'read' },
       { resource: 'support.request', action: 'read' },
       { resource: 'support.request', action: 'create' },
+      { resource: 'identity.club_member', action: 'read' },
     ],
   },
   {
@@ -543,6 +622,7 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'library.governance_document', action: 'read' },
       { resource: 'operations.inventory', action: 'read' },
       { resource: 'governance.club_success_plan', action: 'read' },
+      { resource: 'identity.club_member', action: 'read' },
     ],
   },
   {
@@ -559,6 +639,11 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'membership.prospect', action: 'create' },
       { resource: 'membership.prospect', action: 'update' },
       { resource: 'meeting.meeting', action: 'read' },
+      { resource: 'meeting.guest', action: 'read' },
+      { resource: 'meeting.guest', action: 'create' },
+      { resource: 'meeting.guest', action: 'update' },
+      { resource: 'meeting.guest', action: 'delete' },
+      { resource: 'meeting.attendance', action: 'read' },
       { resource: 'identity.role_assignment', action: 'read' },
       { resource: 'library.governance_document', action: 'read' },
       { resource: 'library.item', action: 'read' },
@@ -571,6 +656,7 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'governance.excom_meeting', action: 'read' },
       { resource: 'governance.motion', action: 'read' },
       { resource: 'governance.minutes', action: 'read' },
+      { resource: 'identity.club_member', action: 'read' },
     ],
   },
   {
@@ -591,6 +677,9 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'meeting.live_record', action: 'create' },
       { resource: 'meeting.ballot', action: 'read' },
       { resource: 'meeting.vote', action: 'create' },
+      { resource: 'meeting.guest', action: 'read' },
+      { resource: 'meeting.attendance', action: 'read' },
+      { resource: 'meeting.resource', action: 'read' },
       { resource: 'identity.role_assignment', action: 'read' },
       { resource: 'finance.ledger', action: 'read', condition: 'own' },
       { resource: 'finance.dues', action: 'read', condition: 'own' },
@@ -607,6 +696,7 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'education.onboarding', action: 'update', condition: 'own' },
       { resource: 'governance.minutes', action: 'read', condition: 'published' },
       { resource: 'support.request', action: 'read' },
+      { resource: 'identity.club_member', action: 'read' },
     ],
     // finance.report is club-wide (opening/closing balances, member counts),
     // not per-member — it deliberately gets no `own`-condition grant here;
@@ -636,6 +726,7 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'governance.excom_meeting', action: 'read' },
       { resource: 'governance.motion', action: 'read' },
       { resource: 'governance.minutes', action: 'read' },
+      { resource: 'identity.club_member', action: 'read' },
     ],
   },
   {
@@ -655,6 +746,11 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'meeting.checklist', action: 'read' },
       { resource: 'meeting.checklist', action: 'create' },
       { resource: 'meeting.checklist', action: 'update' },
+      // M9: the SAA works the door, so they take the headcount.
+      { resource: 'meeting.attendance', action: 'read' },
+      { resource: 'meeting.attendance', action: 'create' },
+      { resource: 'meeting.guest', action: 'read' },
+      { resource: 'meeting.resource', action: 'read' },
       { resource: 'library.governance_document', action: 'read' },
       { resource: 'library.item', action: 'read' },
       { resource: 'meeting.meeting', action: 'read' },
@@ -662,6 +758,7 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'governance.excom_meeting', action: 'read' },
       { resource: 'governance.motion', action: 'read' },
       { resource: 'governance.minutes', action: 'read' },
+      { resource: 'identity.club_member', action: 'read' },
     ],
   },
   {
@@ -682,6 +779,10 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'library.item', action: 'read' },
       { resource: 'meeting.checklist', action: 'read' },
       { resource: 'meeting.meeting', action: 'read' },
+      // M9: the Secretary keeps the attendance record of the meeting.
+      { resource: 'meeting.attendance', action: 'read' },
+      { resource: 'meeting.attendance', action: 'create' },
+      { resource: 'meeting.resource', action: 'read' },
       { resource: 'identity.role_assignment', action: 'read' },
       { resource: 'governance.club_success_plan', action: 'read' },
       { resource: 'governance.excom_meeting', action: 'read' },
@@ -693,6 +794,7 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'governance.minutes', action: 'read' },
       { resource: 'governance.minutes', action: 'create' },
       { resource: 'governance.minutes', action: 'update' },
+      { resource: 'identity.club_member', action: 'read' },
     ],
   },
   {

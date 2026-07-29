@@ -67,6 +67,7 @@ model OrgUnit {
   checklistTemplates     ChecklistTemplate[]
   checklistRuns          ChecklistRun[]
   agendaTemplates        AgendaTemplate[]
+  meetingTemplates       MeetingTemplate[]
   prospects              Prospect[]
   ledgerEntries          LedgerEntry[]
   duesRecords            DuesRecord[]
@@ -131,6 +132,7 @@ model Person {
   personGrantsIssued        PersonGrant[]     @relation("PersonGrantGrantedBy")
   auditEvents               AuditEvent[]
   meetingsCreated           Meeting[]
+  meetingGuestsAdded        MeetingGuest[]
   invitationsSent           Invitation[] @relation("InvitationInvitedBy")
   invitationsAccepted       Invitation[] @relation("InvitationAcceptedBy")
   meetingRoleAssignments    MeetingRoleAssignment[]
@@ -173,6 +175,12 @@ model Person {
   minutesDrafted            Minutes[]            @relation("MinutesDraftedBy")
   minutesApproved           Minutes[]            @relation("MinutesApprovedBy")
   supportProfile            SupportProfile?
+  meetingAttendance         MeetingAttendanceRecord[] @relation("MeetingAttendancePerson")
+  meetingAttendanceRecorded MeetingAttendanceRecord[] @relation("MeetingAttendanceRecordedBy")
+  meetingResourcesCreated   MeetingResource[]
+  meetingTemplatesCreated   MeetingTemplate[]
+  speechSlotsAsSpeaker      SpeechSlot[]        @relation("SpeechSlotSpeaker")
+  speechSlotsAsEvaluator    SpeechSlot[]        @relation("SpeechSlotEvaluator")
 
   @@map("person")
 }
@@ -317,6 +325,17 @@ model Meeting {
   programYear     ProgramYear @relation(fields: [programYearId], references: [id])
   scheduledAt     DateTime    @map("scheduled_at")
   status          MeetingStatus @default(draft)
+  // M9 slice — descriptive metadata carried over from the legacy portal.
+  // All optional so drafts remain cheap to create; edited from the detail
+  // page or the create form. `wordOfDay` and `tableTopicQuestions` are JSONB
+  // to keep the shape flexible without a proliferation of side tables.
+  title              String?  @db.VarChar(200)
+  theme              String?  @db.VarChar(200)
+  venue              String?  @db.VarChar(200)
+  meetingNumber      Int?     @map("meeting_number")
+  wordOfDay          Json?    @map("word_of_day")
+  tableTopicQuestions Json?   @map("table_topic_questions")
+  joinUrl            String?  @map("join_url") @db.VarChar(500)
   createdBy       String      @map("created_by") @db.Uuid
   createdByPerson Person      @relation(fields: [createdBy], references: [id])
   createdAt       DateTime    @default(now()) @map("created_at")
@@ -333,6 +352,9 @@ model Meeting {
   speechEvaluations SpeechEvaluation[]
   minutes          Minutes[]
   supportRequests  SupportRequest[]
+  guests           MeetingGuest[]
+  attendanceRecords MeetingAttendanceRecord[]
+  resources        MeetingResource[]
 
   @@map("meeting")
 }
@@ -505,10 +527,12 @@ enum MeetingRoleKey {
   toastmaster
   general_evaluator
   table_topics_master
+  table_topics_evaluator
   timer
   ah_counter
   grammarian
   sergeant_at_arms
+  president
   speaker
   evaluator
 
@@ -607,11 +631,25 @@ enum SpeechSlotStatus {
   @@map("speech_slot_status")
 }
 
-/** M3 Slice 4: system-design.md §9.1's speechSlot[] — request/approval with path validation. */
+/**
+ * M3 Slice 4: system-design.md §9.1's speechSlot[] — request/approval with
+ * path validation.
+ *
+ * M9: this is also the agenda's "Prepared Speakers" block (the legacy
+ * portal's `speakers[]`), so it carries the pairing the printed agenda
+ * needs: who actually delivers the speech, who evaluates it, and where it
+ * sits in the running order.
+ *
+ * `requestedBy` (who filed the request) stays distinct from
+ * `speakerPersonId` (who speaks) — a VPE building next week's agenda files
+ * slots on other members' behalf. `speakerPersonId` null means "the
+ * requester speaks", which is the self-service case.
+ */
 model SpeechSlot {
   id                     String           @id @default(uuid()) @db.Uuid
   meetingId              String           @map("meeting_id") @db.Uuid
   meeting                Meeting          @relation(fields: [meetingId], references: [id])
+  position               Int              @default(0)
   title                  String
   pathCode               String           @map("path_code")
   path                   PathwayPath      @relation(fields: [pathCode], references: [pathCode])
@@ -620,6 +658,11 @@ model SpeechSlot {
   plannedDurationSeconds Int              @map("planned_duration_seconds")
   requestedBy            String           @map("requested_by") @db.Uuid
   requestedByPerson      Person           @relation(fields: [requestedBy], references: [id])
+  speakerPersonId        String?          @map("speaker_person_id") @db.Uuid
+  speakerPerson          Person?          @relation("SpeechSlotSpeaker", fields: [speakerPersonId], references: [id])
+  evaluatorPersonId      String?          @map("evaluator_person_id") @db.Uuid
+  evaluatorPerson        Person?          @relation("SpeechSlotEvaluator", fields: [evaluatorPersonId], references: [id])
+  notes                  String?
   status                 SpeechSlotStatus @default(requested)
   createdAt              DateTime         @default(now()) @map("created_at")
   evaluations            SpeechEvaluation[]
@@ -911,6 +954,7 @@ model Prospect {
   createdAt           DateTime               @default(now()) @map("created_at")
   visits              ProspectVisit[]
   communications      ProspectCommunication[]
+  meetingGuests       MeetingGuest[]
   /// M4 Slice 3: set by the nightly retention job once PII is redacted — CLAUDE.md §2 decision 4.
   /// Anonymises (fullName/email/phone/whatsapp/photoUrl/bio) rather than deleting the row, so
   /// ProspectVisit/ProspectCommunication history and lead-source aggregates stay intact — same
@@ -969,6 +1013,131 @@ model ProspectCommunication {
   loggedAt       DateTime                     @default(now()) @map("logged_at")
 
   @@map("prospect_communication")
+}
+
+/**
+ * M9 Slice 2: the legacy meeting-page Guest List — a per-meeting roster.
+ * Rows are either (a) linked to a Prospect from the pool via `prospectId`,
+ * or (b) a manual entry with just name/email/phone/notes. The `present`
+ * flag reflects who actually showed up; correcting a mistaken entry is a
+ * DELETE, not an audit event — this is a live meeting-day tool.
+ *
+ * ProspectVisit stays separate: it is the append-only pipeline record
+ * ("this lead attended a meeting") and is only ever created via a
+ * Prospect-linked guest. A manual guest never becomes a ProspectVisit —
+ * they are not in the pipeline.
+ */
+model MeetingGuest {
+  id            String    @id @default(uuid()) @db.Uuid
+  meetingId     String    @map("meeting_id") @db.Uuid
+  meeting       Meeting   @relation(fields: [meetingId], references: [id])
+  fullName      String    @map("full_name") @db.VarChar(200)
+  email         String?   @db.VarChar(200)
+  phone         String?   @db.VarChar(50)
+  notes         String?
+  prospectId    String?   @map("prospect_id") @db.Uuid
+  prospect      Prospect? @relation(fields: [prospectId], references: [id])
+  present       Boolean   @default(true)
+  addedBy       String    @map("added_by") @db.Uuid
+  addedByPerson Person    @relation(fields: [addedBy], references: [id])
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@unique([meetingId, prospectId])
+  @@index([meetingId])
+  @@map("meeting_guest")
+}
+
+/**
+ * M9 Slice 3: the legacy meeting-page Attendance tab — member headcount.
+ *
+ * Append-only (CLAUDE.md §1, NFR-4): flipping a member from present to
+ * absent writes a *new* row rather than mutating the old one, and
+ * `REVOKE UPDATE, DELETE` enforces that at the DB rather than by
+ * convention. The roster the UI renders is the latest row per person
+ * (`DISTINCT ON (person_id) ... ORDER BY recorded_at DESC`), so the tab
+ * still behaves like a simple toggle while the history stays intact.
+ *
+ * Deliberately separate from `MeetingGuest`: that is the *guest* roster
+ * (non-members, deletable), this is the *member* headcount that feeds the
+ * club's attendance rate.
+ */
+model MeetingAttendanceRecord {
+  id               String   @id @default(uuid()) @db.Uuid
+  meetingId        String   @map("meeting_id") @db.Uuid
+  meeting          Meeting  @relation(fields: [meetingId], references: [id])
+  personId         String   @map("person_id") @db.Uuid
+  person           Person   @relation("MeetingAttendancePerson", fields: [personId], references: [id])
+  present          Boolean
+  recordedBy       String   @map("recorded_by") @db.Uuid
+  recordedByPerson Person   @relation("MeetingAttendanceRecordedBy", fields: [recordedBy], references: [id])
+  recordedAt       DateTime @default(now()) @map("recorded_at")
+
+  @@index([meetingId, personId, recordedAt])
+  @@map("meeting_attendance_record")
+}
+
+/**
+ * M9 Slice 4: the legacy meeting-page Resources tab — free-form title +
+ * description notes attached to one meeting (a recording link, a slide
+ * deck, reference notes).
+ *
+ * Not `library.item`: that is the club's versioned, reviewed, signed-URL
+ * document store (M5). This is throwaway per-meeting scratch content with
+ * no file behind it, so it is editable and deletable in place.
+ */
+model MeetingResource {
+  id              String   @id @default(uuid()) @db.Uuid
+  meetingId       String   @map("meeting_id") @db.Uuid
+  meeting         Meeting  @relation(fields: [meetingId], references: [id])
+  position        Int
+  title           String   @db.VarChar(200)
+  description     String?
+  createdBy       String   @map("created_by") @db.Uuid
+  createdByPerson Person   @relation(fields: [createdBy], references: [id])
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@unique([meetingId, position])
+  @@map("meeting_resource")
+}
+
+/**
+ * M9 Slice 5: the legacy portal's meeting template. The old schema modelled
+ * this as an `isTemplate` flag on the event row itself; here it is its own
+ * table so a template never carries a meaningless `scheduledAt`/
+ * `programYearId`/lifecycle `status`, and can never leak into a meeting
+ * list, the public upcoming-meetings page, or a DCP count.
+ *
+ * Carries the default role assignments, theme, venue, start time, word of
+ * the day, and table-topic questions — i.e. everything "create meeting from
+ * template" copies. All snapshots in Json, copied onto real rows on apply
+ * and never referenced live.
+ *
+ * Deliberately no agenda line items: a Toastmasters meeting's running order
+ * is fixed and derived from the roles and prepared speakers (the API's
+ * `agenda-schedule.ts`), so there is nothing per-meeting to template.
+ */
+model MeetingTemplate {
+  id                  String   @id @default(uuid()) @db.Uuid
+  clubUnitId          String   @map("club_unit_id") @db.Uuid
+  clubUnit            OrgUnit  @relation(fields: [clubUnitId], references: [id])
+  name                String   @db.VarChar(100)
+  theme               String?  @db.VarChar(200)
+  venue               String?  @db.VarChar(200)
+  startTime           String?  @map("start_time") @db.VarChar(5)
+  joinUrl             String?  @map("join_url") @db.VarChar(500)
+  /// `{ roleKey, personId }[]` — a person may have left the club by the time
+  /// the template is applied, so apply resolves and skips missing people
+  /// rather than failing.
+  roles               Json
+  wordOfDay           Json?    @map("word_of_day")
+  tableTopicQuestions Json?    @map("table_topic_questions")
+  isActive            Boolean  @default(true) @map("is_active")
+  createdBy           String   @map("created_by") @db.Uuid
+  createdByPerson     Person   @relation(fields: [createdBy], references: [id])
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  @@index([clubUnitId])
+  @@map("meeting_template")
 }
 
 enum LedgerDirection {

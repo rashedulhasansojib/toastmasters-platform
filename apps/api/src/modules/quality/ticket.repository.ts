@@ -59,6 +59,15 @@ export class TicketRepository {
     return row ? toTicket(row) : null;
   }
 
+  /** Cheap scope lookup for the controller's manual authz on `:id`-keyed routes. */
+  async findScopeUnitId(id: string): Promise<string | null> {
+    const row = await this.db.ticket.findUnique({
+      where: { id },
+      select: { scopeUnitId: true },
+    });
+    return row?.scopeUnitId ?? null;
+  }
+
   /**
    * system-design.md §16.1: "visible to any principal holding read on
    * ticket whose scope path prefixes the ticket's scope path" — the coarse

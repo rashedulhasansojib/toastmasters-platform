@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { getSession, getSwitchableUnits } from '@/lib/session';
-import { UnitSwitcher } from '@/components/UnitSwitcher';
+import { AppShell } from '@/components/app-shell/AppShell';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -18,31 +18,19 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   return (
     <html lang="en">
       <body suppressHydrationWarning>
-        <header className="shell-header">
-          <Link href="/">Toastmasters Platform</Link>
-          {session ? (
-            <div className="shell-header-session">
-              {session.activeUnitId && (
-                <>
-                  <Link href={`/clubs/${session.activeUnitId}/meetings`}>Meetings</Link>
-                  <Link href={`/clubs/${session.activeUnitId}/prospects`}>Prospects</Link>
-                  <Link href={`/clubs/${session.activeUnitId}/finance`}>Finance</Link>
-                  <Link href={`/clubs/${session.activeUnitId}/library`}>Library</Link>
-                  <Link href={`/clubs/${session.activeUnitId}/inventory`}>Inventory</Link>
-                  <Link href={`/clubs/${session.activeUnitId}/quality`}>Quality</Link>
-                  <Link href={`/clubs/${session.activeUnitId}/education`}>Education</Link>
-                  <Link href={`/clubs/${session.activeUnitId}/governance`}>Governance</Link>
-                  <Link href="/tickets">Tickets</Link>
-                </>
-              )}
-              <span>{session.fullName}</span>
-              <UnitSwitcher units={units} activeUnitId={session.activeUnitId} />
-            </div>
-          ) : (
-            <Link href="/login">Log in</Link>
-          )}
-        </header>
-        {children}
+        {session ? (
+          <AppShell session={session} units={units}>
+            {children}
+          </AppShell>
+        ) : (
+          <>
+            <header className="shell-header">
+              <Link href="/">Toastmasters Platform</Link>
+              <Link href="/login">Log in</Link>
+            </header>
+            {children}
+          </>
+        )}
       </body>
     </html>
   );

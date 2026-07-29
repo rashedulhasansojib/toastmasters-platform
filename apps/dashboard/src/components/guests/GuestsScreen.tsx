@@ -17,6 +17,7 @@ import {
 import { GuestCard } from './GuestCard';
 import { GuestFormDialog } from './GuestFormDialog';
 import { GuestPipelineBoard } from './GuestPipelineBoard';
+import { GuestPipelineBoardMobile } from './GuestPipelineBoardMobile';
 import { MoveGuestDialog } from './MoveGuestDialog';
 import { useGuestActions } from './useGuestActions';
 import { PIPELINE_STATUSES, STATUS_ACCENT, STATUS_LABEL } from './pipeline';
@@ -24,25 +25,21 @@ import { PIPELINE_STATUSES, STATUS_ACCENT, STATUS_LABEL } from './pipeline';
 type Filter = GuestPipelineStatus | 'all';
 
 /**
- * Mobile-first by construction. The board the legacy portal shows on a laptop
- * is five side-by-side columns behind a horizontal scroll — unusable on a
- * phone, and drag-and-drop is the wrong gesture on a touch screen anyway.
+ * The board is the primary view and the initial state on every breakpoint. On
+ * a laptop it renders as five side-by-side columns with drag-and-drop; on a
+ * phone the same columns become a horizontal snap-scroll and each card carries
+ * a Select instead of a drag handle — dragging fights a touch scroll. Both
+ * views share one dataset and one write path, so they can't drift.
  *
- * So the phone gets the same model expressed differently: the stage rail is
- * the set of columns, viewed one at a time, and moving a guest is a tap on
- * its status chip rather than a drag. The board is a wide-screen enhancement,
- * rendered only from `lg:` up; both views share one dataset and one write
- * path, so they can't drift.
- *
- * Mobile-first is not mobile-everywhere, though. From `lg:` the touch
- * affordances step aside for desktop ones: the stage rail becomes a dropdown,
- * the floating action button becomes a header button, controls drop to their
- * natural height, and the grid widens instead of stretching phone-sized cards.
+ * The list view stays available as a toggle for filtering-heavy workflows. On
+ * a phone it keeps its stage rail of filter chips; from `lg:` up the rail
+ * collapses into a dropdown and the grid widens instead of stretching
+ * phone-sized cards.
  */
 export function GuestsScreen({ clubUnitId, guests }: { clubUnitId: string; guests: Guest[] }) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
-  const [view, setView] = useState<'list' | 'board'>('list');
+  const [view, setView] = useState<'list' | 'board'>('board');
   const [formOpen, setFormOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Guest | undefined>();
   const [moveTarget, setMoveTarget] = useState<Guest | null>(null);
@@ -141,12 +138,13 @@ export function GuestsScreen({ clubUnitId, guests }: { clubUnitId: string; guest
           </Select>
         )}
 
-        {/* The board is a laptop affordance — no toggle on a phone at all. */}
-        <div className="hidden shrink-0 items-center gap-0.5 rounded-lg border p-0.5 lg:flex">
+        {/* Board is the primary view on every breakpoint; the toggle lets a
+            user drop to the searchable list when hunting for a specific guest. */}
+        <div className="flex shrink-0 items-center gap-0.5 rounded-lg border p-0.5">
           {(
             [
-              { key: 'list', label: 'List', Icon: ListIcon },
               { key: 'board', label: 'Board', Icon: KanbanIcon },
+              { key: 'list', label: 'List', Icon: ListIcon },
             ] as const
           ).map(({ key, label, Icon }) => (
             <button
@@ -162,7 +160,7 @@ export function GuestsScreen({ clubUnitId, guests }: { clubUnitId: string; guest
               )}
             >
               <Icon className="size-3.5" />
-              {label}
+              <span className="hidden sm:inline">{label}</span>
             </button>
           ))}
         </div>
@@ -180,80 +178,90 @@ export function GuestsScreen({ clubUnitId, guests }: { clubUnitId: string; guest
         </div>
       )}
 
-      {/* Stage rail + cards: the phone's whole pipeline, and the desktop list view. */}
-      <div className={cn('flex flex-col gap-4', view === 'board' && 'lg:hidden')}>
-        <div className="-mx-4 overflow-x-auto px-4 sm:-mx-6 sm:px-6 lg:hidden">
-          <div className="flex w-max gap-2">
-            {chips.map(({ key, label, count, accent }) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setFilter(key)}
-                aria-pressed={filter === key}
-                className={cn(
-                  'inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm whitespace-nowrap transition-colors',
-                  filter === key
-                    ? 'border-primary bg-primary text-primary-foreground'
-                    : 'bg-background text-muted-foreground active:bg-accent sm:hover:bg-accent',
-                )}
-              >
-                {accent && (
-                  <span
-                    className={cn(
-                      'size-1.5 rounded-full',
-                      filter === key ? 'bg-primary-foreground/70' : accent,
-                    )}
-                  />
-                )}
-                {label}
-                <span className={cn('text-xs', filter !== key && 'text-muted-foreground/70')}>
-                  {count}
-                </span>
-              </button>
-            ))}
+      {view === 'list' && (
+        <div className="flex flex-col gap-4">
+          <div className="-mx-4 overflow-x-auto px-4 sm:-mx-6 sm:px-6 lg:hidden">
+            <div className="flex w-max gap-2">
+              {chips.map(({ key, label, count, accent }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setFilter(key)}
+                  aria-pressed={filter === key}
+                  className={cn(
+                    'inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm whitespace-nowrap transition-colors',
+                    filter === key
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'bg-background text-muted-foreground active:bg-accent sm:hover:bg-accent',
+                  )}
+                >
+                  {accent && (
+                    <span
+                      className={cn(
+                        'size-1.5 rounded-full',
+                        filter === key ? 'bg-primary-foreground/70' : accent,
+                      )}
+                    />
+                  )}
+                  {label}
+                  <span className={cn('text-xs', filter !== key && 'text-muted-foreground/70')}>
+                    {count}
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
 
-        {visible.length === 0 ? (
-          <EmptyState
-            hasAny={guests.length > 0}
-            filtered={query.trim() !== '' || filter !== 'all'}
-            onAdd={openCreate}
-          />
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:gap-2.5 xl:grid-cols-3 2xl:grid-cols-4">
-            {visible.map((guest) => (
-              <GuestCard
-                key={guest.id}
-                clubUnitId={clubUnitId}
-                guest={guest}
-                onRequestMove={setMoveTarget}
-                pending={pendingId === guest.id}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {view === 'board' && (
-        <div className="hidden lg:block">
-          {searched.length === 0 ? (
+          {visible.length === 0 ? (
             <EmptyState
               hasAny={guests.length > 0}
-              filtered={query.trim() !== ''}
+              filtered={query.trim() !== '' || filter !== 'all'}
               onAdd={openCreate}
             />
           ) : (
-            <GuestPipelineBoard
-              clubUnitId={clubUnitId}
-              guests={searched}
-              onMove={moveTo}
-              onRequestMove={setMoveTarget}
-              pendingId={pendingId}
-            />
+            <div className="grid gap-3 sm:grid-cols-2 lg:gap-2.5 xl:grid-cols-3 2xl:grid-cols-4">
+              {visible.map((guest) => (
+                <GuestCard
+                  key={guest.id}
+                  clubUnitId={clubUnitId}
+                  guest={guest}
+                  onRequestMove={setMoveTarget}
+                  pending={pendingId === guest.id}
+                />
+              ))}
+            </div>
           )}
         </div>
       )}
+
+      {view === 'board' &&
+        (searched.length === 0 ? (
+          <EmptyState
+            hasAny={guests.length > 0}
+            filtered={query.trim() !== ''}
+            onAdd={openCreate}
+          />
+        ) : (
+          <>
+            <div className="lg:hidden">
+              <GuestPipelineBoardMobile
+                clubUnitId={clubUnitId}
+                guests={searched}
+                onMove={moveTo}
+                pendingId={pendingId}
+              />
+            </div>
+            <div className="hidden lg:block">
+              <GuestPipelineBoard
+                clubUnitId={clubUnitId}
+                guests={searched}
+                onMove={moveTo}
+                onRequestMove={setMoveTarget}
+                pendingId={pendingId}
+              />
+            </div>
+          </>
+        ))}
 
       {/* Thumb-reachable on a phone, where the header button is out of reach. */}
       <Button

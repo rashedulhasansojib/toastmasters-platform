@@ -17,6 +17,7 @@ import { FinanceModule } from './modules/finance/finance.module';
 import { LibraryModule } from './modules/library/library.module';
 import { OperationsModule } from './modules/operations/operations.module';
 import { QualityModule } from './modules/quality/quality.module';
+import { GovernanceModule } from './modules/governance/governance.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { QualityModule } from './modules/quality/quality.module';
     LibraryModule,
     OperationsModule,
     QualityModule,
+    GovernanceModule,
   ],
   // Global guard chain: authenticate first (JwtAuthGuard), then authorize
   // (ResourceGuard). Both honour @Public(). Default-deny everywhere else.

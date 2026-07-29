@@ -50,14 +50,21 @@ const GOAL_DEFS: GoalDef[] = [
   },
 ];
 
+interface ConfirmedLevel {
+  recordId: string;
+  level: number;
+  vpeConfirmedAt: string;
+}
+
 /**
- * M6 Slice 3: system-design.md §16.3, FR-OVS-5. Nightly, per club per
- * program year, each goal traceable to its contributing records. Goals
- * 1-6/9/10 have no data source yet (education levels are M7; officer
- * training periods aren't modelled anywhere) — they report
- * `dataSource: 'not_yet_tracked'` rather than a fabricated number. Only
- * goals 7/8 (membership growth, from ClubMembership) are actually
- * computed today. See the M6 plan doc's scope-sequencing note.
+ * M6 Slice 3 / M7 Slice 5: system-design.md §16.3, FR-OVS-5. Nightly, per
+ * club per program year, each goal traceable to its contributing records.
+ * Goals 1-6 (education levels) are wired to `EducationRecord`'s
+ * VPE-confirmed completions as of M7 — only `vpeConfirmedAt`, never
+ * `memberMarkedCompleteAt`, ever counts (FR-EDU-3). Goals 7/8 (membership
+ * growth) come from `ClubMembership`. Goals 9/10 stay `not_yet_tracked` —
+ * officer training periods and TI officer-list submission still aren't
+ * modelled anywhere. See the M6/M7 plan docs' scope-sequencing notes.
  */
 @Processor(DCP_PROJECTION_QUEUE)
 export class DcpProjectionProcessor extends WorkerHost {
@@ -90,6 +97,32 @@ export class DcpProjectionProcessor extends WorkerHost {
         where: { clubUnitId_programYearId: { clubUnitId: club.id, programYearId: programYear.id } },
       });
 
+      const educationRecords = await db.educationRecord.findMany({
+        where: { clubUnitId: club.id },
+      });
+      const confirmedByLevel = new Map<number, ConfirmedLevel[]>();
+      for (const record of educationRecords) {
+        const levels = record.levels as unknown as Array<{
+          level: number;
+          vpeConfirmedAt: string | null;
+        }>;
+        for (const level of levels) {
+          if (!level.vpeConfirmedAt) continue;
+          const bucket = level.level >= 4 ? 4 : level.level; // Level 4/5/DTM share goals 5/6
+          const list = confirmedByLevel.get(bucket) ?? [];
+          list.push({
+            recordId: record.id,
+            level: level.level,
+            vpeConfirmedAt: level.vpeConfirmedAt,
+          });
+          confirmedByLevel.set(bucket, list);
+        }
+      }
+      const level1 = confirmedByLevel.get(1) ?? [];
+      const level2 = confirmedByLevel.get(2) ?? [];
+      const level3 = confirmedByLevel.get(3) ?? [];
+      const level4Plus = confirmedByLevel.get(4) ?? [];
+
       const goals = GOAL_DEFS.map((def) => {
         if (def.goalNumber === 7) {
           const achievedCount = Math.min(qualifyingCount, 4);
@@ -109,6 +142,60 @@ export class DcpProjectionProcessor extends WorkerHost {
             achieved: qualifyingCount >= 8,
             dataSource: 'computed' as const,
             contributingRecordIds: qualifyingMemberships.slice(4, 8).map((m) => m.id),
+          };
+        }
+        if (def.goalNumber === 1) {
+          return {
+            ...def,
+            achievedCount: Math.min(level1.length, 4),
+            achieved: level1.length >= 4,
+            dataSource: 'computed' as const,
+            contributingRecordIds: level1.slice(0, 4).map((c) => c.recordId),
+          };
+        }
+        if (def.goalNumber === 2) {
+          return {
+            ...def,
+            achievedCount: Math.min(level2.length, 2),
+            achieved: level2.length >= 2,
+            dataSource: 'computed' as const,
+            contributingRecordIds: level2.slice(0, 2).map((c) => c.recordId),
+          };
+        }
+        if (def.goalNumber === 3) {
+          return {
+            ...def,
+            achievedCount: Math.max(0, Math.min(level2.length - 2, 2)),
+            achieved: level2.length >= 4,
+            dataSource: 'computed' as const,
+            contributingRecordIds: level2.slice(2, 4).map((c) => c.recordId),
+          };
+        }
+        if (def.goalNumber === 4) {
+          return {
+            ...def,
+            achievedCount: Math.min(level3.length, 2),
+            achieved: level3.length >= 2,
+            dataSource: 'computed' as const,
+            contributingRecordIds: level3.slice(0, 2).map((c) => c.recordId),
+          };
+        }
+        if (def.goalNumber === 5) {
+          return {
+            ...def,
+            achievedCount: Math.min(level4Plus.length, 1),
+            achieved: level4Plus.length >= 1,
+            dataSource: 'computed' as const,
+            contributingRecordIds: level4Plus.slice(0, 1).map((c) => c.recordId),
+          };
+        }
+        if (def.goalNumber === 6) {
+          return {
+            ...def,
+            achievedCount: Math.max(0, Math.min(level4Plus.length - 1, 1)),
+            achieved: level4Plus.length >= 2,
+            dataSource: 'computed' as const,
+            contributingRecordIds: level4Plus.slice(1, 2).map((c) => c.recordId),
           };
         }
         return {

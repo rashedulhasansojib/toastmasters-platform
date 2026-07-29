@@ -86,6 +86,12 @@ model OrgUnit {
   dcpProjections         DcpProjection[]
   clubHealthSnapshots    ClubHealthSnapshot[]
   tickets                Ticket[]
+  educationRecords       EducationRecord[]
+  speechEvaluations      SpeechEvaluation[]
+  mentorshipPairings     MentorshipPairing[]
+  mentorAvailabilities   MentorAvailability[]
+  onboardingTracks       OnboardingTrack[]
+  onboardingProgress     OnboardingProgress[]
 
   @@map("org_unit")
 }
@@ -150,6 +156,14 @@ model Person {
   ticketsCreated            Ticket[]           @relation("TicketCreatedBy")
   ticketsResolved           Ticket[]           @relation("TicketResolvedBy")
   ticketCommentsMade        TicketComment[]
+  educationRecords          EducationRecord[]
+  evaluationsAsSpeaker      SpeechEvaluation[] @relation("EvaluationSpeaker")
+  evaluationsAsEvaluator    SpeechEvaluation[] @relation("EvaluationEvaluator")
+  mentorshipsAsMentor       MentorshipPairing[] @relation("MentorshipMentor")
+  mentorshipsAsMentee       MentorshipPairing[] @relation("MentorshipMentee")
+  mentorshipsAssigned       MentorshipPairing[] @relation("MentorshipAssignedBy")
+  mentorAvailability        MentorAvailability[]
+  onboardingProgress        OnboardingProgress[]
 
   @@map("person")
 }
@@ -263,6 +277,7 @@ model ProgramYear {
   presidentContactLogs PresidentContactLog[]
   clubSuccessPlans ClubSuccessPlan[]
   dcpProjections   DcpProjection[]
+  mentorshipPairings MentorshipPairing[]
 
   @@map("program_year")
 }
@@ -304,6 +319,7 @@ model Meeting {
   prospectVisits  ProspectVisit[]
   contentPlanItems ContentPlanItem[]
   inventoryMovements InventoryMovement[]
+  speechEvaluations SpeechEvaluation[]
 
   @@map("meeting")
 }
@@ -551,6 +567,7 @@ model PathwayPath {
   createdAt  DateTime          @default(now()) @map("created_at")
   projects   PathwayProject[]
   speechSlots SpeechSlot[]
+  educationRecords EducationRecord[]
 
   @@map("pathway_path")
 }
@@ -592,6 +609,7 @@ model SpeechSlot {
   requestedByPerson      Person           @relation(fields: [requestedBy], references: [id])
   status                 SpeechSlotStatus @default(requested)
   createdAt              DateTime         @default(now()) @map("created_at")
+  evaluations            SpeechEvaluation[]
 
   @@map("speech_slot")
 }
@@ -885,6 +903,7 @@ model Prospect {
   /// ProspectVisit/ProspectCommunication history and lead-source aggregates stay intact — same
   /// "correct with a new fact, don't destroy the old one" reasoning as append-only ledger rows.
   piiRedactedAt       DateTime?              @map("pii_redacted_at")
+  speechEvaluations   SpeechEvaluation[]
 
   @@map("prospect")
 }
@@ -1635,4 +1654,202 @@ model TicketComment {
   at         DateTime @default(now())
 
   @@map("ticket_comment")
+}
+
+// ---------------------------------------------------------------------------
+// M7: Education — system-design.md §10
+// ---------------------------------------------------------------------------
+
+/**
+ * M7 Slice 1: system-design.md §10.1, FR-EDU-2/3. One row per (person, club,
+ * path). `levels` carries the two-step confirmation — `memberMarkedCompleteAt`
+ * is member-initiated but gated on real delivered `PathwayProject` rows
+ * (never bare self-report); only `vpeConfirmedAt` ever feeds the DCP
+ * projection (Slice 5). See the M7 plan doc's scope-cut note on the
+ * simplified role-requirement check.
+ */
+model EducationRecord {
+  id            String    @id @default(uuid()) @db.Uuid
+  personId      String    @map("person_id") @db.Uuid
+  person        Person    @relation(fields: [personId], references: [id])
+  clubUnitId    String    @map("club_unit_id") @db.Uuid
+  clubUnit      OrgUnit   @relation(fields: [clubUnitId], references: [id])
+  pathCode      String    @map("path_code")
+  path          PathwayPath @relation(fields: [pathCode], references: [pathCode])
+  startedAt     DateTime  @default(now()) @map("started_at")
+  completedAt   DateTime? @map("completed_at")
+  credential    String?
+  levels        Json      @default("[]")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@unique([personId, clubUnitId, pathCode])
+  @@map("education_record")
+}
+
+enum EvaluationSubjectKind {
+  prepared_speech
+  table_topic
+
+  @@map("evaluation_subject_kind")
+}
+
+enum EvaluationMode {
+  form
+  audio
+  scan
+
+  @@map("evaluation_mode")
+}
+
+enum EvaluationVisibility {
+  speaker_and_vpe
+  speaker_only
+
+  @@map("evaluation_visibility")
+}
+
+/**
+ * M7 Slice 2: system-design.md §10.2, FR-EDU-4/5. `metricsSnapshot` is
+ * copied at submission time, never referenced back to the live timer/
+ * ah-counter record — a later correction must not silently rewrite an
+ * evaluation. Restricted sensitivity — seeded in M1, first grants land
+ * with this slice.
+ */
+model SpeechEvaluation {
+  id                     String                @id @default(uuid()) @db.Uuid
+  meetingId              String                @map("meeting_id") @db.Uuid
+  meeting                Meeting               @relation(fields: [meetingId], references: [id])
+  orgUnitId              String                @map("org_unit_id") @db.Uuid
+  orgUnit                OrgUnit               @relation(fields: [orgUnitId], references: [id])
+  subjectKind            EvaluationSubjectKind @map("subject_kind")
+  speechSlotId           String?               @map("speech_slot_id") @db.Uuid
+  speechSlot             SpeechSlot?           @relation(fields: [speechSlotId], references: [id])
+  speakerPersonId        String?               @map("speaker_person_id") @db.Uuid
+  speakerPerson          Person?               @relation("EvaluationSpeaker", fields: [speakerPersonId], references: [id])
+  speakerProspectId      String?               @map("speaker_prospect_id") @db.Uuid
+  speakerProspect        Prospect?             @relation(fields: [speakerProspectId], references: [id])
+  evaluatorPersonId      String                @map("evaluator_person_id") @db.Uuid
+  evaluatorPerson        Person                @relation("EvaluationEvaluator", fields: [evaluatorPersonId], references: [id])
+  mode                   EvaluationMode
+  formScales             Json?                 @map("form_scales")
+  formExcelledAt         String?               @map("form_excelled_at")
+  formWorkOn             String?               @map("form_work_on")
+  formChallengeYourself  String?               @map("form_challenge_yourself")
+  audioUrl               String?               @map("audio_url")
+  scanUrl                String?               @map("scan_url")
+  metricsSnapshot        Json                  @map("metrics_snapshot")
+  visibility             EvaluationVisibility  @default(speaker_and_vpe)
+  submittedAt            DateTime              @default(now()) @map("submitted_at")
+
+  @@map("speech_evaluation")
+}
+
+enum MentorshipPurpose {
+  new_member_onboarding
+  pathway_project
+  contest_prep
+  officer_transition
+  general
+
+  @@map("mentorship_purpose")
+}
+
+enum MentorshipStatus {
+  proposed
+  active
+  completed
+  ended
+
+  @@map("mentorship_status")
+}
+
+enum MentorshipEndedReason {
+  completed
+  mentor_unavailable
+  mentee_left
+  mismatch
+
+  @@map("mentorship_ended_reason")
+}
+
+/** M7 Slice 3: system-design.md §10.3, FR-EDU-6. Ending a pairing never deletes goals/checkIns history. At most one `active` pairing per (mentee, purpose) — enforced in the service (see the M7 plan doc's note on the race window). */
+model MentorshipPairing {
+  id             String                  @id @default(uuid()) @db.Uuid
+  orgUnitId      String                  @map("org_unit_id") @db.Uuid
+  orgUnit        OrgUnit                 @relation(fields: [orgUnitId], references: [id])
+  programYearId  String                  @map("program_year_id")
+  programYear    ProgramYear             @relation(fields: [programYearId], references: [id])
+  mentorPersonId String                  @map("mentor_person_id") @db.Uuid
+  mentorPerson   Person                  @relation("MentorshipMentor", fields: [mentorPersonId], references: [id])
+  menteePersonId String                  @map("mentee_person_id") @db.Uuid
+  menteePerson   Person                  @relation("MentorshipMentee", fields: [menteePersonId], references: [id])
+  purpose        MentorshipPurpose
+  status         MentorshipStatus        @default(proposed)
+  startedAt      DateTime                @default(now()) @map("started_at")
+  endedAt        DateTime?               @map("ended_at")
+  endedReason    MentorshipEndedReason?  @map("ended_reason")
+  assignedBy     String                  @map("assigned_by") @db.Uuid
+  assignedByPerson Person                @relation("MentorshipAssignedBy", fields: [assignedBy], references: [id])
+  goals          Json                    @default("[]")
+  checkIns       Json                    @default("[]") @map("check_ins")
+
+  @@map("mentorship_pairing")
+}
+
+/** M7 Slice 3. */
+model MentorAvailability {
+  id                    String   @id @default(uuid()) @db.Uuid
+  personId              String   @map("person_id") @db.Uuid
+  person                Person   @relation(fields: [personId], references: [id])
+  orgUnitId             String   @map("org_unit_id") @db.Uuid
+  orgUnit               OrgUnit  @relation(fields: [orgUnitId], references: [id])
+  isAvailable           Boolean  @default(true) @map("is_available")
+  maxConcurrentMentees  Int      @default(2) @map("max_concurrent_mentees")
+  strengths             String[] @default([])
+  preferredPurposes     String[] @default([]) @map("preferred_purposes")
+
+  @@unique([personId, orgUnitId])
+  @@map("mentor_availability")
+}
+
+enum OnboardingAudience {
+  new_member
+  new_officer
+  guest
+  mentor
+
+  @@map("onboarding_audience")
+}
+
+/** M7 Slice 4: system-design.md §10.4, FR-EDU-7. `orgUnitId: null` means district-wide default. */
+model OnboardingTrack {
+  id        String              @id @default(uuid()) @db.Uuid
+  orgUnitId String?             @map("org_unit_id") @db.Uuid
+  orgUnit   OrgUnit?            @relation(fields: [orgUnitId], references: [id])
+  name      String
+  audience  OnboardingAudience
+  forRoles  String[]            @default([]) @map("for_roles")
+  isActive  Boolean             @default(true) @map("is_active")
+  steps     Json
+  createdAt DateTime            @default(now()) @map("created_at")
+  progress  OnboardingProgress[]
+
+  @@map("onboarding_track")
+}
+
+/** `steps` is a snapshot of the track's steps at enrolment time — a later track edit never rewrites a member's in-progress checklist, same pattern as `ChecklistRun`. */
+model OnboardingProgress {
+  id          String          @id @default(uuid()) @db.Uuid
+  personId    String          @map("person_id") @db.Uuid
+  person      Person          @relation(fields: [personId], references: [id])
+  trackId     String          @map("track_id") @db.Uuid
+  track       OnboardingTrack @relation(fields: [trackId], references: [id])
+  orgUnitId   String          @map("org_unit_id") @db.Uuid
+  orgUnit     OrgUnit         @relation(fields: [orgUnitId], references: [id])
+  enrolledAt  DateTime        @default(now()) @map("enrolled_at")
+  steps       Json
+  completedAt DateTime?       @map("completed_at")
+  nudgedAt    DateTime?       @map("nudged_at")
+
+  @@map("onboarding_progress")
 }

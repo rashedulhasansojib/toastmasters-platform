@@ -321,6 +321,35 @@ const RESOURCES: ResourceSeed[] = [
     clubScoped: true,
     sensitivity: 'normal',
   },
+  {
+    // M7 Slice 1/6: system-design.md §10.1. `approve` is the VPE-only
+    // level-confirmation action — the only write that ever feeds DCP.
+    resource: 'education.record',
+    context: 'education',
+    label: 'Education record',
+    allowedActions: ['read', 'create', 'update', 'approve'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
+  {
+    // M7 Slice 3/6: system-design.md §10.3.
+    resource: 'education.mentorship',
+    context: 'education',
+    label: 'Mentorship pairing',
+    allowedActions: ['read', 'create', 'update'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
+  {
+    // M7 Slice 4/6: system-design.md §10.4. Must exist before the first
+    // July (FR-EDU-7).
+    resource: 'education.onboarding',
+    context: 'education',
+    label: 'Onboarding track/progress',
+    allowedActions: ['read', 'create', 'update'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
 ];
 
 // Grants transcribed verbatim from system-design.md §7.5 for the resources
@@ -365,6 +394,10 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'quality.ticket', action: 'read' },
       { resource: 'quality.ticket', action: 'create' },
       { resource: 'quality.ticket', action: 'update' },
+      { resource: 'education.record', action: 'read' },
+      { resource: 'education.evaluation', action: 'read' },
+      { resource: 'education.mentorship', action: 'read' },
+      { resource: 'education.onboarding', action: 'read' },
     ],
   },
   {
@@ -402,6 +435,19 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'governance.club_success_plan', action: 'read' },
       { resource: 'governance.club_success_plan', action: 'create' },
       { resource: 'governance.club_success_plan', action: 'update' },
+      { resource: 'education.record', action: 'read' },
+      { resource: 'education.record', action: 'create' },
+      { resource: 'education.record', action: 'update' },
+      { resource: 'education.record', action: 'approve' },
+      { resource: 'education.evaluation', action: 'read' },
+      { resource: 'education.evaluation', action: 'create' },
+      { resource: 'education.evaluation', action: 'update' },
+      { resource: 'education.mentorship', action: 'read' },
+      { resource: 'education.mentorship', action: 'create' },
+      { resource: 'education.mentorship', action: 'update' },
+      { resource: 'education.onboarding', action: 'read' },
+      { resource: 'education.onboarding', action: 'create' },
+      { resource: 'education.onboarding', action: 'update' },
     ],
   },
   {
@@ -455,6 +501,8 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'governance.club_success_plan', action: 'read' },
       { resource: 'governance.club_success_plan', action: 'create' },
       { resource: 'governance.club_success_plan', action: 'update' },
+      { resource: 'education.mentorship', action: 'read' },
+      { resource: 'education.onboarding', action: 'read' },
     ],
   },
   {
@@ -482,6 +530,13 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'finance.installment_plan', action: 'read', condition: 'own' },
       { resource: 'library.item', action: 'read' },
       { resource: 'governance.club_success_plan', action: 'read' },
+      { resource: 'education.record', action: 'read', condition: 'own' },
+      { resource: 'education.record', action: 'update', condition: 'own' },
+      { resource: 'education.evaluation', action: 'read', condition: 'own' },
+      { resource: 'education.evaluation', action: 'create' },
+      { resource: 'education.mentorship', action: 'read', condition: 'own' },
+      { resource: 'education.onboarding', action: 'read', condition: 'own' },
+      { resource: 'education.onboarding', action: 'update', condition: 'own' },
     ],
     // finance.report is club-wide (opening/closing balances, member counts),
     // not per-member — it deliberately gets no `own`-condition grant here;

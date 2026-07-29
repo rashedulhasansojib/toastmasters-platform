@@ -204,6 +204,20 @@ const RESOURCES: ResourceSeed[] = [
     sensitivity: 'restricted',
   },
   {
+    // The platform-tier admin console. `normal`, not `restricted` — it reads
+    // the org tree and headcounts, never the four restricted resources, which
+    // stay behind break-glass even for system_admin (CLAUDE.md §5). No role
+    // template grants it, so the only holder is system_admin, via the broad
+    // non-restricted synthesis in access.repository.ts. That is what makes the
+    // console super-admin-only without an `isAdmin` flag anywhere.
+    resource: 'platform.console',
+    context: 'platform',
+    label: 'Platform admin console',
+    allowedActions: ['read'],
+    clubScoped: false,
+    sensitivity: 'normal',
+  },
+  {
     resource: 'identity.invitation',
     context: 'identity',
     label: 'Invitation',

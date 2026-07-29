@@ -102,9 +102,14 @@ function buildBootstrapSql({
   //      person is scoped into; without one, the sidebar's club section
   //      never renders.
   //   5. The 2026-2027 ProgramYear (the string the login flow returns).
-  //   6. A club-scoped system_admin grant so the club appears in
+  //   6. Club- *and* region-scoped system_admin grants so both appear in
   //      switchable-units — findPlatformRoleOrgUnitIdsForPerson filters
-  //      out NULL org_unit_id.
+  //      out NULL org_unit_id, so the global grant from step 2 is invisible
+  //      to the switcher. The region row is what surfaces the platform admin
+  //      console in the unit switcher; it adds no authority the global grant
+  //      doesn't already confer (systemAdminGrants resolves the org-unit-less
+  //      row at the region root path anyway) — it exists purely so the
+  //      switcher has a region entry to select.
   return `
 WITH upserted AS (
   INSERT INTO "person" (id, email, password_hash, full_name, status, mfa_enabled, permission_version, created_at)
@@ -112,7 +117,13 @@ WITH upserted AS (
   ON CONFLICT (email) DO UPDATE SET
     password_hash = EXCLUDED.password_hash,
     full_name = EXCLUDED.full_name,
-    status = 'active'
+    status = 'active',
+    -- Resolved grants are Redis-cached for 5 min keyed personId:permissionVersion
+    -- (GrantCacheService). This script adds grants, so without a bump a re-run's
+    -- new scopes stay invisible until the TTL lapses. The bump is the sanctioned
+    -- invalidation path (rbac-design.md §5) and costs no re-login — JwtAuthGuard
+    -- silently reissues the cookie when the token's v claim is behind.
+    permission_version = "person".permission_version + 1
   RETURNING id
 ),
 _global_grant AS (
@@ -155,15 +166,20 @@ _year AS (
   VALUES ('2026-2027', DATE '2026-07-01', DATE '2027-06-30', 'current')
   ON CONFLICT (id) DO NOTHING
   RETURNING id
+),
+scoped AS (
+  SELECT id FROM club
+  UNION ALL
+  SELECT id FROM region
 )
 INSERT INTO "platform_role_assignment" (id, person_id, role, org_unit_id, granted_by, granted_at)
-SELECT gen_random_uuid(), u.id, 'system_admin', c.id, u.id, now()
-FROM upserted u, club c
+SELECT gen_random_uuid(), u.id, 'system_admin', s.id, u.id, now()
+FROM upserted u, scoped s
 WHERE NOT EXISTS (
   SELECT 1 FROM "platform_role_assignment" pra
   WHERE pra.person_id = u.id
     AND pra.role = 'system_admin'
-    AND pra.org_unit_id = c.id
+    AND pra.org_unit_id = s.id
 );
 `.trim();
 }

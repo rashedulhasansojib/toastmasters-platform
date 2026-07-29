@@ -23,7 +23,10 @@ export function Sidebar({
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
-  const sections = buildNavSections(session.activeUnitId);
+  // The session carries only the id; the unit's tier comes from the
+  // switchable-units list the layout already fetched.
+  const active = units.find((unit) => unit.id === session.activeUnitId);
+  const sections = buildNavSections(active ? { id: active.id, type: active.type } : null);
 
   return (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">

@@ -4,6 +4,7 @@ import {
   Gavel,
   GraduationCap,
   Home,
+  Network,
   Package,
   Plus,
   ShieldCheck,
@@ -12,6 +13,7 @@ import {
   Wallet,
   type LucideIcon,
 } from 'lucide-react';
+import type { OrgUnitType } from '@toastmasters/contracts';
 
 /** Inline affordance rendered on the right of a nav row (e.g. "+ New meeting"). */
 export type NavAction = {
@@ -32,13 +34,19 @@ export type NavSection = {
   items: NavItem[];
 };
 
+/** The active unit drives which tier's pages the sidebar links to. */
+export type ActiveUnit = { id: string; type: OrgUnitType };
+
 /**
  * The sidebar renders from grants once we wire `can()` in — for now every
- * signed-in person sees the club sub-tree of whichever unit they've selected.
- * The `authorize()` gate on each API route is still the source of truth; the
- * sidebar just avoids linking to a page whose data-fetch would 403.
+ * signed-in person sees the sub-tree matching the tier of whichever unit
+ * they've selected. The `authorize()` gate on each API route is still the
+ * source of truth; the sidebar just avoids linking to a page whose data-fetch
+ * would 403 — which is exactly why branching on the unit's *tier* here is not
+ * a permission check. A non-super-admin who somehow reached a region unit
+ * still gets a 403 from `platform.console` on the fetch.
  */
-export function buildNavSections(activeUnitId: string | null): NavSection[] {
+export function buildNavSections(activeUnit: ActiveUnit | null): NavSection[] {
   const overview: NavSection = {
     label: 'Overview',
     items: [{ href: '/', label: 'Home', icon: Home }],
@@ -49,9 +57,42 @@ export function buildNavSections(activeUnitId: string | null): NavSection[] {
     items: [{ href: '/tickets', label: 'Tickets', icon: Ticket }],
   };
 
-  if (!activeUnitId) return [overview, crossTier];
+  if (!activeUnit) return [overview, crossTier];
 
-  const clubBase = `/clubs/${activeUnitId}`;
+  // Region is the platform tier: the org tree roots there and only
+  // system_admin is ever scoped to it, so it maps to the admin console
+  // rather than to a club's pages.
+  if (activeUnit.type === 'region') {
+    const platform: NavSection = {
+      label: 'Platform',
+      items: [
+        {
+          href: `/platform/${activeUnit.id}/dashboard`,
+          label: 'Org tree',
+          icon: Network,
+        },
+      ],
+    };
+    return [overview, platform, crossTier];
+  }
+
+  // Area and division already have their own dashboards; anything above a
+  // club that isn't the region gets its oversight page, not club nav.
+  if (activeUnit.type === 'area' || activeUnit.type === 'division') {
+    const oversight: NavSection = {
+      label: activeUnit.type === 'area' ? 'Area' : 'Division',
+      items: [
+        {
+          href: `/${activeUnit.type}s/${activeUnit.id}/dashboard`,
+          label: 'Dashboard',
+          icon: ShieldCheck,
+        },
+      ],
+    };
+    return [overview, oversight, crossTier];
+  }
+
+  const clubBase = `/clubs/${activeUnit.id}`;
   const club: NavSection = {
     label: 'Club',
     items: [

@@ -47,7 +47,7 @@ export default async function GuestDetailPage({
       <header className="flex flex-col items-center gap-3 text-center sm:flex-row sm:text-left">
         <Avatar name={guest.fullName} photoUrl={guest.photoUrl} size="lg" />
         <div className="min-w-0">
-          <h1 className="text-xl font-semibold break-words sm:text-2xl">
+          <h1 className="text-xl font-semibold wrap-break-word sm:text-2xl">
             {redacted ? 'Details removed' : guest.fullName}
           </h1>
           <div className="mt-1.5">
@@ -105,7 +105,7 @@ export default async function GuestDetailPage({
             </dl>
           )}
           {guest.bio && (
-            <p className="text-sm break-words whitespace-pre-wrap text-muted-foreground">
+            <p className="text-sm wrap-break-word whitespace-pre-wrap text-muted-foreground">
               {guest.bio}
             </p>
           )}
@@ -124,9 +124,7 @@ export default async function GuestDetailPage({
       <section className="flex flex-col gap-4">
         <div className="flex flex-col gap-3">
           <h2 className="text-base font-semibold">Activity</h2>
-          {!redacted && (
-            <LogActivity clubUnitId={clubUnitId} guestId={guestId} meetings={meetings} />
-          )}
+          {!redacted && <LogActivity clubUnitId={clubUnitId} guestId={guestId} />}
         </div>
         <GuestActivity visits={visits} communications={communications} meetings={meetings} />
       </section>

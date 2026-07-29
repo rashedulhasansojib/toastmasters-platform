@@ -2,8 +2,7 @@
 
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Meeting } from '@toastmasters/contracts';
-import { CalendarPlusIcon, MessageSquarePlusIcon } from 'lucide-react';
+import { MessageSquarePlusIcon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -16,32 +15,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { CHANNELS, CHANNEL_LABEL, formatDate } from './pipeline';
-
-/** `Meeting.title` is nullable, so fall back to its number, then its date. */
-function meetingLabel(meeting: Meeting): string {
-  const when = formatDate(meeting.scheduledAt);
-  if (meeting.title) return `${meeting.title} · ${when}`;
-  if (meeting.meetingNumber !== null) return `Meeting #${meeting.meetingNumber} · ${when}`;
-  return when;
-}
+import { CHANNELS, CHANNEL_LABEL } from './pipeline';
 
 /**
- * Both append-only logs behind two thumb-sized buttons. A visit must reference
- * a real meeting — the API takes a `meetingId`, not a free date — so this
- * picks from the club's meetings rather than asking anyone to paste a UUID.
+ * Contact notes only. Visits are not hand-entered any more — a visit is
+ * recorded when the guest is marked present on a meeting's Guest List, so the
+ * attendance roster and the visit history are the same fact rather than two
+ * that can disagree.
  */
-export function LogActivity({
-  clubUnitId,
-  guestId,
-  meetings,
-}: {
-  clubUnitId: string;
-  guestId: string;
-  meetings: Meeting[];
-}) {
+export function LogActivity({ clubUnitId, guestId }: { clubUnitId: string; guestId: string }) {
   const [contactOpen, setContactOpen] = useState(false);
-  const [visitOpen, setVisitOpen] = useState(false);
 
   return (
     <div className="flex flex-wrap gap-2">
@@ -55,17 +38,6 @@ export function LogActivity({
         <MessageSquarePlusIcon />
         Log contact
       </Button>
-      <Button
-        type="button"
-        variant="outline"
-        size="lg"
-        className="h-11 flex-1 lg:h-9 lg:flex-none"
-        onClick={() => setVisitOpen(true)}
-        disabled={meetings.length === 0}
-      >
-        <CalendarPlusIcon />
-        Log visit
-      </Button>
 
       <Dialog
         open={contactOpen}
@@ -78,22 +50,6 @@ export function LogActivity({
             clubUnitId={clubUnitId}
             guestId={guestId}
             onDone={() => setContactOpen(false)}
-          />
-        )}
-      </Dialog>
-
-      <Dialog
-        open={visitOpen}
-        onOpenChange={setVisitOpen}
-        title="Log visit"
-        description="Record that they attended one of the club's meetings."
-      >
-        {visitOpen && (
-          <LogVisitForm
-            clubUnitId={clubUnitId}
-            guestId={guestId}
-            meetings={meetings}
-            onDone={() => setVisitOpen(false)}
           />
         )}
       </Dialog>
@@ -173,78 +129,6 @@ function LogContactForm({
 
       <Button type="submit" size="lg" className="h-11 lg:h-9" disabled={submitting}>
         {submitting ? 'Saving…' : 'Log contact'}
-      </Button>
-    </form>
-  );
-}
-
-function LogVisitForm({
-  clubUnitId,
-  guestId,
-  meetings,
-  onDone,
-}: {
-  clubUnitId: string;
-  guestId: string;
-  meetings: Meeting[];
-  onDone: () => void;
-}) {
-  const router = useRouter();
-  const [meetingId, setMeetingId] = useState<string>(meetings[0]?.id ?? '');
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const meeting = meetings.find((m) => m.id === meetingId);
-    if (!meeting) {
-      setError('Pick a meeting first.');
-      return;
-    }
-    setError(null);
-    setSubmitting(true);
-    try {
-      const response = await fetch(`/api/clubs/${clubUnitId}/guests/${guestId}/visits`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        // The visit is the meeting's own instant — no separate date to key wrong.
-        body: JSON.stringify({ meetingId: meeting.id, attendedAt: meeting.scheduledAt }),
-      });
-      if (!response.ok) {
-        setError('Could not log that visit — it may already be recorded.');
-        return;
-      }
-      onDone();
-      router.refresh();
-    } catch {
-      setError('Network error — nothing was logged.');
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1.5">
-        <Label>Which meeting?</Label>
-        <Select value={meetingId} onValueChange={(v) => setMeetingId(v as string)}>
-          <SelectTrigger className="h-11 lg:h-9">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {meetings.map((m) => (
-              <SelectItem key={m.id} value={m.id}>
-                {meetingLabel(m)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {error && <p className="text-sm text-destructive">{error}</p>}
-
-      <Button type="submit" size="lg" className="h-11 lg:h-9" disabled={submitting}>
-        {submitting ? 'Saving…' : 'Log visit'}
       </Button>
     </form>
   );

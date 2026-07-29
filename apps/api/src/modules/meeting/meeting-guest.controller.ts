@@ -86,12 +86,14 @@ export class MeetingGuestController {
     @Param('clubUnitId', uuidPipe) clubUnitId: string,
     @Param('meetingId', uuidPipe) meetingId: string,
     @Param('guestId', uuidPipe) guestId: string,
+    @CurrentUser() principal: Principal,
     @Body(new ZodValidationPipe(updateMeetingGuestRequestSchema))
     body: UpdateMeetingGuestRequest,
   ): Promise<MeetingGuest> {
     await this.assertMeetingInClub(clubUnitId, meetingId);
     await this.assertGuestInMeeting(meetingId, guestId);
-    return this.guests.update({ id: guestId, ...body });
+    // `loggedBy` attributes the GuestVisit this may create — see the repository.
+    return this.guests.update({ id: guestId, ...body, loggedBy: principal.userId });
   }
 
   @Delete(':guestId')

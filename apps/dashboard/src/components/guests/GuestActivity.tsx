@@ -89,7 +89,7 @@ export function GuestActivity({
               </time>
             </div>
             {entry.detail && (
-              <p className="mt-0.5 text-sm break-words text-muted-foreground">{entry.detail}</p>
+              <p className="mt-0.5 text-sm wrap-break-word text-muted-foreground">{entry.detail}</p>
             )}
           </div>
         </li>

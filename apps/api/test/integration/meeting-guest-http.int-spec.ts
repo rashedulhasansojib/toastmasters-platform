@@ -200,4 +200,83 @@ describe('M9 Slice 2: meeting guest list (integration)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(404);
   });
+
+  /**
+   * Attendance is the only thing that writes a visit — there is no hand-entry
+   * path any more, so the roster and the guest's visit history cannot disagree.
+   */
+  describe('marking a linked guest present records their visit', () => {
+    it('creates the visit on add, drops it when un-marked, and restores it — idempotently', async () => {
+      const token = await jwtFor(vpeId);
+      const guestBase = `/v1/clubs/${clubId}/guests`;
+      const rosterBase = `/v1/clubs/${clubId}/meetings/${meetingId}/guests`;
+
+      const guest = await request(app.getHttpServer())
+        .post(guestBase)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ fullName: 'Linked Visitor', email: 'linked.visitor@example.com' })
+        .expect(201);
+      const clubGuestId = guest.body.id;
+
+      // Added to the roster present -> the visit exists, dated to the meeting.
+      const added = await request(app.getHttpServer())
+        .post(rosterBase)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ fullName: 'Linked Visitor', guestId: clubGuestId })
+        .expect(201);
+      const rosterRowId = added.body.id;
+
+      const afterAdd = await request(app.getHttpServer())
+        .get(`${guestBase}/${clubGuestId}/visits`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      expect(afterAdd.body).toHaveLength(1);
+      expect(afterAdd.body[0].meetingId).toBe(meetingId);
+      expect(afterAdd.body[0].attendedAt).toBe(new Date('2026-08-01T18:00:00Z').toISOString());
+
+      // Marked absent -> the visit never happened, so it goes.
+      await request(app.getHttpServer())
+        .patch(`${rosterBase}/${rosterRowId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ present: false })
+        .expect(200);
+      const afterAbsent = await request(app.getHttpServer())
+        .get(`${guestBase}/${clubGuestId}/visits`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      expect(afterAbsent.body).toHaveLength(0);
+
+      // Marked present twice -> still exactly one visit, not a duplicate or a 409.
+      for (const _ of [1, 2]) {
+        await request(app.getHttpServer())
+          .patch(`${rosterBase}/${rosterRowId}`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ present: true })
+          .expect(200);
+      }
+      const afterRestore = await request(app.getHttpServer())
+        .get(`${guestBase}/${clubGuestId}/visits`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      expect(afterRestore.body).toHaveLength(1);
+    });
+
+    it('a manual roster entry with no linked guest records no visit', async () => {
+      const token = await jwtFor(vpeId);
+      const added = await request(app.getHttpServer())
+        .post(`/v1/clubs/${clubId}/meetings/${meetingId}/guests`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ fullName: 'Walk-in, unlinked' })
+        .expect(201);
+      expect(added.body.guestId).toBeNull();
+
+      // Nothing to assert against a guest record — the point is that the
+      // present-flip below does not throw trying to write one.
+      await request(app.getHttpServer())
+        .patch(`/v1/clubs/${clubId}/meetings/${meetingId}/guests/${added.body.id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ present: false })
+        .expect(200);
+    });
+  });
 });

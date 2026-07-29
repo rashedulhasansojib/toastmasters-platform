@@ -1,6 +1,5 @@
 import { listProspects } from '@/lib/membership';
-import { CreateProspectForm } from '@/components/prospects/CreateProspectForm';
-import { ProspectsList } from '@/components/prospects/ProspectsList';
+import { ProspectsScreen } from '@/components/prospects/ProspectsScreen';
 
 export default async function ClubProspectsPage({
   params,
@@ -10,11 +9,11 @@ export default async function ClubProspectsPage({
   const { clubUnitId } = await params;
   const prospects = await listProspects(clubUnitId);
 
+  // Deliberately not the narrow `.page` container — the wide-screen board needs
+  // the full width, and the phone layout is edge-to-edge by design.
   return (
-    <main className="page flex flex-col gap-6">
-      <h1>Prospects</h1>
-      <CreateProspectForm clubUnitId={clubUnitId} />
-      <ProspectsList clubUnitId={clubUnitId} prospects={prospects} />
+    <main className="mx-auto w-full max-w-7xl">
+      <ProspectsScreen clubUnitId={clubUnitId} prospects={prospects} />
     </main>
   );
 }

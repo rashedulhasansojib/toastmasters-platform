@@ -18,14 +18,30 @@ export default defineConfig({
     environment: 'node',
     coverage: {
       provider: 'v8',
-      // Gate the domain logic; DI wiring (modules, guards, filters, adapters)
-      // is exercised by the e2e suite instead.
+      // The 80% gate (CLAUDE.md §7) covers every domain module and cross-
+      // cutting concern that currently has a spec. New modules join this
+      // list in the same commit as their first spec — never later. Modules
+      // still missing tests (M3 slices 8–12 and M4 slices 2–10 per their
+      // plan docs) are deliberately absent so the gate stays honest until
+      // those suites land.
       include: [
-        'src/common/authz/evaluate.ts',
-        'src/common/authz/authz.service.ts',
-        'src/common/auth/password.service.ts',
-        'src/common/pipes/zod-validation.pipe.ts',
-        'src/health/health.service.ts',
+        'src/common/auth/**/*.ts',
+        'src/common/authz/**/*.ts',
+        'src/common/pipes/**/*.ts',
+        'src/health/**/*.ts',
+        'src/modules/access/unit-policy.service.ts',
+        'src/modules/identity/invitation.service.ts',
+        'src/modules/identity/invitation-rate-limiter.service.ts',
+        'src/modules/membership/prospect.service.ts',
+        'src/modules/org/org.service.ts',
+      ],
+      exclude: [
+        '**/*.spec.ts',
+        '**/*.e2e-spec.ts',
+        '**/*.module.ts',
+        '**/*.decorator.ts',
+        '**/*.token.ts',
+        '**/*.types.ts',
       ],
       thresholds: { lines: 80, functions: 80, branches: 80, statements: 80 },
     },

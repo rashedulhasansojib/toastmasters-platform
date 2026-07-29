@@ -33,6 +33,9 @@ describe('Authorisation matrix (generated from role_template × resource_catalog
     'club_treasurer',
     'club_member',
     'club_vpm',
+    'club_vppr',
+    'club_saa',
+    'club_secretary',
     'system_admin',
     'unit_admin',
     'support_readonly',
@@ -46,6 +49,9 @@ describe('Authorisation matrix (generated from role_template × resource_catalog
     'club_treasurer',
     'club_member',
     'club_vpm',
+    'club_vppr',
+    'club_saa',
+    'club_secretary',
     'unit_admin',
   ];
 
@@ -72,6 +78,10 @@ describe('Authorisation matrix (generated from role_template × resource_catalog
     { resource: 'finance.invoice', actions: ['read', 'create', 'update'] },
     { resource: 'finance.installment_plan', actions: ['read', 'create', 'update'] },
     { resource: 'finance.report', actions: ['read', 'create', 'update'] },
+    { resource: 'library.governance_document', actions: ['read', 'create', 'update'] },
+    { resource: 'library.item', actions: ['read', 'create', 'update'] },
+    { resource: 'library.content_plan', actions: ['read', 'create', 'update'] },
+    { resource: 'operations.inventory', actions: ['read', 'create', 'update'] },
   ];
 
   /**
@@ -139,7 +149,16 @@ describe('Authorisation matrix (generated from role_template × resource_catalog
       endsOn: new Date('2027-06-30'),
     });
 
-    const domainRoles = ['club_president', 'club_vpe', 'club_treasurer', 'club_member', 'club_vpm'];
+    const domainRoles = [
+      'club_president',
+      'club_vpe',
+      'club_treasurer',
+      'club_member',
+      'club_vpm',
+      'club_vppr',
+      'club_saa',
+      'club_secretary',
+    ];
     for (const role of domainRoles) {
       const person = await people.create({ email: `${role}@example.com`, fullName: role });
       actorId[role] = person.id;

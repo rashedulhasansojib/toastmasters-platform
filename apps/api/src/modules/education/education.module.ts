@@ -5,6 +5,9 @@ import { IdentityModule } from '../identity/identity.module';
 import { EducationRecordRepository } from './education-record.repository';
 import { EducationRecordService } from './education-record.service';
 import { EducationRecordController } from './education-record.controller';
+import { EducationProgressRepository } from './education-progress.repository';
+import { EducationProgressService } from './education-progress.service';
+import { EducationProgressController } from './education-progress.controller';
 import { SpeechEvaluationRepository } from './speech-evaluation.repository';
 import { SpeechEvaluationController } from './speech-evaluation.controller';
 import { MentorAvailabilityRepository } from './mentor-availability.repository';
@@ -21,6 +24,8 @@ import { OnboardingTrackController, OnboardingProgressController } from './onboa
     { provide: PRISMA_CLIENT, useFactory: () => getPrisma() },
     EducationRecordRepository,
     EducationRecordService,
+    EducationProgressRepository,
+    EducationProgressService,
     SpeechEvaluationRepository,
     MentorAvailabilityRepository,
     MentorshipPairingRepository,
@@ -30,6 +35,7 @@ import { OnboardingTrackController, OnboardingProgressController } from './onboa
   ],
   controllers: [
     EducationRecordController,
+    EducationProgressController,
     SpeechEvaluationController,
     MentorshipController,
     OnboardingTrackController,

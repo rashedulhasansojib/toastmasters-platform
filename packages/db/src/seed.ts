@@ -390,6 +390,20 @@ const RESOURCES: ResourceSeed[] = [
     sensitivity: 'normal',
   },
   {
+    // M10: the club-wide education roster. Deliberately *not* `education.record`
+    // read — a plain member holds that with condition `own`, and this endpoint
+    // returns every member's row, so reusing it would hand the whole club's
+    // progress to anyone with a self-scoped grant (FR-AUTHZ-8). Its own
+    // resource keeps the grant unconditional and club-officer-only; the
+    // oversight tiers never hold it (FR-OVS-3).
+    resource: 'education.progress',
+    context: 'education',
+    label: 'Club education roster',
+    allowedActions: ['read'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
+  {
     // M7 Slice 3/6: system-design.md §10.3.
     resource: 'education.mentorship',
     context: 'education',
@@ -507,6 +521,7 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'quality.ticket', action: 'create' },
       { resource: 'quality.ticket', action: 'update' },
       { resource: 'education.record', action: 'read' },
+      { resource: 'education.progress', action: 'read' },
       { resource: 'education.evaluation', action: 'read' },
       { resource: 'education.mentorship', action: 'read' },
       { resource: 'education.onboarding', action: 'read' },
@@ -577,6 +592,7 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'education.record', action: 'create' },
       { resource: 'education.record', action: 'update' },
       { resource: 'education.record', action: 'approve' },
+      { resource: 'education.progress', action: 'read' },
       { resource: 'education.evaluation', action: 'read' },
       { resource: 'education.evaluation', action: 'create' },
       { resource: 'education.evaluation', action: 'update' },
@@ -979,6 +995,48 @@ const PATHWAY_PATHS: PathwayPathSeed[] = [
       },
     ],
   },
+  // M10: the remaining ten TI paths, names and credentials only. The club
+  // education roster needs a real path list for its picker and its `Path`
+  // column; the per-level project curriculum for these is *not* transcribed
+  // here, because guessing it would put wrong denominators in front of a VPE.
+  // A path with no seeded projects reports `required: 0` and the roster
+  // renders that level as "not defined" rather than as unearned progress.
+  // Extend `projects` from TI's published curriculum — no migration needed.
+  {
+    pathCode: 'MS',
+    name: 'Motivational Strategies',
+    credential: 'Motivational Strategies',
+    projects: [],
+  },
+  {
+    pathCode: 'PI',
+    name: 'Persuasive Influence',
+    credential: 'Persuasive Influence',
+    projects: [],
+  },
+  {
+    pathCode: 'VC',
+    name: 'Visionary Communication',
+    credential: 'Visionary Communication',
+    projects: [],
+  },
+  {
+    pathCode: 'SR',
+    name: 'Strategic Relationships',
+    credential: 'Strategic Relationships',
+    projects: [],
+  },
+  { pathCode: 'DL', name: 'Dynamic Leadership', credential: 'Dynamic Leadership', projects: [] },
+  { pathCode: 'IP', name: 'Innovative Planning', credential: 'Innovative Planning', projects: [] },
+  {
+    pathCode: 'LD',
+    name: 'Leadership Development',
+    credential: 'Leadership Development',
+    projects: [],
+  },
+  { pathCode: 'EC', name: 'Effective Coaching', credential: 'Effective Coaching', projects: [] },
+  { pathCode: 'TC', name: 'Team Collaboration', credential: 'Team Collaboration', projects: [] },
+  { pathCode: 'EH', name: 'Engaging Humor', credential: 'Engaging Humor', projects: [] },
 ];
 
 export async function seedPathwayCatalog(db: PrismaClient): Promise<void> {

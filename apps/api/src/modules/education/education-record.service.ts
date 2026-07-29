@@ -1,6 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { EducationRecord, EducationRecordLevel } from '@toastmasters/contracts';
 import { EducationRecordRepository } from './education-record.repository';
+import { PATH_LEVELS } from './club-education-progress';
+
+function confirmedLevel(levels: EducationRecordLevel[], level: number): boolean {
+  return levels.find((l) => l.level === level)?.vpeConfirmedAt != null;
+}
 
 /**
  * M7 Slice 1: system-design.md §10.1, FR-EDU-2/3. `markLevelComplete` is
@@ -74,12 +79,27 @@ export class EducationRecordService {
       throw new BadRequestException('Member has not marked this level complete yet');
     }
 
+    const confirmedAt = new Date();
     const levels = this.upsertLevel(record.levels, level, (current) => ({
       ...current,
-      vpeConfirmedAt: new Date().toISOString(),
+      vpeConfirmedAt: confirmedAt.toISOString(),
       vpeConfirmedBy: vpePersonId,
     }));
-    return this.records.updateLevels(recordId, levels);
+
+    // The path is complete once every level carries a VPE confirmation — the
+    // only date that ever feeds DCP (FR-EDU-3). Derived here rather than left
+    // to a separate "close the path" click, which would be a second chance to
+    // get it wrong. Still a portal projection, never an official TI award:
+    // `tiAwardRecordedAt` on the level is what records TI's own credit.
+    const complete =
+      record.completedAt === null && PATH_LEVELS.every((l) => confirmedLevel(levels, l));
+    const credential = complete ? await this.records.findPathCredential(record.pathCode) : null;
+
+    return this.records.updateLevels(
+      recordId,
+      levels,
+      complete && credential ? { completedAt: confirmedAt, credential } : undefined,
+    );
   }
 
   private upsertLevel(

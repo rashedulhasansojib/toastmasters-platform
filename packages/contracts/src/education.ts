@@ -292,3 +292,55 @@ export const completeOnboardingStepRequestSchema = z
   .object({ note: z.string().min(1).optional() })
   .strict();
 export type CompleteOnboardingStepRequest = z.infer<typeof completeOnboardingStepRequestSchema>;
+
+/**
+ * M10: the club's education roster — one row per member per path, with
+ * per-level progress. A read-only **projection**, not a record: `delivered`
+ * is counted live from approved speech slots on closed meetings (the same
+ * evidence `markLevelComplete` gates on), and `required` comes from the
+ * seeded `PathwayProject` catalogue, so both move when the catalogue does.
+ *
+ * `required: 0` means the catalogue has no projects seeded at that level for
+ * that path — the UI must render that as "not defined", never as "0 of 0
+ * complete", or a thin catalogue reads as a member who has done nothing.
+ */
+export const clubEducationProgressLevel = z.object({
+  level: z.number().int().min(1).max(5),
+  /** Projects the seeded catalogue defines at this level of this path. */
+  required: z.number().int().min(0),
+  /** Distinct catalogue projects the member has actually delivered at this level. */
+  delivered: z.number().int().min(0),
+  memberMarkedCompleteAt: z.iso.datetime().nullable(),
+  /** The only date that ever feeds the DCP projection (FR-EDU-3). */
+  vpeConfirmedAt: z.iso.datetime().nullable(),
+});
+export type ClubEducationProgressLevel = z.infer<typeof clubEducationProgressLevel>;
+
+/**
+ * A catalogue project the member has actually delivered on this path — the
+ * earliest approved slot on a closed meeting. Re-deliveries do not appear:
+ * the drawer shows the speech that first satisfied the project, not every
+ * time the Ice Breaker got repeated for practice.
+ */
+export const clubEducationProgressDelivery = z.object({
+  projectCode: z.string(),
+  speechTitle: z.string(),
+  deliveredAt: z.iso.datetime(),
+});
+export type ClubEducationProgressDelivery = z.infer<typeof clubEducationProgressDelivery>;
+
+export const clubEducationProgressRow = z.object({
+  personId: z.uuid(),
+  fullName: z.string(),
+  /** null when the member has not started a path — the row still appears. */
+  recordId: z.uuid().nullable(),
+  pathCode: z.string().nullable(),
+  pathName: z.string().nullable(),
+  startedAt: z.iso.datetime().nullable(),
+  completedAt: z.iso.datetime().nullable(),
+  credential: z.string().nullable(),
+  levels: z.array(clubEducationProgressLevel),
+  /** Per-project delivery detail for this row's path. Empty until a member both starts a path and delivers a project on it. */
+  deliveredProjects: z.array(clubEducationProgressDelivery),
+});
+export type ClubEducationProgressRow = z.infer<typeof clubEducationProgressRow>;

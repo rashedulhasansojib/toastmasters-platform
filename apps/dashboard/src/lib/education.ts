@@ -1,10 +1,12 @@
 import {
+  clubEducationProgressRow,
   educationRecord,
   speechEvaluation,
   mentorshipPairing,
   mentorshipSuggestion,
   onboardingTrack,
   onboardingProgress,
+  type ClubEducationProgressRow,
   type EducationRecord,
   type SpeechEvaluation,
   type MentorshipPairing,
@@ -22,6 +24,20 @@ export async function listEducationRecords(
   const response = await authedFetch(`/v1/clubs/${clubUnitId}/education-records${qs}`);
   if (!response.ok) return [];
   return educationRecord.array().parse(await response.json());
+}
+
+/**
+ * The club education roster. Returns `null` — not `[]` — when the caller
+ * lacks `education.progress: read`, so the page can say "officers only"
+ * rather than show an empty club.
+ */
+export async function listClubEducationProgress(
+  clubUnitId: string,
+): Promise<ClubEducationProgressRow[] | null> {
+  const response = await authedFetch(`/v1/clubs/${clubUnitId}/education/progress`);
+  if (response.status === 403 || response.status === 404) return null;
+  if (!response.ok) return [];
+  return clubEducationProgressRow.array().parse(await response.json());
 }
 
 export async function listMyEvaluations(clubUnitId: string): Promise<SpeechEvaluation[]> {

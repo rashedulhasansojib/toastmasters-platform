@@ -47,12 +47,26 @@ export class EducationRecordRepository {
     return rows.map(toEducationRecord);
   }
 
-  async updateLevels(id: string, levels: EducationRecordLevel[]): Promise<EducationRecord> {
+  /** `completion` is set only when the fifth level is confirmed — see EducationRecordService.confirmLevel. */
+  async updateLevels(
+    id: string,
+    levels: EducationRecordLevel[],
+    completion?: { completedAt: Date; credential: string },
+  ): Promise<EducationRecord> {
     const row = await this.db.educationRecord.update({
       where: { id },
-      data: { levels: levels as never },
+      data: { levels: levels as never, ...(completion ?? {}) },
     });
     return toEducationRecord(row);
+  }
+
+  /** The credential a path awards on completion — seeded reference data, never hardcoded (FR-EDU-1). */
+  async findPathCredential(pathCode: string): Promise<string | null> {
+    const path = await this.db.pathwayPath.findUnique({
+      where: { pathCode },
+      select: { credential: true },
+    });
+    return path?.credential ?? null;
   }
 
   async findByPersonAndClub(personId: string, clubUnitId: string): Promise<EducationRecord[]> {
@@ -72,11 +86,16 @@ export class EducationRecordRepository {
   ): Promise<SpeechSlotRow[]> {
     return this.db.speechSlot.findMany({
       where: {
-        requestedBy: personId,
         pathCode,
         level,
         status: 'approved',
         meeting: { status: 'closed' },
+        // M9 split "who filed the request" from "who speaks" — a VPE files
+        // slots on other members' behalf. Credit the speaker, falling back to
+        // the requester for the self-service case where they are the same
+        // person. Matching the roster projection's rule keeps "3 of 3" on the
+        // roster and a successful mark-complete in agreement.
+        OR: [{ speakerPersonId: personId }, { speakerPersonId: null, requestedBy: personId }],
       },
     });
   }

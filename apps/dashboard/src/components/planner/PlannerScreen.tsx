@@ -170,24 +170,27 @@ export function PlannerScreen({
         <>
           {/* Wide screens: the spreadsheet shape clubs already think in. */}
           <div className="hidden overflow-x-auto rounded-xl border lg:block">
-            <table className="w-full border-collapse text-sm">
+            <table className="w-full border-separate border-spacing-0 text-sm">
               <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="sticky left-0 z-10 bg-muted/50 px-3 py-2.5 text-left font-medium whitespace-nowrap">
-                    Date / Theme
+                <tr className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
+                  <th className="sticky left-0 z-10 min-w-[9rem] border-b border-r border-border bg-muted/50 px-3 py-2 text-left font-medium whitespace-nowrap">
+                    Date
                   </th>
                   {PLANNER_COLUMNS.map((column) => (
                     <th
                       key={cellKey(column.roleKey, column.slotIndex)}
                       title={column.label}
-                      className="px-3 py-2.5 text-left font-medium whitespace-nowrap"
+                      className="min-w-[10rem] border-b border-border px-3 py-2 text-left font-medium whitespace-nowrap"
                     >
                       {column.short}
                     </th>
                   ))}
+                  <th className="min-w-[12rem] border-b border-border px-3 py-2 text-left font-medium whitespace-nowrap">
+                    Theme
+                  </th>
                   <th
                     scope="col"
-                    className="sticky right-0 z-10 w-20 bg-muted/50 px-3 py-2.5 text-right font-medium whitespace-nowrap"
+                    className="sticky right-0 z-10 w-24 border-b border-l border-border bg-muted/50 px-3 py-2 text-right font-medium whitespace-nowrap"
                   >
                     <span className="sr-only">Actions</span>
                   </th>
@@ -236,7 +239,7 @@ export function PlannerScreen({
   );
 }
 
-/** One row in the desktop grid. Date, cells and theme are all editable in place. */
+/** One row in the desktop grid. Every cell is edited in place. */
 function PlannerRowGrid({
   row,
   clubUnitId,
@@ -249,10 +252,10 @@ function PlannerRowGrid({
   guests: Guest[];
 }) {
   return (
-    <tr className="border-b last:border-0 hover:bg-muted/30">
+    <tr className="group hover:bg-muted/20">
       <th
         scope="row"
-        className="sticky left-0 z-10 bg-background px-3 py-2.5 text-left font-medium align-top"
+        className="sticky left-0 z-10 border-b border-r border-border bg-background px-2 py-1.5 text-left align-middle font-normal group-hover:bg-muted/20"
       >
         <DateInput
           clubUnitId={clubUnitId}
@@ -260,14 +263,13 @@ function PlannerRowGrid({
           scheduledAt={row.scheduledAt}
           status={row.status}
         />
-        <ThemeInput clubUnitId={clubUnitId} meetingId={row.meetingId} initial={row.theme} />
       </th>
       {PLANNER_COLUMNS.map((column) => {
         const cell = cellFor(row, column.roleKey, column.slotIndex);
         return (
           <td
             key={cellKey(column.roleKey, column.slotIndex)}
-            className={cn('px-3 py-2 align-top whitespace-nowrap', cellTone(cell))}
+            className={cn('border-b border-border px-2 py-1.5 align-middle', cellTone(cell))}
           >
             <CellPicker
               clubUnitId={clubUnitId}
@@ -281,7 +283,10 @@ function PlannerRowGrid({
           </td>
         );
       })}
-      <td className="sticky right-0 z-10 bg-background px-3 py-2 align-top text-right">
+      <td className="border-b border-border px-2 py-1.5 align-middle">
+        <ThemeInput clubUnitId={clubUnitId} meetingId={row.meetingId} initial={row.theme} />
+      </td>
+      <td className="sticky right-0 z-10 border-b border-l border-border bg-background px-2 py-1.5 align-middle text-right group-hover:bg-muted/20">
         <RowActions clubUnitId={clubUnitId} meetingId={row.meetingId} status={row.status} />
       </td>
     </tr>
@@ -306,29 +311,30 @@ function PlannerRowCard({
 
   return (
     <article className="overflow-hidden rounded-xl border bg-card">
-      <div className="flex flex-col gap-2 border-b bg-muted/30 px-3.5 py-2.5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <DateInput
-              clubUnitId={clubUnitId}
-              meetingId={row.meetingId}
-              scheduledAt={row.scheduledAt}
-              status={row.status}
-            />
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {formatMeetingDateLong(row.scheduledAt)}
-            </p>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {missing > 0 && (
-              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                <CircleAlertIcon className="size-3.5" />
-                {missing}
-              </span>
-            )}
-            <RowActions clubUnitId={clubUnitId} meetingId={row.meetingId} status={row.status} />
-          </div>
+      <div className="flex items-start justify-between gap-2 border-b bg-muted/30 px-3.5 py-2.5">
+        <div className="min-w-0 flex-1">
+          <DateInput
+            clubUnitId={clubUnitId}
+            meetingId={row.meetingId}
+            scheduledAt={row.scheduledAt}
+            status={row.status}
+          />
+          <p className="mt-0.5 pl-2 text-xs text-muted-foreground">
+            {formatMeetingDateLong(row.scheduledAt)}
+          </p>
         </div>
+        <div className="flex shrink-0 items-center gap-2 pt-1">
+          {missing > 0 && (
+            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+              <CircleAlertIcon className="size-3.5" />
+              {missing}
+            </span>
+          )}
+          <RowActions clubUnitId={clubUnitId} meetingId={row.meetingId} status={row.status} />
+        </div>
+      </div>
+      <div className="border-b px-3.5 py-2">
+        <p className="mb-1 text-xs text-muted-foreground">Theme</p>
         <ThemeInput clubUnitId={clubUnitId} meetingId={row.meetingId} initial={row.theme} />
       </div>
       <dl className="grid grid-cols-2 gap-x-4 gap-y-3 px-3.5 py-3 text-sm">
@@ -499,10 +505,11 @@ function ThemeInput({
         onKeyDown={(e) => {
           if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
         }}
-        className="mt-1 block w-full max-w-[240px] rounded border border-transparent bg-transparent px-1 py-0.5 text-xs font-normal text-muted-foreground outline-none placeholder:text-muted-foreground/60 hover:border-input focus:border-input focus:bg-background focus:text-foreground"
+        aria-label="Meeting theme"
+        className="h-9 w-full rounded-md border border-transparent bg-transparent px-2 text-sm outline-none transition-colors placeholder:text-muted-foreground/60 hover:border-input hover:bg-background focus:border-ring focus:bg-background focus:ring-1 focus:ring-ring"
       />
       {error && (
-        <span role="alert" className="text-xs text-destructive">
+        <span role="alert" className="mt-0.5 block text-xs text-destructive">
           {error}
         </span>
       )}
@@ -571,9 +578,9 @@ function DateInput({
         }}
         aria-label="Meeting date"
         className={cn(
-          'h-8 rounded-md border border-transparent bg-transparent px-1.5 text-sm font-medium outline-none',
-          'hover:border-input focus:border-input focus:bg-background',
-          locked && 'cursor-not-allowed opacity-70',
+          'h-9 w-full rounded-md border border-transparent bg-transparent px-2 text-sm font-medium outline-none transition-colors',
+          'hover:border-input hover:bg-background focus:border-ring focus:bg-background focus:ring-1 focus:ring-ring',
+          locked && 'cursor-not-allowed opacity-70 hover:border-transparent hover:bg-transparent',
         )}
       />
       {error && (

@@ -233,8 +233,10 @@ export function PersonPicker({
         onClick={() => (open ? closeDropdown() : openDropdown())}
         disabled={disabled}
         className={cn(
-          'flex h-8 w-full items-center justify-between gap-1 rounded-md border border-input bg-background px-2.5 text-left text-sm transition-colors',
-          open ? 'ring-1 ring-ring' : 'hover:bg-accent',
+          'flex h-9 w-full items-center justify-between gap-1 rounded-md border border-transparent bg-transparent px-2 text-left text-sm transition-colors',
+          open
+            ? 'border-ring bg-background ring-1 ring-ring'
+            : 'hover:border-input hover:bg-background',
           disabled && 'cursor-not-allowed opacity-60',
         )}
       >

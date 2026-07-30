@@ -180,36 +180,36 @@ export function GuestsScreen({ clubUnitId, guests }: { clubUnitId: string; guest
 
       {view === 'list' && (
         <div className="flex flex-col gap-4">
-          <div className="-mx-4 overflow-x-auto px-4 sm:-mx-6 sm:px-6 lg:hidden">
-            <div className="flex w-max gap-2">
-              {chips.map(({ key, label, count, accent }) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setFilter(key)}
-                  aria-pressed={filter === key}
-                  className={cn(
-                    'inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm whitespace-nowrap transition-colors',
-                    filter === key
-                      ? 'border-primary bg-primary text-primary-foreground'
-                      : 'bg-background text-muted-foreground active:bg-accent sm:hover:bg-accent',
-                  )}
-                >
-                  {accent && (
-                    <span
-                      className={cn(
-                        'size-1.5 rounded-full',
-                        filter === key ? 'bg-primary-foreground/70' : accent,
-                      )}
-                    />
-                  )}
-                  {label}
-                  <span className={cn('text-xs', filter !== key && 'text-muted-foreground/70')}>
-                    {count}
-                  </span>
-                </button>
-              ))}
-            </div>
+          {/* Wraps rather than scrolls: a horizontal rail hid the later stages
+              off-screen behind a swipe nobody knew was there. */}
+          <div className="flex flex-wrap gap-2 lg:hidden">
+            {chips.map(({ key, label, count, accent }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setFilter(key)}
+                aria-pressed={filter === key}
+                className={cn(
+                  'inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-sm whitespace-nowrap transition-colors',
+                  filter === key
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'bg-background text-muted-foreground active:bg-accent sm:hover:bg-accent',
+                )}
+              >
+                {accent && (
+                  <span
+                    className={cn(
+                      'size-1.5 rounded-full',
+                      filter === key ? 'bg-primary-foreground/70' : accent,
+                    )}
+                  />
+                )}
+                {label}
+                <span className={cn('text-xs', filter !== key && 'text-muted-foreground/70')}>
+                  {count}
+                </span>
+              </button>
+            ))}
           </div>
 
           {visible.length === 0 ? (

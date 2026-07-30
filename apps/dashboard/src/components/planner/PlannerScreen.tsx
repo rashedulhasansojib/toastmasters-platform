@@ -746,7 +746,10 @@ function RowActions({
   agendaTemplates: AgendaTemplate[];
 }) {
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  // One state variable, not one useTransition per button — so a spinner
+  // only shows on the icon whose action is actually in flight. `busy` also
+  // guards the sibling buttons against concurrent clicks.
+  const [busy, setBusy] = useState<'play' | 'cancel' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
 
@@ -761,11 +764,13 @@ function RowActions({
         : agendaTemplates.length === 1
           ? `Apply agenda template "${agendaTemplates[0].name}"`
           : 'Choose an agenda template to apply';
-  const playDisabled = pending || !canApplyAgenda || agendaTemplates.length === 0;
+  const playDisabled = busy !== null || !canApplyAgenda || agendaTemplates.length === 0;
+  const cancelDisabled = busy !== null || !canCancel;
 
-  function applyTemplate(templateId: string) {
+  async function applyTemplate(templateId: string) {
     setError(null);
-    startTransition(async () => {
+    setBusy('play');
+    try {
       const res = await fetch(
         `/api/clubs/${clubUnitId}/meetings/${meetingId}/agenda-items/from-template`,
         {
@@ -780,20 +785,22 @@ function RowActions({
       }
       setPickerOpen(false);
       router.refresh();
-    });
+    } finally {
+      setBusy(null);
+    }
   }
 
   function play() {
     if (playDisabled) return;
     if (agendaTemplates.length === 1) {
-      applyTemplate(agendaTemplates[0].id);
+      void applyTemplate(agendaTemplates[0].id);
       return;
     }
     setPickerOpen(true);
   }
 
-  function cancel() {
-    if (!canCancel) return;
+  async function cancel() {
+    if (cancelDisabled) return;
     if (
       !confirm(
         'Cancel this meeting? It will be marked as cancelled and hidden from the planner. History and role assignments are preserved.',
@@ -802,7 +809,8 @@ function RowActions({
       return;
     }
     setError(null);
-    startTransition(async () => {
+    setBusy('cancel');
+    try {
       const res = await fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/cancel`, {
         method: 'POST',
       });
@@ -811,7 +819,9 @@ function RowActions({
         return;
       }
       router.refresh();
-    });
+    } finally {
+      setBusy(null);
+    }
   }
 
   return (
@@ -827,7 +837,11 @@ function RowActions({
           playDisabled ? 'cursor-not-allowed opacity-40' : 'hover:bg-primary/10 hover:text-primary',
         )}
       >
-        {pending ? <Loader2 className="size-4 animate-spin" /> : <PlayIcon className="size-4" />}
+        {busy === 'play' ? (
+          <Loader2 className="size-4 animate-spin" />
+        ) : (
+          <PlayIcon className="size-4" />
+        )}
       </button>
       <a
         href={`/clubs/${clubUnitId}/meetings/${meetingId}`}
@@ -840,7 +854,7 @@ function RowActions({
       <button
         type="button"
         onClick={cancel}
-        disabled={!canCancel || pending}
+        disabled={cancelDisabled}
         aria-label="Cancel meeting"
         title={canCancel ? 'Cancel meeting' : 'Cannot cancel a meeting that has started or closed'}
         className={cn(
@@ -850,7 +864,11 @@ function RowActions({
             : 'cursor-not-allowed opacity-40',
         )}
       >
-        {pending ? <Loader2 className="size-4 animate-spin" /> : <Trash2Icon className="size-4" />}
+        {busy === 'cancel' ? (
+          <Loader2 className="size-4 animate-spin" />
+        ) : (
+          <Trash2Icon className="size-4" />
+        )}
       </button>
       {error && (
         <span role="alert" className="text-xs text-destructive">
@@ -861,8 +879,10 @@ function RowActions({
       {pickerOpen && (
         <TemplatePickerDialog
           templates={agendaTemplates}
-          pending={pending}
-          onApply={applyTemplate}
+          pending={busy === 'play'}
+          onApply={(id) => {
+            void applyTemplate(id);
+          }}
           onClose={() => setPickerOpen(false)}
         />
       )}

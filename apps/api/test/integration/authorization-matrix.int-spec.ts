@@ -77,7 +77,7 @@ describe('Authorisation matrix (generated from role_template × resource_catalog
     { resource: 'identity.person', actions: ['read', 'create', 'update'] },
     { resource: 'org.unit', actions: ['create', 'update'] },
     { resource: 'access.unit_policy', actions: ['create'] },
-    { resource: 'membership.guest', actions: ['read', 'create', 'update'] },
+    { resource: 'membership.guest', actions: ['read', 'create', 'update', 'delete'] },
     { resource: 'finance.dues', actions: ['read', 'create', 'update'] },
     { resource: 'finance.invoice', actions: ['read', 'create', 'update'] },
     { resource: 'finance.installment_plan', actions: ['read', 'create', 'update'] },

@@ -4,6 +4,7 @@ import { ArrowLeftIcon, MailIcon, MessageCircleIcon, PhoneIcon } from 'lucide-re
 
 import { getGuest, getGuestVisits, getGuestCommunications } from '@/lib/membership';
 import { listMeetings } from '@/lib/meetings';
+import { getSession } from '@/lib/session';
 import { Avatar } from '@/components/ui/avatar';
 import { GuestStatusBadge } from '@/components/guests/GuestStatusBadge';
 import { GuestDetailActions } from '@/components/guests/GuestDetailActions';
@@ -17,11 +18,12 @@ export default async function GuestDetailPage({
   params: Promise<{ clubUnitId: string; guestId: string }>;
 }) {
   const { clubUnitId, guestId } = await params;
-  const [guest, visits, communications, meetings] = await Promise.all([
+  const [guest, visits, communications, meetings, session] = await Promise.all([
     getGuest(clubUnitId, guestId),
     getGuestVisits(clubUnitId, guestId),
     getGuestCommunications(clubUnitId, guestId),
     listMeetings(clubUnitId),
+    getSession(),
   ]);
   if (!guest) notFound();
 
@@ -126,7 +128,13 @@ export default async function GuestDetailPage({
           <h2 className="text-base font-semibold">Activity</h2>
           {!redacted && <LogActivity clubUnitId={clubUnitId} guestId={guestId} />}
         </div>
-        <GuestActivity visits={visits} communications={communications} meetings={meetings} />
+        <GuestActivity
+          clubUnitId={clubUnitId}
+          visits={visits}
+          communications={communications}
+          meetings={meetings}
+          currentUserId={session?.personId ?? null}
+        />
       </section>
     </main>
   );

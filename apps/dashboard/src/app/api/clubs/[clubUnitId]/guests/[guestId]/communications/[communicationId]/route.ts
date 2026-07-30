@@ -1,0 +1,48 @@
+import { NextResponse } from 'next/server';
+import { updateGuestCommunicationRequestSchema } from '@toastmasters/contracts';
+import { authedFetch } from '@/lib/session-proxy';
+
+export async function PATCH(
+  request: Request,
+  {
+    params,
+  }: {
+    params: Promise<{ clubUnitId: string; guestId: string; communicationId: string }>;
+  },
+): Promise<NextResponse> {
+  const { clubUnitId, guestId, communicationId } = await params;
+
+  const parsed = updateGuestCommunicationRequestSchema.safeParse(await request.json());
+  if (!parsed.success) {
+    return NextResponse.json({ message: 'Invalid request' }, { status: 422 });
+  }
+
+  const upstream = await authedFetch(
+    `/v1/clubs/${clubUnitId}/guests/${guestId}/communications/${communicationId}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(parsed.data),
+    },
+  );
+  return NextResponse.json(await upstream.json().catch(() => ({})), { status: upstream.status });
+}
+
+export async function DELETE(
+  _request: Request,
+  {
+    params,
+  }: {
+    params: Promise<{ clubUnitId: string; guestId: string; communicationId: string }>;
+  },
+): Promise<NextResponse> {
+  const { clubUnitId, guestId, communicationId } = await params;
+  const upstream = await authedFetch(
+    `/v1/clubs/${clubUnitId}/guests/${guestId}/communications/${communicationId}`,
+    { method: 'DELETE' },
+  );
+  if (upstream.status === 204) {
+    return new NextResponse(null, { status: 204 });
+  }
+  return NextResponse.json(await upstream.json().catch(() => ({})), { status: upstream.status });
+}

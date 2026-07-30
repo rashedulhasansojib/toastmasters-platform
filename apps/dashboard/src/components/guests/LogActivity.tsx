@@ -44,7 +44,7 @@ export function LogActivity({ clubUnitId, guestId }: { clubUnitId: string; guest
         open={contactOpen}
         onOpenChange={setContactOpen}
         title="Log contact"
-        description="Dated note of a follow-up. Entries can't be edited afterwards."
+        description="Dated note of a follow-up. Only you can edit or delete your own entries."
       >
         {contactOpen && (
           <LogContactForm

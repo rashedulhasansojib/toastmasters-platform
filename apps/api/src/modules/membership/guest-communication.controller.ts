@@ -1,8 +1,21 @@
-import { Body, Controller, Get, NotFoundException, Param, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  ForbiddenException,
+  Get,
+  HttpCode,
+  NotFoundException,
+  Param,
+  Patch,
+  Post,
+} from '@nestjs/common';
 import { z } from 'zod';
 import {
   createGuestCommunicationRequestSchema,
+  updateGuestCommunicationRequestSchema,
   type CreateGuestCommunicationRequest,
+  type UpdateGuestCommunicationRequest,
   type GuestCommunication,
 } from '@toastmasters/contracts';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
@@ -27,6 +40,22 @@ export class GuestCommunicationController {
     if (!guest || guest.orgUnitId !== clubUnitId) {
       throw new NotFoundException('Guest not found');
     }
+  }
+
+  /** Filer-only: RBAC lets any VPM in scope update/delete on `membership.guest`, but a contact-log entry is authored by one person and only they get to revise it. */
+  private async findOwnEntry(
+    guestId: string,
+    communicationId: string,
+    principalId: string,
+  ): Promise<GuestCommunication> {
+    const entry = await this.communications.findById(communicationId);
+    if (!entry || entry.guestId !== guestId) {
+      throw new NotFoundException('Contact log entry not found');
+    }
+    if (entry.loggedBy !== principalId) {
+      throw new ForbiddenException('Only the person who logged the entry can modify it');
+    }
+    return entry;
   }
 
   @Post()
@@ -55,5 +84,34 @@ export class GuestCommunicationController {
   ): Promise<GuestCommunication[]> {
     await this.assertGuestInClub(clubUnitId, guestId);
     return this.communications.findByGuest(guestId);
+  }
+
+  @Patch(':communicationId')
+  @ResourceScope('membership.guest', 'update', { source: 'param', key: 'clubUnitId' })
+  async update(
+    @Param('clubUnitId', uuidPipe) clubUnitId: string,
+    @Param('guestId', uuidPipe) guestId: string,
+    @Param('communicationId', uuidPipe) communicationId: string,
+    @CurrentUser() principal: Principal,
+    @Body(new ZodValidationPipe(updateGuestCommunicationRequestSchema))
+    body: UpdateGuestCommunicationRequest,
+  ): Promise<GuestCommunication> {
+    await this.assertGuestInClub(clubUnitId, guestId);
+    await this.findOwnEntry(guestId, communicationId, principal.userId);
+    return this.communications.update(communicationId, body);
+  }
+
+  @Delete(':communicationId')
+  @HttpCode(204)
+  @ResourceScope('membership.guest', 'delete', { source: 'param', key: 'clubUnitId' })
+  async remove(
+    @Param('clubUnitId', uuidPipe) clubUnitId: string,
+    @Param('guestId', uuidPipe) guestId: string,
+    @Param('communicationId', uuidPipe) communicationId: string,
+    @CurrentUser() principal: Principal,
+  ): Promise<void> {
+    await this.assertGuestInClub(clubUnitId, guestId);
+    await this.findOwnEntry(guestId, communicationId, principal.userId);
+    await this.communications.remove(communicationId);
   }
 }

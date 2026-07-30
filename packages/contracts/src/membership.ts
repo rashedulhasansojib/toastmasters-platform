@@ -127,6 +127,20 @@ export const createGuestCommunicationRequestSchema = z
 export type CreateGuestCommunicationRequest = z.infer<typeof createGuestCommunicationRequestSchema>;
 
 /**
+ * Only the person who logged an entry can revise it — enforced at the
+ * controller. `guest_communication` has no REVOKE UPDATE/DELETE (unlike
+ * ledger/audit/attendance/votes/inventory), so this is a real edit, not a
+ * correction-record.
+ */
+export const updateGuestCommunicationRequestSchema = z
+  .object({
+    channel: guestCommunicationChannel.optional(),
+    note: z.string().min(1).optional(),
+  })
+  .strict();
+export type UpdateGuestCommunicationRequest = z.infer<typeof updateGuestCommunicationRequestSchema>;
+
+/**
  * M4 Slice 4: system-design.md §11.1's conversion — "create-or-attach `Person`
  * → create `ClubMembership` → link → emit `GuestConverted`." `wasExistingPerson`
  * tells the caller whether this matched an existing account (dual membership)

@@ -12,6 +12,8 @@ import { OrgUnitRepository } from '../../src/modules/org/org.repository';
 import { ProgramYearRepository } from '../../src/modules/identity/program-year.repository';
 import { PersonRepository } from '../../src/modules/identity/person.repository';
 import { RoleAssignmentRepository } from '../../src/modules/identity/role-assignment.repository';
+import { AccessRepository } from '../../src/modules/access/access.repository';
+import { GrantAdminRepository } from '../../src/modules/access/grant-admin.repository';
 
 /** M4 Slice 1: the guest pipeline. */
 describe('M4 Slice 1: guest pipeline (integration)', () => {
@@ -25,6 +27,7 @@ describe('M4 Slice 1: guest pipeline (integration)', () => {
   let programYearId: string;
   let vpmId: string;
   let outsiderId: string;
+  let sysAdminId: string;
 
   const jwtFor = (personId: string) =>
     new SignJWT({ roles: [], scopes: [] })
@@ -43,6 +46,10 @@ describe('M4 Slice 1: guest pipeline (integration)', () => {
     process.env.DIRECT_URL = dbUrl;
     process.env.REDIS_URL = redisUrl;
     process.env.SESSION_JWT_SECRET = secret;
+    process.env.S3_ENDPOINT ??= 'http://localhost:9000';
+    process.env.S3_BUCKET ??= 'toastmasters-test';
+    process.env.S3_ACCESS_KEY_ID ??= 'minio';
+    process.env.S3_SECRET_ACCESS_KEY ??= 'minio12345';
     await seedAccessVocabulary(db);
 
     const orgUnits = new OrgUnitRepository();
@@ -113,6 +120,23 @@ describe('M4 Slice 1: guest pipeline (integration)', () => {
       appointedBy: outsider.id,
     });
 
+    // A system_admin has synthesised update/delete on membership.guest, so
+    // they clear the RBAC gate — which is exactly what makes them useful for
+    // exercising the controller-level filer-only check.
+    const access = new AccessRepository(db);
+    const grantAdmin = new GrantAdminRepository(db, access);
+    const sysAdmin = await people.create({
+      email: 'sysadmin@example.com',
+      fullName: 'System Admin',
+    });
+    sysAdminId = sysAdmin.id;
+    await grantAdmin.grantPlatformRole({
+      personId: sysAdmin.id,
+      role: 'system_admin',
+      orgUnitId: null,
+      grantedBy: sysAdmin.id,
+    });
+
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     app.use(cookieParser());
@@ -176,5 +200,65 @@ describe('M4 Slice 1: guest pipeline (integration)', () => {
       .get(`/v1/clubs/${clubId}/guests`)
       .set('Authorization', `Bearer ${token}`)
       .expect(403);
+  });
+
+  it('the filer can edit and delete their own contact-log entry; a passer-by with RBAC access still cannot', async () => {
+    const vpmToken = await jwtFor(vpmId);
+    const guestRes = await request(app.getHttpServer())
+      .post(`/v1/clubs/${clubId}/guests`)
+      .set('Authorization', `Bearer ${vpmToken}`)
+      .send({ fullName: 'Contact-log Guest' })
+      .expect(201);
+    const guestId = guestRes.body.id;
+
+    const created = await request(app.getHttpServer())
+      .post(`/v1/clubs/${clubId}/guests/${guestId}/communications`)
+      .set('Authorization', `Bearer ${vpmToken}`)
+      .send({ channel: 'call', note: 'initial call' })
+      .expect(201);
+    const commId = created.body.id;
+
+    await request(app.getHttpServer())
+      .patch(`/v1/clubs/${clubId}/guests/${guestId}/communications/${commId}`)
+      .set('Authorization', `Bearer ${vpmToken}`)
+      .send({ note: 'corrected note' })
+      .expect(200)
+      .expect((res) => {
+        if (res.body.note !== 'corrected note') throw new Error('note did not update');
+      });
+
+    // system_admin clears the RBAC gate but is not the filer — the
+    // controller-level filer check must still reject them.
+    const sysToken = await jwtFor(sysAdminId);
+    await request(app.getHttpServer())
+      .patch(`/v1/clubs/${clubId}/guests/${guestId}/communications/${commId}`)
+      .set('Authorization', `Bearer ${sysToken}`)
+      .send({ note: 'not the filer' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .delete(`/v1/clubs/${clubId}/guests/${guestId}/communications/${commId}`)
+      .set('Authorization', `Bearer ${sysToken}`)
+      .expect(403);
+
+    // A different club's member is denied at the RBAC layer, not the filer check.
+    const outsiderToken = await jwtFor(outsiderId);
+    await request(app.getHttpServer())
+      .patch(`/v1/clubs/${clubId}/guests/${guestId}/communications/${commId}`)
+      .set('Authorization', `Bearer ${outsiderToken}`)
+      .send({ note: 'from another club' })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .delete(`/v1/clubs/${clubId}/guests/${guestId}/communications/${commId}`)
+      .set('Authorization', `Bearer ${vpmToken}`)
+      .expect(204);
+
+    const after = await request(app.getHttpServer())
+      .get(`/v1/clubs/${clubId}/guests/${guestId}/communications`)
+      .set('Authorization', `Bearer ${vpmToken}`)
+      .expect(200);
+    if (after.body.some((e: { id: string }) => e.id === commId)) {
+      throw new Error('deleted entry still visible');
+    }
   });
 });

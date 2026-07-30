@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 
 import { CHANNEL_LABEL, formatDate } from './pipeline';
+import { GuestCommunicationActions } from './GuestCommunicationActions';
 
 const CHANNEL_ICON: Record<GuestCommunication['channel'], LucideIcon> = {
   call: PhoneIcon,
@@ -24,21 +25,28 @@ type Entry = {
   Icon: LucideIcon;
   title: string;
   detail?: string;
+  actions?: React.ReactNode;
 };
 
 /**
- * Visits and contacts are separate append-only tables but one story to the
- * person reading them, so they're merged into a single reverse-chronological
- * trail rather than two lists you have to interleave in your head.
+ * Visits and contacts share a timeline but only contact entries are
+ * revisable — visits are derived from meeting attendance, not hand-entered.
+ * `currentUserId` is what gates the edit/delete affordance to the entry's
+ * filer; the API re-enforces it, so this is a UI hint rather than an
+ * authorisation check.
  */
 export function GuestActivity({
+  clubUnitId,
   visits,
   communications,
   meetings,
+  currentUserId,
 }: {
+  clubUnitId: string;
   visits: GuestVisit[];
   communications: GuestCommunication[];
   meetings: Meeting[];
+  currentUserId: string | null;
 }) {
   const meetingById = new Map(meetings.map((m) => [m.id, m]));
 
@@ -60,6 +68,10 @@ export function GuestActivity({
       Icon: CHANNEL_ICON[communication.channel],
       title: CHANNEL_LABEL[communication.channel],
       detail: communication.note,
+      actions:
+        currentUserId === communication.loggedBy ? (
+          <GuestCommunicationActions clubUnitId={clubUnitId} communication={communication} />
+        ) : undefined,
     })),
   ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
 
@@ -84,9 +96,12 @@ export function GuestActivity({
           <div className="min-w-0 flex-1 pb-5">
             <div className="flex flex-wrap items-baseline justify-between gap-x-3">
               <p className="text-sm font-medium">{entry.title}</p>
-              <time dateTime={entry.at} className="text-xs text-muted-foreground">
-                {formatDate(entry.at)}
-              </time>
+              <div className="flex items-center gap-1">
+                <time dateTime={entry.at} className="text-xs text-muted-foreground">
+                  {formatDate(entry.at)}
+                </time>
+                {entry.actions}
+              </div>
             </div>
             {entry.detail && (
               <p className="mt-0.5 text-sm wrap-break-word text-muted-foreground">{entry.detail}</p>

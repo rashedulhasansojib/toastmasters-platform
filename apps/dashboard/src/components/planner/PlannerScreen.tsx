@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import type {
+  AgendaTemplate,
   ClubMemberSummary,
   CreateMeetingRoleAssignmentRequest,
   Guest,
@@ -127,12 +128,14 @@ export function PlannerScreen({
   rows,
   members,
   guests,
+  agendaTemplates,
   programYearId,
 }: {
   clubUnitId: string;
   rows: PlannerRow[];
   members: ClubMemberSummary[];
   guests: Guest[];
+  agendaTemplates: AgendaTemplate[];
   programYearId: string | null;
 }) {
   const [importOpen, setImportOpen] = useState(false);
@@ -250,6 +253,7 @@ export function PlannerScreen({
                     clubUnitId={clubUnitId}
                     members={members}
                     guests={guests}
+                    agendaTemplates={agendaTemplates}
                   />
                 ))}
               </tbody>
@@ -267,6 +271,7 @@ export function PlannerScreen({
                 clubUnitId={clubUnitId}
                 members={members}
                 guests={guests}
+                agendaTemplates={agendaTemplates}
               />
             ))}
           </div>
@@ -293,12 +298,14 @@ function PlannerRowGrid({
   clubUnitId,
   members,
   guests,
+  agendaTemplates,
 }: {
   row: PlannerRow;
   rowStatus: RowStatus;
   clubUnitId: string;
   members: ClubMemberSummary[];
   guests: Guest[];
+  agendaTemplates: AgendaTemplate[];
 }) {
   const isPast = rowStatus === 'past';
   const isNext = rowStatus === 'next';
@@ -364,7 +371,12 @@ function PlannerRowGrid({
           isNext ? 'bg-amber-50/95 dark:bg-amber-950/40' : 'bg-inherit',
         )}
       >
-        <RowActions clubUnitId={clubUnitId} meetingId={row.meetingId} status={row.status} />
+        <RowActions
+          clubUnitId={clubUnitId}
+          meetingId={row.meetingId}
+          status={row.status}
+          agendaTemplates={agendaTemplates}
+        />
       </td>
     </tr>
   );
@@ -377,12 +389,14 @@ function PlannerRowCard({
   clubUnitId,
   members,
   guests,
+  agendaTemplates,
 }: {
   row: PlannerRow;
   rowStatus: RowStatus;
   clubUnitId: string;
   members: ClubMemberSummary[];
   guests: Guest[];
+  agendaTemplates: AgendaTemplate[];
 }) {
   const missing = PLANNER_COLUMNS.filter(
     (c) => !cellFor(row, c.roleKey, c.slotIndex)?.assignmentId,
@@ -432,7 +446,12 @@ function PlannerRowCard({
               {missing}
             </span>
           )}
-          <RowActions clubUnitId={clubUnitId} meetingId={row.meetingId} status={row.status} />
+          <RowActions
+            clubUnitId={clubUnitId}
+            meetingId={row.meetingId}
+            status={row.status}
+            agendaTemplates={agendaTemplates}
+          />
         </div>
       </div>
       <div className="border-b px-3.5 py-2">
@@ -701,28 +720,77 @@ function DateInput({
 }
 
 /**
- * Row actions — open the meeting page (deeper edits: title, venue, agenda),
- * or cancel the meeting. "Delete" in the DB sense would break §CLAUDE.md's
- * append-only invariant; `cancel` sets the status to `cancelled` and the
- * planner filters it out on the next render. History is preserved.
+ * Row actions — apply an agenda template (Play), open the meeting page for
+ * deeper edits (Open), or cancel the meeting (Delete).
+ *
+ * Play calls `POST /agenda-items/from-template`, appending the template's
+ * items to *this* meeting's agenda — matching the user ask that the agenda
+ * be created ON the meeting, not on a separate printable page. If the club
+ * has exactly one active template we apply it directly; more than one and
+ * we open a small picker so the user chooses. No templates means Play is
+ * disabled with an explanatory tooltip.
+ *
+ * `Delete` in the DB sense would break §CLAUDE.md's append-only invariant;
+ * `cancel` sets the status to `cancelled` and the planner filters it out
+ * on the next render. History and role assignments are preserved.
  */
 function RowActions({
   clubUnitId,
   meetingId,
   status,
+  agendaTemplates,
 }: {
   clubUnitId: string;
   meetingId: string;
   status: MeetingStatus;
+  agendaTemplates: AgendaTemplate[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
-  // A closed meeting is a historical record — a "cancel" after the fact would
-  // rewrite what happened. The API rejects it too; disable here so the UI
-  // is honest about why the button doesn't do anything.
   const canCancel = status === 'draft' || status === 'published';
+  const canApplyAgenda = status === 'draft' || status === 'published';
+
+  const playTitle =
+    agendaTemplates.length === 0
+      ? 'Create an agenda template first (Meetings › Agenda templates)'
+      : !canApplyAgenda
+        ? 'The meeting has already started or closed'
+        : agendaTemplates.length === 1
+          ? `Apply agenda template "${agendaTemplates[0].name}"`
+          : 'Choose an agenda template to apply';
+  const playDisabled = pending || !canApplyAgenda || agendaTemplates.length === 0;
+
+  function applyTemplate(templateId: string) {
+    setError(null);
+    startTransition(async () => {
+      const res = await fetch(
+        `/api/clubs/${clubUnitId}/meetings/${meetingId}/agenda-items/from-template`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ templateId }),
+        },
+      );
+      if (!res.ok) {
+        setError('Could not create the agenda.');
+        return;
+      }
+      setPickerOpen(false);
+      router.refresh();
+    });
+  }
+
+  function play() {
+    if (playDisabled) return;
+    if (agendaTemplates.length === 1) {
+      applyTemplate(agendaTemplates[0].id);
+      return;
+    }
+    setPickerOpen(true);
+  }
 
   function cancel() {
     if (!canCancel) return;
@@ -748,16 +816,19 @@ function RowActions({
 
   return (
     <div className="flex items-center justify-end gap-1">
-      <a
-        href={`/api/clubs/${clubUnitId}/meetings/${meetingId}/agenda-print`}
-        target="_blank"
-        rel="noopener noreferrer"
-        aria-label="Generate agenda"
-        title="Generate meeting agenda"
-        className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
+      <button
+        type="button"
+        onClick={play}
+        disabled={playDisabled}
+        aria-label="Create agenda from template"
+        title={playTitle}
+        className={cn(
+          'inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors',
+          playDisabled ? 'cursor-not-allowed opacity-40' : 'hover:bg-primary/10 hover:text-primary',
+        )}
       >
-        <PlayIcon className="size-4" />
-      </a>
+        {pending ? <Loader2 className="size-4 animate-spin" /> : <PlayIcon className="size-4" />}
+      </button>
       <a
         href={`/clubs/${clubUnitId}/meetings/${meetingId}`}
         aria-label="Open meeting"
@@ -786,6 +857,71 @@ function RowActions({
           {error}
         </span>
       )}
+
+      {pickerOpen && (
+        <TemplatePickerDialog
+          templates={agendaTemplates}
+          pending={pending}
+          onApply={applyTemplate}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Small modal — only reached when the club has more than one active template. */
+function TemplatePickerDialog({
+  templates,
+  pending,
+  onApply,
+  onClose,
+}: {
+  templates: AgendaTemplate[];
+  pending: boolean;
+  onApply: (templateId: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="planner-agenda-template-title"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="flex w-full max-w-sm flex-col gap-3 rounded-t-2xl border border-border bg-background p-5 shadow-xl sm:rounded-xl">
+        <h2 id="planner-agenda-template-title" className="text-base font-semibold">
+          Create agenda from template
+        </h2>
+        <p className="text-xs text-muted-foreground">
+          Appends the template&apos;s items to this meeting&apos;s agenda. Existing items stay put.
+        </p>
+        <ul className="flex flex-col gap-1.5">
+          {templates.map((template) => (
+            <li key={template.id}>
+              <button
+                type="button"
+                onClick={() => onApply(template.id)}
+                disabled={pending}
+                className="flex w-full items-center justify-between gap-3 rounded-md border border-input px-3 py-2 text-left text-sm transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <span className="min-w-0 flex-1 truncate font-medium">{template.name}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {template.items.length} item{template.items.length === 1 ? '' : 's'}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+        <div className="flex justify-end">
+          <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={pending}>
+            Cancel
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

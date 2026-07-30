@@ -17,6 +17,7 @@ import {
   DownloadIcon,
   ExternalLinkIcon,
   Loader2,
+  PlayIcon,
   Plus,
   Trash2Icon,
   UploadIcon,
@@ -234,7 +235,7 @@ export function PlannerScreen({
                   <th className="px-3 py-2 text-left whitespace-nowrap">Theme</th>
                   <th
                     scope="col"
-                    className="sticky right-0 z-10 w-24 bg-muted/50 px-3 py-2 text-right whitespace-nowrap border-l border-border"
+                    className="sticky right-0 z-10 w-32 bg-muted/50 px-3 py-2 text-right whitespace-nowrap border-l border-border"
                   >
                     <span className="sr-only">Actions</span>
                   </th>
@@ -747,6 +748,16 @@ function RowActions({
 
   return (
     <div className="flex items-center justify-end gap-1">
+      <a
+        href={`/api/clubs/${clubUnitId}/meetings/${meetingId}/agenda-print`}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="Generate agenda"
+        title="Generate meeting agenda"
+        className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
+      >
+        <PlayIcon className="size-4" />
+      </a>
       <a
         href={`/clubs/${clubUnitId}/meetings/${meetingId}`}
         aria-label="Open meeting"

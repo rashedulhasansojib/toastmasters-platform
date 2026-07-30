@@ -8,6 +8,7 @@ import type {
   PersonSearchResponse,
   UpdatePersonRequest,
 } from '@toastmasters/contracts';
+import { PasswordService } from '../../common/auth/password.service';
 import { OrgUnitRepository } from '../org/org.repository';
 import { InvitationService } from './invitation.service';
 import { PersonRepository } from './person.repository';
@@ -24,6 +25,7 @@ export class PersonService {
     private readonly people: PersonRepository,
     private readonly orgUnits: OrgUnitRepository,
     private readonly invitations: InvitationService,
+    private readonly passwords: PasswordService,
   ) {}
 
   async search(input: {
@@ -65,14 +67,57 @@ export class PersonService {
     anchorOrgUnitId: string,
     changes: UpdatePersonRequest,
   ): Promise<Person> {
+    await this.assertVisible(personId, anchorOrgUnitId);
+    return this.people.update(personId, changes);
+  }
+
+  /**
+   * Users admin password reset (super-admin People page). Same anchor +
+   * subtree + not-deleted check as update(). Argon2id hashing happens here,
+   * once, so the repo never sees a plaintext (matching CLAUDE.md §6
+   * "Never bcrypt" and the single-place hashing convention).
+   */
+  async setPassword(
+    personId: string,
+    anchorOrgUnitId: string,
+    password: string,
+    actorId: string,
+  ): Promise<void> {
+    await this.assertVisible(personId, anchorOrgUnitId);
+    const hash = await this.passwords.hash(password);
+    await this.people.setPassword(personId, hash, actorId);
+  }
+
+  /**
+   * Users admin soft-delete (super-admin People page). Same anchor +
+   * subtree + not-deleted check as update(). The rest of the transaction
+   * (ending role assignments, deactivating memberships, revoking pending
+   * invitations, marking the row deleted, bumping permissionVersion,
+   * writing the audit row) lives in the repository as one commit — see
+   * PersonRepository.softDelete.
+   */
+  async softDelete(personId: string, anchorOrgUnitId: string, actorId: string): Promise<void> {
+    const target = await this.assertVisible(personId, anchorOrgUnitId);
+    await this.people.softDelete(personId, target.email, actorId);
+  }
+
+  /**
+   * Shared 404-hide for detail/update/setPassword/softDelete: the outer
+   * @ResourceScope only checked the actor at the anchor; the target person
+   * id must additionally be in the anchor's subtree AND not already
+   * soft-deleted. Both branches return the same NotFoundException so the
+   * response never leaks which condition failed.
+   */
+  private async assertVisible(personId: string, anchorOrgUnitId: string): Promise<Person> {
     const anchor = await this.orgUnits.findById(anchorOrgUnitId);
     if (!anchor) throw new NotFoundException('Org unit not found');
 
     if (anchor.type !== 'region' && !(await this.people.isWithinSubtree(personId, anchor.path))) {
       throw new NotFoundException('Person not found');
     }
-
-    return this.people.update(personId, changes);
+    const person = await this.people.findById(personId);
+    if (!person) throw new NotFoundException('Person not found');
+    return person;
   }
 
   /**

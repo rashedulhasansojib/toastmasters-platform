@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query } from '@nestjs/common';
 import { z } from 'zod';
 import {
   createPersonRequestSchema,
   personSearchQuerySchema,
+  setPersonPasswordRequestSchema,
   updatePersonRequestSchema,
   type CreatePersonRequest,
   type InvitationWithLink,
@@ -11,6 +12,7 @@ import {
   type PersonDetail,
   type PersonSearchQuery,
   type PersonSearchResponse,
+  type SetPersonPasswordRequest,
   type UpdatePersonRequest,
 } from '@toastmasters/contracts';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
@@ -67,6 +69,42 @@ export class PersonController {
     @Body(new ZodValidationPipe(updatePersonRequestSchema)) body: UpdatePersonRequest,
   ): Promise<Person> {
     return this.people.update(personId, anchorOrgUnitId, body);
+  }
+
+  /**
+   * Users admin password reset. `update` (not a separate action) — the six
+   * fixed actions are read/create/update/approve/export/delete (CLAUDE.md
+   * §5) and password reset is a credential-side "update" of the person.
+   * Whoever can flip status to 'disabled' via PATCH can already lock the
+   * user out, so the authorization surface is symmetric.
+   */
+  @Post('people/:personId/password')
+  @HttpCode(204)
+  @ResourceScope('identity.person', 'update', { source: 'query', key: 'anchorOrgUnitId' })
+  async setPassword(
+    @Param('personId', uuidPipe) personId: string,
+    @Query('anchorOrgUnitId', uuidPipe) anchorOrgUnitId: string,
+    @CurrentUser() principal: Principal,
+    @Body(new ZodValidationPipe(setPersonPasswordRequestSchema)) body: SetPersonPasswordRequest,
+  ): Promise<void> {
+    await this.people.setPassword(personId, anchorOrgUnitId, body.password, principal.userId);
+  }
+
+  /**
+   * Users admin soft-delete. `identity.person:delete` is granted only to
+   * system_admin (via the broad non-restricted synthesis) — no role
+   * template's grant list includes it, so a district-scoped unit_admin
+   * that can read/update people cannot delete them.
+   */
+  @Delete('people/:personId')
+  @HttpCode(204)
+  @ResourceScope('identity.person', 'delete', { source: 'query', key: 'anchorOrgUnitId' })
+  async delete(
+    @Param('personId', uuidPipe) personId: string,
+    @Query('anchorOrgUnitId', uuidPipe) anchorOrgUnitId: string,
+    @CurrentUser() principal: Principal,
+  ): Promise<void> {
+    await this.people.softDelete(personId, anchorOrgUnitId, principal.userId);
   }
 
   /** The Add User dialog's cascade picker: auto-populate the parents above a directly-picked unit. */

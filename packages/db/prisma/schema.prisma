@@ -122,6 +122,14 @@ model Person {
   permissionVersion Int          @default(1) @map("permission_version")
   createdAt         DateTime     @default(now()) @map("created_at")
   lastLoginAt       DateTime?    @map("last_login_at")
+  /// Users admin soft-delete (super-admin People page). Set only by
+  /// PersonRepository.softDelete — the same transaction that ends active
+  /// role assignments, deactivates club memberships, clears the password
+  /// hash and bumps permission_version. Filtered out of every Users admin
+  /// read (search, detail, isWithinSubtree). Never overwritten: soft-delete
+  /// is one-way — an accidental deletion is corrected by restoring from a
+  /// backup, not by clearing this column.
+  deletedAt         DateTime?    @map("deleted_at")
 
   clubMemberships ClubMembership[]
   roleAssignments RoleAssignment[] @relation("RoleAssignmentPerson")
@@ -935,6 +943,15 @@ enum AuditEventType {
   unit_policy_grant_created
   platform_role_granted
   platform_role_revoked
+  /// Users admin: super-admin cleared another person's session and set a new
+  /// argon2id password hash. Written by PersonRepository.setPassword; never
+  /// carries the plaintext or the hash.
+  person_password_reset
+  /// Users admin: super-admin soft-deleted a person. Written by
+  /// PersonRepository.softDelete in the same transaction as the actual
+  /// state change (deletedAt, roleAssignment end, membership deactivation,
+  /// permissionVersion bump).
+  person_soft_deleted
 }
 
 model AuditEvent {

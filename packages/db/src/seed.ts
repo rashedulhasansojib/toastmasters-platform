@@ -239,17 +239,19 @@ const RESOURCES: ResourceSeed[] = [
     sensitivity: 'normal',
   },
   {
-    // Users admin (super-admin People search/create/edit). Not `restricted` —
-    // profile fields (name/email/phone/TI#/status) are the same exposure
-    // class as `membership.guest`, not a ledger amount or an evaluation.
-    // Granted only to the platform tier (system_admin via the broad
-    // non-restricted synthesis, plus explicit unit_admin/support_readonly
-    // grants below) — no club/area/division/district role template ever
-    // holds it, so oversight and club roles get the ordinary default-deny.
+    // Users admin (super-admin People search/create/edit/delete). Not
+    // `restricted` — profile fields (name/email/phone/TI#/status) are the
+    // same exposure class as `membership.guest`, not a ledger amount or an
+    // evaluation. `delete` is reachable only by system_admin: no role
+    // template's grant list includes it, so it arrives solely through the
+    // broad non-restricted synthesis (same shape as `org.unit:delete`).
+    // Soft-delete is one-way — the repository sets `person.deleted_at` and
+    // ends active role assignments in the same transaction; the row is kept
+    // for FK integrity on ledger/audit/history rows.
     resource: 'identity.person',
     context: 'identity',
     label: 'Person',
-    allowedActions: ['read', 'create', 'update'],
+    allowedActions: ['read', 'create', 'update', 'delete'],
     clubScoped: false,
     sensitivity: 'normal',
   },

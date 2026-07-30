@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Plus } from 'lucide-react';
+import { ArrowLeft, KeyRound, Plus, Trash2 } from 'lucide-react';
 import type {
   ClubMemberType,
   OrgUnitWithCount,
@@ -138,6 +138,14 @@ export function UserDetailView({
         </CardContent>
       </Card>
 
+      <PasswordResetCard regionUnitId={regionUnitId} personId={detail.id} />
+
+      <DangerZoneCard
+        regionUnitId={regionUnitId}
+        personId={detail.id}
+        personName={detail.fullName}
+      />
+
       <Dialog open={assignOpen} onOpenChange={setAssignOpen} title="Assign a new role">
         {assignOpen && (
           <AssignRoleForm
@@ -155,6 +163,181 @@ export function UserDetailView({
         )}
       </Dialog>
     </div>
+  );
+}
+
+/**
+ * Users admin password reset (super-admin People page). Sets a new
+ * argon2id-hashed password server-side and bumps permission_version so any
+ * live session for this person is invalidated on the next request.
+ */
+function PasswordResetCard({ regionUnitId, personId }: { regionUnitId: string; personId: string }) {
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    setError(null);
+    setSuccess(false);
+
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError('The two passwords do not match.');
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const response = await fetch(
+        `/api/people/${personId}/password?anchorOrgUnitId=${regionUnitId}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password }),
+        },
+      );
+      if (!response.ok) {
+        setError('Could not reset the password.');
+        return;
+      }
+      setPassword('');
+      setConfirmPassword('');
+      setSuccess(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <KeyRound className="size-4" /> Reset password
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
+          <p className="text-sm text-muted-foreground">
+            Sets a new password and signs the user out of any active session on their next request.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="reset-password">New password</Label>
+              <Input
+                id="reset-password"
+                type="password"
+                autoComplete="new-password"
+                className="h-11 lg:h-9"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                minLength={8}
+                required
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="reset-password-confirm">Confirm password</Label>
+              <Input
+                id="reset-password-confirm"
+                type="password"
+                autoComplete="new-password"
+                className="h-11 lg:h-9"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                minLength={8}
+                required
+              />
+            </div>
+          </div>
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          {success && <p className="text-sm text-emerald-600">Password updated.</p>}
+          <div className="flex justify-end">
+            <Button type="submit" size="lg" className="h-11 lg:h-9" disabled={busy}>
+              {busy ? 'Saving…' : 'Reset password'}
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Users admin soft-delete (super-admin People page). One-way from the UI —
+ * on success, we bounce back to the users list, since the detail page for a
+ * deleted person 404s.
+ */
+function DangerZoneCard({
+  regionUnitId,
+  personId,
+  personName,
+}: {
+  regionUnitId: string;
+  personId: string;
+  personName: string;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onDelete(): Promise<void> {
+    if (
+      !confirm(
+        `Delete ${personName}? This ends all their active roles and club memberships and signs them out. Ledger, meeting, and audit history is retained.`,
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/people/${personId}?anchorOrgUnitId=${regionUnitId}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        setError('Could not delete this user.');
+        return;
+      }
+      router.push(`/platform/${regionUnitId}/users`);
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-destructive">
+          <Trash2 className="size-4" /> Delete user
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <p className="text-sm text-muted-foreground">
+          Removes the user from the admin surface, ends every active role and club membership, and
+          revokes any pending invitation. Historical records (ledger, minutes, attendance, audit)
+          are kept — this is not a hard delete.
+        </p>
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <div>
+          <Button
+            type="button"
+            variant="destructive"
+            size="lg"
+            className="h-11 lg:h-9"
+            disabled={busy}
+            onClick={() => void onDelete()}
+          >
+            {busy ? 'Deleting…' : 'Delete user'}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

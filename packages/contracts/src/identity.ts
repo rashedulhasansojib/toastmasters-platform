@@ -17,9 +17,28 @@ export const person = z.object({
   permissionVersion: z.number().int().positive(),
   createdAt: z.iso.datetime(),
   lastLoginAt: z.iso.datetime().nullable(),
+  /**
+   * Users admin soft-delete marker (super-admin People page). Non-null means
+   * the person is filtered out of search/detail; the row itself stays for
+   * referential integrity. Set by DELETE /people/:personId; never cleared.
+   */
+  deletedAt: z.iso.datetime().nullable(),
 });
 // `passwordHash` is deliberately absent — it never leaves the repository layer.
 export type Person = z.infer<typeof person>;
+
+/**
+ * Users admin password reset (super-admin People page). The plaintext leaves
+ * the browser exactly once, is hashed with argon2id at the repository, and
+ * never appears in a log or a response body — the redact list in
+ * `packages/logger` covers `password`.
+ */
+export const setPersonPasswordRequestSchema = z
+  .object({
+    password: z.string().min(8),
+  })
+  .strict();
+export type SetPersonPasswordRequest = z.infer<typeof setPersonPasswordRequestSchema>;
 
 /** Email is deliberately not editable here — it is the login/invitation-matching key. */
 export const updatePersonRequestSchema = z

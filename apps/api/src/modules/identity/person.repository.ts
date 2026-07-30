@@ -28,6 +28,7 @@ function toPerson(row: PersonRow): Person {
     permissionVersion: row.permissionVersion,
     createdAt: row.createdAt.toISOString(),
     lastLoginAt: row.lastLoginAt?.toISOString() ?? null,
+    deletedAt: row.deletedAt?.toISOString() ?? null,
   };
 }
 
@@ -53,12 +54,14 @@ export class PersonRepository {
   }
 
   async findById(id: string): Promise<Person | null> {
-    const row = await this.db.person.findUnique({ where: { id } });
+    const row = await this.db.person.findFirst({ where: { id, deletedAt: null } });
     return row ? toPerson(row) : null;
   }
 
   async findByEmail(email: string): Promise<Person | null> {
-    const row = await this.db.person.findUnique({ where: { email: email.toLowerCase() } });
+    const row = await this.db.person.findFirst({
+      where: { email: email.toLowerCase(), deletedAt: null },
+    });
     return row ? toPerson(row) : null;
   }
 
@@ -78,13 +81,19 @@ export class PersonRepository {
   async findCredentialsByEmail(
     email: string,
   ): Promise<{ id: string; passwordHash: string | null; status: PersonStatus } | null> {
-    return this.db.person.findUnique({
-      where: { email: email.toLowerCase() },
+    return this.db.person.findFirst({
+      where: { email: email.toLowerCase(), deletedAt: null },
       select: { id: true, passwordHash: true, status: true },
     });
   }
 
-  /** Users admin profile edit. Email is not updatable here — see updatePersonRequestSchema. */
+  /**
+   * Users admin profile edit. Email is not updatable here — see
+   * updatePersonRequestSchema. `updateMany` (rather than `update`) so a
+   * soft-deleted row is a silent 0-row hit; the service pre-checks with
+   * findById to translate that into a 404. Returns the fresh Person the
+   * controller shapes back.
+   */
   async update(
     id: string,
     changes: {
@@ -104,6 +113,84 @@ export class PersonRepository {
       },
     });
     return toPerson(row);
+  }
+
+  /**
+   * Users admin password reset (super-admin People page). Never receives the
+   * plaintext — hashing happens in the service (argon2id, one place). The
+   * transaction bumps permission_version so any live session is invalidated
+   * on the next request (rbac-design.md §5) and writes an audit row in the
+   * same commit as the state change.
+   */
+  async setPassword(personId: string, passwordHash: string, actorId: string): Promise<void> {
+    await this.db.$transaction(async (tx) => {
+      await tx.person.update({
+        where: { id: personId },
+        data: { passwordHash, permissionVersion: { increment: 1 } },
+      });
+      await tx.auditEvent.create({
+        data: {
+          actorPersonId: actorId,
+          type: 'person_password_reset',
+          metadata: { personId },
+        },
+      });
+    });
+  }
+
+  /**
+   * Users admin soft-delete (super-admin People page). One transaction:
+   *
+   *   1. End every active role_assignment (endedReason='removed') — the
+   *      "ended assignments grant nothing but are retained as history"
+   *      contract (CLAUDE.md §1) is exactly what a deleted user should carry.
+   *   2. Deactivate every active club_membership (leftAt=now). Membership is
+   *      not append-only at the DB layer, so an in-place status flip is fine.
+   *   3. Revoke any pending invitations addressed to the person's email —
+   *      otherwise a delete-then-someone-accepts race could resurrect them.
+   *   4. Set person.deletedAt, status='disabled', passwordHash=null, and
+   *      bump permission_version so any live session is invalidated.
+   *   5. Write an AuditEvent in the same transaction.
+   *
+   * The Person row itself is retained: it is referenced from ledger,
+   * meeting attendance, audit, and dozens of other tables (see
+   * schema.prisma model Person), and integrity outranks erasure (CLAUDE.md
+   * §6 "Person/financial/governance deletion anonymises ledger/invoice/
+   * minutes/audit rows rather than removing them"). PII on the person row
+   * is intentionally kept — an explicit erasure operation is a future
+   * addition, not this endpoint.
+   */
+  async softDelete(personId: string, email: string, actorId: string): Promise<void> {
+    await this.db.$transaction(async (tx) => {
+      await tx.roleAssignment.updateMany({
+        where: { personId, status: 'active' },
+        data: { status: 'ended', endedReason: 'removed' },
+      });
+      await tx.clubMembership.updateMany({
+        where: { personId, localStatus: 'active' },
+        data: { localStatus: 'inactive', leftAt: new Date() },
+      });
+      await tx.invitation.updateMany({
+        where: { email, status: 'pending' },
+        data: { status: 'revoked' },
+      });
+      await tx.person.update({
+        where: { id: personId },
+        data: {
+          deletedAt: new Date(),
+          status: 'disabled',
+          passwordHash: null,
+          permissionVersion: { increment: 1 },
+        },
+      });
+      await tx.auditEvent.create({
+        data: {
+          actorPersonId: actorId,
+          type: 'person_soft_deleted',
+          metadata: { personId },
+        },
+      });
+    });
   }
 
   /**
@@ -154,13 +241,17 @@ export class PersonRepository {
       ? await Promise.all([
           // $queryRaw does not apply Prisma's camelCase field mapping —
           // every column toPerson() reads back is aliased explicitly.
+          // deleted_at IS NULL filters soft-deleted rows out of the Users
+          // admin list uniformly — the Person row is retained for FK
+          // integrity but must never re-surface in the admin surface.
           this.db.$queryRaw<PersonRow[]>`
             SELECT id, email, full_name AS "fullName", phone, photo_url AS "photoUrl", bio,
                    ti_member_number AS "tiMemberNumber", status, mfa_enabled AS "mfaEnabled",
                    permission_version AS "permissionVersion", created_at AS "createdAt",
-                   last_login_at AS "lastLoginAt"
+                   last_login_at AS "lastLoginAt", deleted_at AS "deletedAt"
             FROM person
-            WHERE (${needle}::text IS NULL
+            WHERE deleted_at IS NULL
+              AND (${needle}::text IS NULL
               OR full_name ILIKE '%' || ${needle} || '%'
               OR email ILIKE '%' || ${needle} || '%'
               OR ti_member_number ILIKE '%' || ${needle} || '%')
@@ -169,7 +260,8 @@ export class PersonRepository {
           `,
           this.db.$queryRaw<Array<{ n: bigint }>>`
             SELECT count(*) AS n FROM person
-            WHERE (${needle}::text IS NULL
+            WHERE deleted_at IS NULL
+              AND (${needle}::text IS NULL
               OR full_name ILIKE '%' || ${needle} || '%'
               OR email ILIKE '%' || ${needle} || '%'
               OR ti_member_number ILIKE '%' || ${needle} || '%')
@@ -180,9 +272,10 @@ export class PersonRepository {
             SELECT p.id, p.email, p.full_name AS "fullName", p.phone, p.photo_url AS "photoUrl", p.bio,
                    p.ti_member_number AS "tiMemberNumber", p.status, p.mfa_enabled AS "mfaEnabled",
                    p.permission_version AS "permissionVersion", p.created_at AS "createdAt",
-                   p.last_login_at AS "lastLoginAt"
+                   p.last_login_at AS "lastLoginAt", p.deleted_at AS "deletedAt"
             FROM person p
-            WHERE (${needle}::text IS NULL
+            WHERE p.deleted_at IS NULL
+              AND (${needle}::text IS NULL
               OR p.full_name ILIKE '%' || ${needle} || '%'
               OR p.email ILIKE '%' || ${needle} || '%'
               OR p.ti_member_number ILIKE '%' || ${needle} || '%')
@@ -201,7 +294,8 @@ export class PersonRepository {
           `,
           this.db.$queryRaw<Array<{ n: bigint }>>`
             SELECT count(*) AS n FROM person p
-            WHERE (${needle}::text IS NULL
+            WHERE p.deleted_at IS NULL
+              AND (${needle}::text IS NULL
               OR p.full_name ILIKE '%' || ${needle} || '%'
               OR p.email ILIKE '%' || ${needle} || '%'
               OR p.ti_member_number ILIKE '%' || ${needle} || '%')
@@ -232,7 +326,7 @@ export class PersonRepository {
   }
 
   async findDetail(id: string): Promise<PersonDetail | null> {
-    const row = await this.db.person.findUnique({ where: { id } });
+    const row = await this.db.person.findFirst({ where: { id, deletedAt: null } });
     if (!row) return null;
 
     const badges = await this.badgesForPersons([id], { includeEndedRoles: true });

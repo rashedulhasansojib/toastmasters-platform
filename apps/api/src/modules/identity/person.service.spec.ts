@@ -32,6 +32,7 @@ function person(overrides: Partial<Person> = {}): Person {
     permissionVersion: 1,
     createdAt: new Date().toISOString(),
     lastLoginAt: null,
+    deletedAt: null,
     ...overrides,
   };
 }
@@ -70,6 +71,7 @@ function makeService(
     anchor?: OrgUnit | null;
     withinSubtree?: boolean;
     detailResult?: PersonDetail | null;
+    personById?: Person | null;
   } = {},
 ) {
   const people = {
@@ -77,9 +79,14 @@ function makeService(
     findDetail: vi
       .fn()
       .mockResolvedValue('detailResult' in overrides ? overrides.detailResult : detail()),
+    findById: vi
+      .fn()
+      .mockResolvedValue('personById' in overrides ? overrides.personById : person()),
     update: vi.fn().mockResolvedValue(person()),
     create: vi.fn().mockResolvedValue(person()),
     isWithinSubtree: vi.fn().mockResolvedValue(overrides.withinSubtree ?? true),
+    setPassword: vi.fn().mockResolvedValue(undefined),
+    softDelete: vi.fn().mockResolvedValue(undefined),
   };
   const orgUnits = {
     findById: vi.fn().mockResolvedValue('anchor' in overrides ? overrides.anchor : orgUnit()),
@@ -88,9 +95,17 @@ function makeService(
   const invitations = {
     create: vi.fn().mockResolvedValue(invitation()),
   };
+  const passwords = {
+    hash: vi.fn().mockResolvedValue('$argon2id$hash'),
+  };
 
-  const service = new PersonService(people as never, orgUnits as never, invitations as never);
-  return { service, people, orgUnits, invitations };
+  const service = new PersonService(
+    people as never,
+    orgUnits as never,
+    invitations as never,
+    passwords as never,
+  );
+  return { service, people, orgUnits, invitations, passwords };
 }
 
 describe('PersonService.search', () => {
@@ -141,6 +156,66 @@ describe('PersonService.getDetail / update', () => {
     await expect(
       service.update('person-1', 'district-1', { fullName: 'New Name' }),
     ).rejects.toThrow(NotFoundException);
+  });
+
+  it('update() 404s when the person is already soft-deleted (findById returns null)', async () => {
+    const { service } = makeService({ withinSubtree: true, personById: null });
+    await expect(
+      service.update('person-1', 'district-1', { fullName: 'New Name' }),
+    ).rejects.toThrow(NotFoundException);
+  });
+});
+
+describe('PersonService.setPassword', () => {
+  it('hashes with argon2id and delegates to the repository', async () => {
+    const { service, people, passwords } = makeService();
+    await service.setPassword('person-1', 'district-1', 'new-password-1', 'actor-1');
+    expect(passwords.hash).toHaveBeenCalledWith('new-password-1');
+    expect(people.setPassword).toHaveBeenCalledWith('person-1', '$argon2id$hash', 'actor-1');
+  });
+
+  it('404s for an out-of-subtree target and never hashes', async () => {
+    const { service, passwords, people } = makeService({ withinSubtree: false });
+    await expect(
+      service.setPassword('person-1', 'district-1', 'new-password-1', 'actor-1'),
+    ).rejects.toThrow(NotFoundException);
+    expect(passwords.hash).not.toHaveBeenCalled();
+    expect(people.setPassword).not.toHaveBeenCalled();
+  });
+
+  it('404s a soft-deleted target and never hashes', async () => {
+    const { service, passwords, people } = makeService({ personById: null });
+    await expect(
+      service.setPassword('person-1', 'district-1', 'new-password-1', 'actor-1'),
+    ).rejects.toThrow(NotFoundException);
+    expect(passwords.hash).not.toHaveBeenCalled();
+    expect(people.setPassword).not.toHaveBeenCalled();
+  });
+});
+
+describe('PersonService.softDelete', () => {
+  it('passes the target email through so the repo can revoke pending invitations', async () => {
+    const { service, people } = makeService({
+      personById: person({ email: 'target@example.com' }),
+    });
+    await service.softDelete('person-1', 'district-1', 'actor-1');
+    expect(people.softDelete).toHaveBeenCalledWith('person-1', 'target@example.com', 'actor-1');
+  });
+
+  it('404s for an out-of-subtree target and never soft-deletes', async () => {
+    const { service, people } = makeService({ withinSubtree: false });
+    await expect(service.softDelete('person-1', 'district-1', 'actor-1')).rejects.toThrow(
+      NotFoundException,
+    );
+    expect(people.softDelete).not.toHaveBeenCalled();
+  });
+
+  it('404s an already-deleted target (findById returns null) and never soft-deletes again', async () => {
+    const { service, people } = makeService({ personById: null });
+    await expect(service.softDelete('person-1', 'district-1', 'actor-1')).rejects.toThrow(
+      NotFoundException,
+    );
+    expect(people.softDelete).not.toHaveBeenCalled();
   });
 });
 

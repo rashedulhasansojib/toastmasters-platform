@@ -17,6 +17,7 @@ function person(overrides: Partial<Person> = {}): Person {
     permissionVersion: 4,
     createdAt: new Date().toISOString(),
     lastLoginAt: null,
+    deletedAt: null,
     ...overrides,
   };
 }

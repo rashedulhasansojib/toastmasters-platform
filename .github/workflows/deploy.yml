@@ -91,7 +91,10 @@ jobs:
           )"
           echo "▸ Previous commit: $(git rev-parse --short HEAD)"
           # Detach first so the local branch never diverges from origin.
-          git checkout --detach --quiet "$TARGET_SHA"
+          # --force discards local changes to tracked files (e.g. Next.js
+          # rewrites apps/dashboard/next-env.d.ts on every build), which would
+          # otherwise make `git checkout` refuse to switch commits.
+          git checkout --detach --force --quiet "$TARGET_SHA"
           git reset --hard --quiet "$TARGET_SHA"
           # No `git clean` on purpose: it would delete .env and node_modules.
 

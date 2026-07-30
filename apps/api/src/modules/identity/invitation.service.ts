@@ -1,7 +1,12 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { ForbiddenException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import type { Env } from '@toastmasters/config';
-import type { ClubMemberType, Invitation, InvitationWithLink } from '@toastmasters/contracts';
+import type {
+  ClubMemberType,
+  Invitation,
+  InvitationPreview,
+  InvitationWithLink,
+} from '@toastmasters/contracts';
 import { canDelegate } from '../../common/authz/can-delegate';
 import { AccessRepository } from '../access/access.repository';
 import { EMAIL_PORT, type EmailPort } from '../../common/email/email.port';
@@ -143,6 +148,24 @@ export class InvitationService {
   async listPending(anchorOrgUnitId: string): Promise<Invitation[]> {
     const scope = await this.accessRepository.pathOf(anchorOrgUnitId);
     return this.invitations.findPendingBySubtree(scope);
+  }
+
+  /**
+   * Public preview so the accept page can show the invitee which email the
+   * invitation was addressed to. Same generic 401 as accept() for any
+   * non-usable state — never reveals whether the token was expired vs
+   * revoked vs simply wrong.
+   */
+  async preview(rawToken: string): Promise<InvitationPreview> {
+    const invitation = await this.invitations.findByTokenHash(hashToken(rawToken));
+    if (
+      !invitation ||
+      invitation.status !== 'pending' ||
+      new Date(invitation.expiresAt) < new Date()
+    ) {
+      throw new UnauthorizedException('Invalid or expired invitation');
+    }
+    return { email: invitation.email, expiresAt: invitation.expiresAt };
   }
 
   async accept(

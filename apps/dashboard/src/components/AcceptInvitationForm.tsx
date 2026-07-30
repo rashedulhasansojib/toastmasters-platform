@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
-export function AcceptInvitationForm({ token }: { token: string }) {
+export function AcceptInvitationForm({ token, email }: { token: string; email: string }) {
   const router = useRouter();
   const [fullName, setFullName] = useState('');
   const [password, setPassword] = useState('');
@@ -45,6 +45,12 @@ export function AcceptInvitationForm({ token }: { token: string }) {
 
   return (
     <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-5">
+      <div className="rounded-xl border border-[#EBD9C8] bg-[#FAF3EC] px-4 py-3">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Signing in as
+        </p>
+        <p className="mt-1 break-all text-sm font-medium text-[#2A1418]">{email}</p>
+      </div>
       <div className="space-y-2">
         <Label htmlFor="accept-full-name">Full name</Label>
         <Input

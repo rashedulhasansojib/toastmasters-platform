@@ -152,6 +152,45 @@ describe('InvitationService.create', () => {
   });
 });
 
+describe('InvitationService.preview', () => {
+  it('returns the invited email and expiry for a valid pending token', async () => {
+    const expiresAt = new Date(Date.now() + 60_000).toISOString();
+    const { service } = makeService({
+      findByTokenHashResult: invitation({ email: 'invitee@example.com', expiresAt }),
+    });
+
+    const result = await service.preview('raw-token');
+
+    expect(result).toEqual({ email: 'invitee@example.com', expiresAt });
+  });
+
+  it('rejects an unknown token with a generic message', async () => {
+    const { service } = makeService({ findByTokenHashResult: null });
+    await expect(service.preview('bad-token')).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('rejects an expired token', async () => {
+    const { service } = makeService({
+      findByTokenHashResult: invitation({ expiresAt: new Date(Date.now() - 1000).toISOString() }),
+    });
+    await expect(service.preview('expired-token')).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('rejects an already-accepted token', async () => {
+    const { service } = makeService({
+      findByTokenHashResult: invitation({ status: 'accepted' }),
+    });
+    await expect(service.preview('used-token')).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('rejects a revoked token', async () => {
+    const { service } = makeService({
+      findByTokenHashResult: invitation({ status: 'revoked' }),
+    });
+    await expect(service.preview('revoked-token')).rejects.toThrow(UnauthorizedException);
+  });
+});
+
 describe('InvitationService.accept', () => {
   it('resolves the program year term dates, hashes the password, and calls accept()', async () => {
     const { service, invitations, programYears, passwords } = makeService();

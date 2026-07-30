@@ -6,6 +6,7 @@ import {
   type CreateInvitationRequest,
   type AcceptInvitationRequest,
   type Invitation,
+  type InvitationPreview,
   type InvitationWithLink,
 } from '@toastmasters/contracts';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
@@ -56,6 +57,13 @@ export class InvitationController {
     @CurrentUser() principal: Principal,
   ): Promise<Invitation> {
     return this.invitations.revoke(id, principal.userId);
+  }
+
+  /** Public — the accept page fetches this so it can display the invited email. */
+  @Public()
+  @Get('invitations/:token/preview')
+  async preview(@Param('token') token: string): Promise<InvitationPreview> {
+    return this.invitations.preview(token);
   }
 
   @Public()

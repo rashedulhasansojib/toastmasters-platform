@@ -1,4 +1,6 @@
+import { invitationPreview } from '@toastmasters/contracts';
 import { AcceptInvitationForm } from '@/components/AcceptInvitationForm';
+import { callApi } from '@/lib/session-proxy';
 
 /** Public — the invited person has no session yet. Reached via the copyable link the Users admin issues. */
 export default async function AcceptInvitationPage({
@@ -7,6 +9,16 @@ export default async function AcceptInvitationPage({
   params: Promise<{ token: string }>;
 }) {
   const { token } = await params;
+
+  // Server-to-server via callApi() — the accept flow's preview endpoint is
+  // @Public(), so no session cookie is involved.
+  const previewResponse = await callApi(`/v1/invitations/${encodeURIComponent(token)}/preview`, {
+    method: 'GET',
+  });
+  const preview = previewResponse.ok
+    ? invitationPreview.safeParse(await previewResponse.json())
+    : null;
+  const invitedEmail = preview?.success ? preview.data.email : null;
 
   return (
     <main className="flex min-h-[80vh] items-center justify-center bg-linear-to-b from-[#FAF3EC] to-[#F3E7DA] px-6 py-16">
@@ -20,7 +32,16 @@ export default async function AcceptInvitationPage({
             You&apos;ve been invited to Toastmasters Portal
           </p>
         </div>
-        <AcceptInvitationForm token={token} />
+        {invitedEmail ? (
+          <AcceptInvitationForm token={token} email={invitedEmail} />
+        ) : (
+          <p
+            role="alert"
+            className="rounded-lg bg-destructive/10 px-3 py-2.5 text-sm text-destructive"
+          >
+            That invitation link is invalid, expired, or already used.
+          </p>
+        )}
       </div>
     </main>
   );

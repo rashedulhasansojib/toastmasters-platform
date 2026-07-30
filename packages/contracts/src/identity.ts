@@ -261,6 +261,19 @@ export const acceptInvitationRequestSchema = z
 export type AcceptInvitationRequest = z.infer<typeof acceptInvitationRequestSchema>;
 
 /**
+ * Public read-by-raw-token used only on the accept page, so the invitee can
+ * see which email address the invitation was addressed to before setting a
+ * password. Deliberately narrow — email + expiry only, no orgUnitId/role/
+ * invitedBy — token possession already lets the caller accept, so revealing
+ * the target email adds no privilege.
+ */
+export const invitationPreview = z.object({
+  email: z.email(),
+  expiresAt: z.iso.datetime(),
+});
+export type InvitationPreview = z.infer<typeof invitationPreview>;
+
+/**
  * The active unit, resolved. The session claim carries only `activeUnitId`;
  * the UI also needs the unit's tier to know which pages exist for it, and its
  * name to label the switcher — neither is a permission, and `authorize()`

@@ -3,13 +3,14 @@
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react';
-import type { PathwayPath, SpeechSlot } from '@toastmasters/contracts';
+import type { PathwayPath, PathwayProject, SpeechSlot } from '@toastmasters/contracts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { submitAction, toast } from '@/lib/toast';
 import { MemberCombobox } from '../MemberCombobox';
 import { EmptyState, Field } from '../primitives';
+import { PathwayPathPicker, PathwayProjectPicker } from '@/components/pathways/PathwayPickers';
 
 const MAX_SPEAKERS = 3;
 
@@ -197,10 +198,9 @@ function SpeakerCard({
   const project = path?.projects.find((p) => p.projectCode === projectCode) ?? null;
 
   /** Picking a project seeds the duration from its permitted range. */
-  function pickProject(code: string) {
-    setProjectCode(code);
-    const next = path?.projects.find((p) => p.projectCode === code);
-    if (next && !minutes) setMinutes(String(next.maxMinutes));
+  function pickProject(project: PathwayProject) {
+    setProjectCode(project.projectCode);
+    if (project.projectCode && !minutes) setMinutes(String(project.maxMinutes));
   }
 
   function pickPath(code: string) {
@@ -345,34 +345,11 @@ function SpeakerCard({
         </Field>
 
         <Field label="Path">
-          <select
-            value={pathCode}
-            onChange={(e) => pickPath(e.target.value)}
-            className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
-          >
-            <option value="">— Choose —</option>
-            {pathways.map((p) => (
-              <option key={p.pathCode} value={p.pathCode}>
-                {p.name} ({p.pathCode})
-              </option>
-            ))}
-          </select>
+          <PathwayPathPicker value={pathCode} onChange={pickPath} pathways={pathways} />
         </Field>
 
         <Field label="Project">
-          <select
-            value={projectCode}
-            onChange={(e) => pickProject(e.target.value)}
-            disabled={!path}
-            className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm disabled:opacity-50"
-          >
-            <option value="">— Choose —</option>
-            {(path?.projects ?? []).map((p) => (
-              <option key={p.projectCode} value={p.projectCode}>
-                L{p.level} · {p.name}
-              </option>
-            ))}
-          </select>
+          <PathwayProjectPicker value={projectCode} onChange={pickProject} path={path} />
         </Field>
 
         <Field label="Level" className="sm:col-span-1">

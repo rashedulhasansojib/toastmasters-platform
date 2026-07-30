@@ -234,6 +234,7 @@ export class SpeechSlotRepository {
             level: true,
             minMinutes: true,
             maxMinutes: true,
+            isRequired: true,
           },
           orderBy: [{ level: 'asc' }, { projectCode: 'asc' }],
         },

@@ -397,6 +397,7 @@ export const pathwayProject = z.object({
   level: z.number().int().positive(),
   minMinutes: z.number().int().nonnegative(),
   maxMinutes: z.number().int().positive(),
+  isRequired: z.boolean(),
 });
 export type PathwayProject = z.infer<typeof pathwayProject>;
 

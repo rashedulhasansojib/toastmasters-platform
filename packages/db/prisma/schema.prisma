@@ -650,6 +650,7 @@ model PathwayProject {
   level       Int
   minMinutes  Int         @map("min_minutes")
   maxMinutes  Int         @map("max_minutes")
+  isRequired  Boolean     @default(true) @map("is_required")
 
   @@unique([pathCode, projectCode])
   @@map("pathway_project")

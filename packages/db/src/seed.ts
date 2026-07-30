@@ -620,6 +620,9 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'meeting.agenda_item', action: 'create' },
       { resource: 'meeting.agenda_item', action: 'read' },
       { resource: 'meeting.speech_slot', action: 'read' },
+      // M9: the VPE builds the Prepared Speakers block directly (speaker +
+      // evaluator assigned up front), not only approving member self-requests.
+      { resource: 'meeting.speech_slot', action: 'create' },
       { resource: 'meeting.speech_slot', action: 'approve' },
       { resource: 'meeting.checklist', action: 'create' },
       { resource: 'meeting.checklist', action: 'read' },

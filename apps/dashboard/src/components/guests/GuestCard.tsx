@@ -34,14 +34,15 @@ export function GuestCard({
   return (
     <article
       className={cn(
-        'overflow-hidden rounded-xl border bg-card transition-opacity',
+        'overflow-hidden rounded-xl border bg-card transition-all',
+        'hover:border-foreground/15 hover:shadow-sm',
         pending && 'opacity-60',
       )}
     >
-      <div className="flex items-start gap-3 p-3">
+      <div className="flex items-start gap-3 p-3.5">
         <Link
           href={`/clubs/${clubUnitId}/guests/${guest.id}`}
-          className="flex min-w-0 flex-1 items-center gap-3 rounded-lg"
+          className="flex min-w-0 flex-1 items-center gap-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         >
           <Avatar name={guest.fullName} photoUrl={guest.photoUrl} size="md" />
           <div className="min-w-0 flex-1">
@@ -77,7 +78,7 @@ export function GuestCard({
       </div>
 
       {actionable && (
-        <div className="flex divide-x border-t text-xs">
+        <div className="flex divide-x border-t bg-muted/30 text-xs">
           {guest.phone && (
             <a
               href={`tel:${guest.phone}`}

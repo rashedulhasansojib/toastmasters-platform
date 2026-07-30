@@ -88,30 +88,34 @@ export function GuestsScreen({ clubUnitId, guests }: { clubUnitId: string; guest
   return (
     <div className="flex flex-col gap-4 px-4 pb-24 pt-4 sm:px-6 lg:pb-8">
       <header className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold sm:text-2xl">Guests</h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Guests</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
             {guests.length === 0
               ? 'Nobody in the pipeline yet'
               : `${guests.length} in the pipeline · ${counts.joined} joined`}
           </p>
         </div>
         {/* Wide screens get the header button; phones get the thumb-reachable FAB below. */}
-        <Button size="lg" className="hidden lg:inline-flex" onClick={openCreate}>
+        <Button className="hidden shrink-0 lg:inline-flex" onClick={openCreate}>
           <PlusIcon />
           Add guest
         </Button>
       </header>
 
-      <div className="flex gap-2">
-        <div className="relative flex-1">
+      {/* One toolbar row; every control shares a height so the row reads as a
+          single band rather than three differently-sized boxes. Hidden on an
+          empty pipeline — searching and filtering nothing is just furniture in
+          front of the one thing there is to do. */}
+      <div className={cn('flex items-center gap-2', guests.length === 0 && 'hidden')}>
+        <div className="relative min-w-0 flex-1">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             type="search"
-            placeholder="Search name, phone, email…"
+            placeholder="Search guests…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="h-11 pl-9 sm:h-9"
+            className="h-11 pl-9 lg:h-9"
             aria-label="Search guests"
           />
         </div>
@@ -125,8 +129,15 @@ export function GuestsScreen({ clubUnitId, guests }: { clubUnitId: string; guest
             onValueChange={(v) => setFilter(v as Filter)}
             aria-label="Filter by stage"
           >
-            <SelectTrigger className="hidden w-44 shrink-0 lg:flex">
-              <SelectValue />
+            <SelectTrigger className="hidden h-9 w-48 shrink-0 lg:flex">
+              {/* Without a formatter this renders the raw enum — a trigger
+                  reading "all" or "not_interested" rather than a label. */}
+              <SelectValue>
+                {(value) => {
+                  const active = chips.find((c) => c.key === value);
+                  return active ? `${active.label} · ${active.count}` : 'All stages';
+                }}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               {chips.map(({ key, label, count }) => (
@@ -139,8 +150,17 @@ export function GuestsScreen({ clubUnitId, guests }: { clubUnitId: string; guest
         )}
 
         {/* Board is the primary view on every breakpoint; the toggle lets a
-            user drop to the searchable list when hunting for a specific guest. */}
-        <div className="flex shrink-0 items-center gap-0.5 rounded-lg border p-0.5">
+            user drop to the searchable list when hunting for a specific guest.
+
+            A segmented control — a recessed track with the selected segment
+            raised out of it. The earlier version filled the active segment with
+            `primary`, which on this near-black neutral palette read as a solid
+            ink blob rather than a selected tab. */}
+        <div
+          role="group"
+          aria-label="View"
+          className="flex h-11 shrink-0 items-center gap-1 rounded-lg bg-muted p-1 lg:h-9"
+        >
           {(
             [
               { key: 'board', label: 'Board', Icon: KanbanIcon },
@@ -152,14 +172,15 @@ export function GuestsScreen({ clubUnitId, guests }: { clubUnitId: string; guest
               type="button"
               onClick={() => setView(key)}
               aria-pressed={view === key}
+              title={label}
               className={cn(
-                'inline-flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium transition-colors',
+                'inline-flex h-full items-center justify-center gap-1.5 rounded-md px-3 text-xs font-medium transition-all',
                 view === key
-                  ? 'bg-primary text-primary-foreground'
+                  ? 'bg-background text-foreground shadow-sm'
                   : 'text-muted-foreground hover:text-foreground',
               )}
             >
-              <Icon className="size-3.5" />
+              <Icon className="size-4" />
               <span className="hidden sm:inline">{label}</span>
             </button>
           ))}
@@ -182,7 +203,7 @@ export function GuestsScreen({ clubUnitId, guests }: { clubUnitId: string; guest
         <div className="flex flex-col gap-4">
           {/* Wraps rather than scrolls: a horizontal rail hid the later stages
               off-screen behind a swipe nobody knew was there. */}
-          <div className="flex flex-wrap gap-2 lg:hidden">
+          <div className={cn('flex flex-wrap gap-2 lg:hidden', guests.length === 0 && 'hidden')}>
             {chips.map(({ key, label, count, accent }) => (
               <button
                 key={key}
@@ -190,10 +211,10 @@ export function GuestsScreen({ clubUnitId, guests }: { clubUnitId: string; guest
                 onClick={() => setFilter(key)}
                 aria-pressed={filter === key}
                 className={cn(
-                  'inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-sm whitespace-nowrap transition-colors',
+                  'inline-flex min-h-9 items-center gap-1.5 rounded-full px-3 text-sm font-medium whitespace-nowrap transition-colors',
                   filter === key
-                    ? 'border-primary bg-primary text-primary-foreground'
-                    : 'bg-background text-muted-foreground active:bg-accent sm:hover:bg-accent',
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted text-muted-foreground active:bg-accent sm:hover:bg-accent sm:hover:text-foreground',
                 )}
               >
                 {accent && (
@@ -205,7 +226,12 @@ export function GuestsScreen({ clubUnitId, guests }: { clubUnitId: string; guest
                   />
                 )}
                 {label}
-                <span className={cn('text-xs', filter !== key && 'text-muted-foreground/70')}>
+                <span
+                  className={cn(
+                    'text-xs tabular-nums',
+                    filter === key ? 'text-primary-foreground/70' : 'text-muted-foreground/70',
+                  )}
+                >
                   {count}
                 </span>
               </button>
@@ -263,16 +289,20 @@ export function GuestsScreen({ clubUnitId, guests }: { clubUnitId: string; guest
           </>
         ))}
 
-      {/* Thumb-reachable on a phone, where the header button is out of reach. */}
-      <Button
-        size="lg"
-        onClick={openCreate}
-        aria-label="Add guest"
-        className="fixed right-4 bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] z-40 h-14 rounded-full px-5 shadow-lg lg:hidden"
-      >
-        <PlusIcon />
-        Add
-      </Button>
+      {/* Thumb-reachable on a phone, where the header button is out of reach.
+          Suppressed while the empty state is up — that already puts the same
+          call to action in the middle of the screen, and two identical buttons
+          is just clutter. */}
+      {guests.length > 0 && (
+        <Button
+          onClick={openCreate}
+          aria-label="Add guest"
+          className="fixed right-4 bottom-[calc(1.25rem+env(safe-area-inset-bottom,0px))] z-40 h-13 gap-2 rounded-full px-5 text-sm shadow-lg ring-1 ring-black/5 lg:hidden"
+        >
+          <PlusIcon className="size-5" />
+          Add guest
+        </Button>
+      )}
 
       <GuestFormDialog
         clubUnitId={clubUnitId}
@@ -303,17 +333,19 @@ function EmptyState({
   onAdd: () => void;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed px-6 py-16 text-center">
-      <UsersIcon className="mb-3 size-10 text-muted-foreground/30" />
+    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed px-6 py-14 text-center">
+      <div className="mb-4 flex size-12 items-center justify-center rounded-full bg-muted">
+        <UsersIcon className="size-5 text-muted-foreground" />
+      </div>
       {hasAny && filtered ? (
-        <p className="text-sm text-muted-foreground">No guests match that.</p>
+        <p className="text-sm text-muted-foreground">No guests match that search.</p>
       ) : (
         <>
           <p className="font-medium">No guests yet</p>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <p className="mt-1 max-w-xs text-sm text-muted-foreground">
             Add the guests who visit, and track them through to joining.
           </p>
-          <Button size="lg" className="mt-4" onClick={onAdd}>
+          <Button className="mt-5" onClick={onAdd}>
             <PlusIcon />
             Add guest
           </Button>

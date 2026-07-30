@@ -13,8 +13,7 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
-  const session = await getSession();
-  const units = session ? await getSwitchableUnits() : [];
+  const [session, units] = await Promise.all([getSession(), getSwitchableUnits()]);
 
   return (
     <html lang="en">

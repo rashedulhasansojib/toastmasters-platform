@@ -85,6 +85,7 @@ export function OrgUnitCascadePicker({
           <div key={levelIndex} className="flex flex-col gap-1.5">
             <Label>{tierLabel}</Label>
             <Select
+              items={Object.fromEntries(options.map((unit) => [unit.id, unit.name]))}
               value={selectedIds[levelIndex] ?? undefined}
               onValueChange={(value) => value && void handleSelect(levelIndex, value)}
             >

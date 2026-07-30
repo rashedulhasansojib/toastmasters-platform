@@ -662,7 +662,11 @@ function AssignRoleForm({
       {selectedUnit && (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="assign-role">Role</Label>
-          <Select value={role || undefined} onValueChange={(v) => setRole(v ?? '')}>
+          <Select
+            items={Object.fromEntries(eligibleRoles.map((t) => [t.role, t.label]))}
+            value={role || undefined}
+            onValueChange={(v) => setRole(v ?? '')}
+          >
             <SelectTrigger className="w-full" id="assign-role">
               <SelectValue placeholder="Select a role" />
             </SelectTrigger>

@@ -2,7 +2,7 @@ import { Logger } from '@nestjs/common';
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import type { Job } from 'bullmq';
 import { getPrisma } from '@toastmasters/db';
-import { bandFor, MS_PER_DAY } from './member-health-band';
+import { memberHealthBandFor, MEMBER_HEALTH_MS_PER_DAY } from '@toastmasters/contracts';
 
 export const MEMBER_HEALTH_SIGNAL_QUEUE = 'member-health-signal';
 
@@ -65,8 +65,10 @@ export class MemberHealthSignalProcessor extends WorkerHost {
       for (const membership of memberships) {
         const lastSpeechAt = lastSpeechByPerson.get(membership.personId) ?? null;
         const reference = lastSpeechAt ?? membership.joinedAt;
-        const daysSinceReference = Math.floor((now.getTime() - reference.getTime()) / MS_PER_DAY);
-        const band = bandFor(daysSinceReference);
+        const daysSinceReference = Math.floor(
+          (now.getTime() - reference.getTime()) / MEMBER_HEALTH_MS_PER_DAY,
+        );
+        const band = memberHealthBandFor(daysSinceReference);
         const reasons = lastSpeechAt
           ? [`Last prepared speech was ${daysSinceReference} days ago`]
           : [`No prepared speech since joining ${daysSinceReference} days ago`];

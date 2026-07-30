@@ -238,6 +238,9 @@ importers:
       '@toastmasters/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@toastmasters/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@toastmasters/db':
         specifier: workspace:*
         version: link:../../packages/db

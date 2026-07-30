@@ -164,6 +164,22 @@ export type ConvertGuestResponse = z.infer<typeof convertGuestResponseSchema>;
 export const memberHealthBand = z.enum(['healthy', 'watch', 'at_risk', 'disengaged']);
 export type MemberHealthBand = z.infer<typeof memberHealthBand>;
 
+export const MEMBER_HEALTH_MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * The v1 thresholds, shared by the worker's nightly upsert and the roster's
+ * read-path fallback for a membership the nightly job hasn't reached yet
+ * (e.g. joined since the last run) — same bands either way, just computed
+ * eagerly instead of persisted. `days` is days since the reference date
+ * (last speech, or `joinedAt` if the member has never spoken).
+ */
+export function memberHealthBandFor(days: number): MemberHealthBand {
+  if (days <= 60) return 'healthy';
+  if (days <= 90) return 'watch';
+  if (days <= 180) return 'at_risk';
+  return 'disengaged';
+}
+
 export const memberHealthSignal = z.object({
   id: z.uuid(),
   clubMembershipId: z.uuid(),

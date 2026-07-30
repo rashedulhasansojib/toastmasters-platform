@@ -10,8 +10,10 @@ import { MEMBER_TYPE_LABEL } from './bands';
  * CLAUDE.md §2 decision 11 (2026-07-30): the member-health signal v1's
  * card — mirrors GuestCard's identity block, but the whole card is a link
  * (no secondary interactive zone; the health band is a fact, not an
- * action). A `null` signal means the nightly job hasn't computed one for
- * this membership yet, not that the member is healthy.
+ * action). The roster always resolves a band — either the nightly job's
+ * persisted signal, or a live fallback computed the same way for a
+ * membership it hasn't reached yet — so `null` here only happens if the
+ * caller isn't VPM-scoped (`membership.health_signal` is restricted).
  */
 export function MemberCard({
   clubUnitId,

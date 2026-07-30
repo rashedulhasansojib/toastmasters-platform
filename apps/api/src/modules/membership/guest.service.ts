@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type { CreateGuestRequest, Guest, UpdateGuestRequest } from '@toastmasters/contracts';
 import { GuestRepository } from './guest.repository';
 
@@ -32,5 +32,22 @@ export class GuestService {
 
   update(id: string, patch: UpdateGuestRequest): Promise<Guest> {
     return this.guests.update(id, patch);
+  }
+
+  /**
+   * Manual counterpart to the nightly retention job — lets a VPM remove a
+   * guest they added by mistake (or on request) before the 180-day timer
+   * fires. Refuses once a guest has been converted: their identity now lives
+   * on a Person, and person deletion is a separate flow.
+   */
+  async remove(id: string): Promise<void> {
+    const guest = await this.guests.findById(id);
+    if (!guest) throw new NotFoundException('Guest not found');
+    if (guest.convertedToPersonId) {
+      throw new ConflictException(
+        'This guest has already been converted to a member — remove the member from the Users admin instead.',
+      );
+    }
+    await this.guests.remove(id);
   }
 }

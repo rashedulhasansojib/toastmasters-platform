@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { Guest } from '@toastmasters/contracts';
-import { PencilIcon, ShuffleIcon, UserRoundCheckIcon } from 'lucide-react';
+import { PencilIcon, ShuffleIcon, Trash2Icon, UserRoundCheckIcon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
@@ -17,10 +18,12 @@ import { isRedacted } from './pipeline';
  * — wherever it's triggered from.
  */
 export function GuestDetailActions({ clubUnitId, guest }: { clubUnitId: string; guest: Guest }) {
-  const { moveTo, pendingId, error, clearError } = useGuestActions(clubUnitId);
+  const router = useRouter();
+  const { moveTo, remove, pendingId, error, clearError } = useGuestActions(clubUnitId);
   const [moveOpen, setMoveOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [convertOpen, setConvertOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const redacted = isRedacted(guest);
   const joined = guest.pipelineStatus === 'joined';
@@ -73,6 +76,20 @@ export function GuestDetailActions({ clubUnitId, guest }: { clubUnitId: string; 
         >
           <UserRoundCheckIcon />
           Convert to member
+        </Button>
+      )}
+
+      {!joined && (
+        <Button
+          type="button"
+          variant="outline"
+          size="lg"
+          className="h-11 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive lg:h-9"
+          onClick={() => setDeleteOpen(true)}
+          disabled={pending}
+        >
+          <Trash2Icon />
+          Delete guest
         </Button>
       )}
 
@@ -131,6 +148,39 @@ export function GuestDetailActions({ clubUnitId, guest }: { clubUnitId: string; 
             }}
           >
             {pending ? 'Converting…' : 'Convert'}
+          </Button>
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title="Delete this guest?"
+        description={`This removes ${guest.fullName} and their visit and communication history from this club. It can't be undone.`}
+      >
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button
+            type="button"
+            variant="outline"
+            size="lg"
+            className="h-11 lg:h-9"
+            onClick={() => setDeleteOpen(false)}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            size="lg"
+            className="h-11 bg-destructive text-destructive-foreground hover:bg-destructive/90 lg:h-9"
+            disabled={pending}
+            onClick={() => {
+              setDeleteOpen(false);
+              void remove(guest.id).then((ok) => {
+                if (ok) router.push(`/clubs/${clubUnitId}/guests`);
+              });
+            }}
+          >
+            {pending ? 'Deleting…' : 'Delete guest'}
           </Button>
         </div>
       </Dialog>

@@ -20,3 +20,17 @@ export async function PATCH(
   });
   return NextResponse.json(await upstream.json().catch(() => ({})), { status: upstream.status });
 }
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ clubUnitId: string; guestId: string }> },
+): Promise<NextResponse> {
+  const { clubUnitId, guestId } = await params;
+  const upstream = await authedFetch(`/v1/clubs/${clubUnitId}/guests/${guestId}`, {
+    method: 'DELETE',
+  });
+  if (upstream.status === 204) {
+    return new NextResponse(null, { status: 204 });
+  }
+  return NextResponse.json(await upstream.json().catch(() => ({})), { status: upstream.status });
+}

@@ -100,4 +100,30 @@ export class GuestRepository {
     });
     return toGuest(row);
   }
+
+  /**
+   * Hard delete for a not-yet-converted guest, plus the guest-owned child
+   * rows (visits, communications). Rows on tables that outlive the guest
+   * conceptually — meeting sign-in sheets and speech evaluations — have
+   * their guest FK nulled instead, since both tables already carry a
+   * snapshot of the guest's identity at record time (meeting_guest keeps
+   * fullName/email/phone; speech_evaluation stays anchored to its meeting).
+   * The guest.service caller is responsible for refusing the delete when
+   * the guest has already converted.
+   */
+  async remove(id: string): Promise<void> {
+    await this.db.$transaction(async (tx) => {
+      await tx.speechEvaluation.updateMany({
+        where: { speakerGuestId: id },
+        data: { speakerGuestId: null },
+      });
+      await tx.meetingGuest.updateMany({
+        where: { guestId: id },
+        data: { guestId: null },
+      });
+      await tx.guestVisit.deleteMany({ where: { guestId: id } });
+      await tx.guestCommunication.deleteMany({ where: { guestId: id } });
+      await tx.guest.delete({ where: { id } });
+    });
+  }
 }

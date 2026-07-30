@@ -67,5 +67,33 @@ export function useGuestActions(clubUnitId: string) {
     [clubUnitId, router],
   );
 
-  return { moveTo, pendingId, error, clearError: () => setError(null) };
+  const remove = useCallback(
+    async (guestId: string): Promise<boolean> => {
+      setError(null);
+      setPendingId(guestId);
+      try {
+        const response = await fetch(`/api/clubs/${clubUnitId}/guests/${guestId}`, {
+          method: 'DELETE',
+        });
+        if (!response.ok) {
+          setError(
+            response.status === 409
+              ? 'This guest has already converted to a member and cannot be deleted here.'
+              : 'Could not delete that guest.',
+          );
+          return false;
+        }
+        router.refresh();
+        return true;
+      } catch {
+        setError('Network error — that change was not saved.');
+        return false;
+      } finally {
+        setPendingId(null);
+      }
+    },
+    [clubUnitId, router],
+  );
+
+  return { moveTo, remove, pendingId, error, clearError: () => setError(null) };
 }

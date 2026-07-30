@@ -1,4 +1,14 @@
-import { Body, Controller, Get, NotFoundException, Param, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  NotFoundException,
+  Param,
+  Patch,
+  Post,
+} from '@nestjs/common';
 import { z } from 'zod';
 import {
   createGuestRequestSchema,
@@ -67,6 +77,17 @@ export class GuestController {
   ): Promise<Guest> {
     await this.assertGuestInClub(clubUnitId, guestId);
     return this.guests.update(guestId, body);
+  }
+
+  @Delete(':guestId')
+  @HttpCode(204)
+  @ResourceScope('membership.guest', 'delete', { source: 'param', key: 'clubUnitId' })
+  async remove(
+    @Param('clubUnitId', uuidPipe) clubUnitId: string,
+    @Param('guestId', uuidPipe) guestId: string,
+  ): Promise<void> {
+    await this.assertGuestInClub(clubUnitId, guestId);
+    await this.guests.remove(guestId);
   }
 
   /** M4 Slice 4: create-or-attach conversion. Reuses `membership.guest:update` — no new resource. */

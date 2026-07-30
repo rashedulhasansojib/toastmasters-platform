@@ -1,4 +1,5 @@
 import { describe, it, beforeAll, afterAll, expect } from 'vitest';
+import { ConflictException } from '@nestjs/common';
 import type { PrismaClient } from '@toastmasters/db';
 import { startTestDb } from '../support/test-db';
 import { OrgUnitRepository } from '../../src/modules/org/org.repository';
@@ -70,11 +71,20 @@ describe('Identity repositories (integration)', () => {
       expect(found?.id).toBe(created.id);
     });
 
-    it('rejects a duplicate email at the database', async () => {
+    it('rejects a duplicate email with a 409, not a raw DB error', async () => {
       await people.create({ email: 'dupe@example.com', fullName: 'First' });
       await expect(
         people.create({ email: 'dupe@example.com', fullName: 'Second' }),
-      ).rejects.toThrow();
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it("rejects re-adding a soft-deleted person's email the same way", async () => {
+      const created = await people.create({ email: 'gone@example.com', fullName: 'Gone' });
+      await people.softDelete(created.id, created.email, created.id);
+
+      await expect(
+        people.create({ email: 'gone@example.com', fullName: 'Reincarnated' }),
+      ).rejects.toThrow(ConflictException);
     });
 
     it('activates a still-invited person on an admin password reset', async () => {

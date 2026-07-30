@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { ConflictException, Inject, Injectable } from '@nestjs/common';
 import { getPrisma, type PrismaClient } from '@toastmasters/db';
 import type {
   Person,
@@ -36,21 +36,36 @@ function toPerson(row: PersonRow): Person {
 export class PersonRepository {
   constructor(@Inject(PRISMA_CLIENT) private readonly db: PrismaClient = getPrisma()) {}
 
+  /**
+   * `email` is unique at the DB level and stays reserved forever once taken —
+   * even by a soft-deleted person, since deletedAt rows are kept, not erased
+   * (see the deletedAt doc comment below). Without this catch, re-adding a
+   * user whose email belongs to a disabled/deleted person surfaced as an
+   * unhandled Prisma P2002, which the global filter renders as an opaque 500
+   * instead of a message an admin can act on.
+   */
   async create(input: {
     email: string;
     fullName: string;
     phone?: string | null;
     tiMemberNumber?: string | null;
   }): Promise<Person> {
-    const row = await this.db.person.create({
-      data: {
-        email: input.email.toLowerCase(),
-        fullName: input.fullName,
-        phone: input.phone ?? null,
-        tiMemberNumber: input.tiMemberNumber ?? null,
-      },
-    });
-    return toPerson(row);
+    try {
+      const row = await this.db.person.create({
+        data: {
+          email: input.email.toLowerCase(),
+          fullName: input.fullName,
+          phone: input.phone ?? null,
+          tiMemberNumber: input.tiMemberNumber ?? null,
+        },
+      });
+      return toPerson(row);
+    } catch (err) {
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'P2002') {
+        throw new ConflictException('A person with this email already exists');
+      }
+      throw err;
+    }
   }
 
   async findById(id: string): Promise<Person | null> {

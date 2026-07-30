@@ -215,6 +215,36 @@ export class PersonRepository {
   }
 
   /**
+   * Users admin "show disabled accounts" toggle's restore action. Clears
+   * deletedAt and resets status to 'invited' — the same state a brand-new
+   * Person starts in, so the normal invite/reset-password paths pick back up
+   * from there. Deliberately does not reinstate the role assignments or club
+   * memberships softDelete ended: those stay historical, and re-placing the
+   * person in the org tree is a separate, explicit action.
+   */
+  async restore(personId: string, actorId: string): Promise<Person> {
+    return this.db.$transaction(async (tx) => {
+      const existing = await tx.person.findUnique({ where: { id: personId } });
+      if (!existing || !existing.deletedAt) {
+        throw new ConflictException('Person is not deleted');
+      }
+
+      const row = await tx.person.update({
+        where: { id: personId },
+        data: { deletedAt: null, status: 'invited' },
+      });
+      await tx.auditEvent.create({
+        data: {
+          actorPersonId: actorId,
+          type: 'person_restored',
+          metadata: { personId },
+        },
+      });
+      return toPerson(row);
+    });
+  }
+
+  /**
    * Users admin detail/edit routes' guard against horizontal scope
    * escalation: the outer @ResourceScope only checks the actor holds
    * identity.person at the *anchor* org unit they passed — it says nothing
@@ -255,23 +285,26 @@ export class PersonRepository {
     q?: string;
     limit: number;
     offset: number;
+    includeDeleted?: boolean;
   }): Promise<{ items: PersonSearchResultItem[]; total: number }> {
     const needle = input.q?.trim() || null;
+    const includeDeleted = input.includeDeleted ?? false;
 
     const [rows, totalRows] = input.isRegionRoot
       ? await Promise.all([
           // $queryRaw does not apply Prisma's camelCase field mapping —
           // every column toPerson() reads back is aliased explicitly.
           // deleted_at IS NULL filters soft-deleted rows out of the Users
-          // admin list uniformly — the Person row is retained for FK
-          // integrity but must never re-surface in the admin surface.
+          // admin list by default — the Person row is retained for FK
+          // integrity but stays hidden unless the "show disabled accounts"
+          // toggle (includeDeleted) opts back in.
           this.db.$queryRaw<PersonRow[]>`
             SELECT id, email, full_name AS "fullName", phone, photo_url AS "photoUrl", bio,
                    ti_member_number AS "tiMemberNumber", status, mfa_enabled AS "mfaEnabled",
                    permission_version AS "permissionVersion", created_at AS "createdAt",
                    last_login_at AS "lastLoginAt", deleted_at AS "deletedAt"
             FROM person
-            WHERE deleted_at IS NULL
+            WHERE (${includeDeleted} OR deleted_at IS NULL)
               AND (${needle}::text IS NULL
               OR full_name ILIKE '%' || ${needle} || '%'
               OR email ILIKE '%' || ${needle} || '%'
@@ -281,7 +314,7 @@ export class PersonRepository {
           `,
           this.db.$queryRaw<Array<{ n: bigint }>>`
             SELECT count(*) AS n FROM person
-            WHERE deleted_at IS NULL
+            WHERE (${includeDeleted} OR deleted_at IS NULL)
               AND (${needle}::text IS NULL
               OR full_name ILIKE '%' || ${needle} || '%'
               OR email ILIKE '%' || ${needle} || '%'
@@ -295,7 +328,7 @@ export class PersonRepository {
                    p.permission_version AS "permissionVersion", p.created_at AS "createdAt",
                    p.last_login_at AS "lastLoginAt", p.deleted_at AS "deletedAt"
             FROM person p
-            WHERE p.deleted_at IS NULL
+            WHERE (${includeDeleted} OR p.deleted_at IS NULL)
               AND (${needle}::text IS NULL
               OR p.full_name ILIKE '%' || ${needle} || '%'
               OR p.email ILIKE '%' || ${needle} || '%'
@@ -315,7 +348,7 @@ export class PersonRepository {
           `,
           this.db.$queryRaw<Array<{ n: bigint }>>`
             SELECT count(*) AS n FROM person p
-            WHERE p.deleted_at IS NULL
+            WHERE (${includeDeleted} OR p.deleted_at IS NULL)
               AND (${needle}::text IS NULL
               OR p.full_name ILIKE '%' || ${needle} || '%'
               OR p.email ILIKE '%' || ${needle} || '%'
@@ -346,8 +379,14 @@ export class PersonRepository {
     return { items, total: Number(totalRows[0]?.n ?? 0) };
   }
 
+  /**
+   * Unlike findById(), does not filter deletedAt: an admin only reaches this
+   * route via an id they already saw (the default list hides deleted people;
+   * the includeDeleted toggle is what surfaces the id), and the "Restore"
+   * action needs the detail page to load for a still-deleted person.
+   */
   async findDetail(id: string): Promise<PersonDetail | null> {
-    const row = await this.db.person.findFirst({ where: { id, deletedAt: null } });
+    const row = await this.db.person.findFirst({ where: { id } });
     if (!row) return null;
 
     const badges = await this.badgesForPersons([id], { includeEndedRoles: true });

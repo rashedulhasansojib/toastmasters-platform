@@ -107,6 +107,22 @@ export class PersonController {
     await this.people.softDelete(personId, anchorOrgUnitId, principal.userId);
   }
 
+  /**
+   * Users admin "show disabled accounts" toggle's restore action. `update`,
+   * not `delete` — reversing a soft-delete is the same tier as the PATCH
+   * status flip, and whoever can disable/delete a person should be able to
+   * undo it too.
+   */
+  @Post('people/:personId/restore')
+  @ResourceScope('identity.person', 'update', { source: 'query', key: 'anchorOrgUnitId' })
+  async restore(
+    @Param('personId', uuidPipe) personId: string,
+    @Query('anchorOrgUnitId', uuidPipe) anchorOrgUnitId: string,
+    @CurrentUser() principal: Principal,
+  ): Promise<Person> {
+    return this.people.restore(personId, anchorOrgUnitId, principal.userId);
+  }
+
   /** The Add User dialog's cascade picker: auto-populate the parents above a directly-picked unit. */
   @Get('org-units/:orgUnitId/ancestors')
   @ResourceScope('identity.person', 'read', { source: 'param', key: 'orgUnitId' })

@@ -126,10 +126,13 @@ model Person {
   /// Users admin soft-delete (super-admin People page). Set only by
   /// PersonRepository.softDelete — the same transaction that ends active
   /// role assignments, deactivates club memberships, clears the password
-  /// hash and bumps permission_version. Filtered out of every Users admin
-  /// read (search, detail, isWithinSubtree). Never overwritten: soft-delete
-  /// is one-way — an accidental deletion is corrected by restoring from a
-  /// backup, not by clearing this column.
+  /// hash and bumps permission_version. Excluded from search() by default and
+  /// from the default admin list, but explicitly reachable via search's
+  /// includeDeleted flag or a direct id (the detail route no longer filters
+  /// on it) — an admin has to be able to find a deleted person to restore
+  /// them. Cleared only by PersonRepository.restore, which resets status to
+  /// 'invited'; the role assignments and memberships ended at delete time are
+  /// not reinstated.
   deletedAt         DateTime?    @map("deleted_at")
 
   clubMemberships ClubMembership[]
@@ -962,6 +965,11 @@ enum AuditEventType {
   /// state change (deletedAt, roleAssignment end, membership deactivation,
   /// permissionVersion bump).
   person_soft_deleted
+  /// Users admin: super-admin restored a soft-deleted person (deletedAt
+  /// cleared, status reset to 'invited'). Written by PersonRepository.restore.
+  /// Role assignments and club memberships ended at delete time are not
+  /// reinstated — restoring undoes the deletion marker, not history.
+  person_restored
 }
 
 model AuditEvent {

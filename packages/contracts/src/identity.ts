@@ -19,8 +19,9 @@ export const person = z.object({
   lastLoginAt: z.iso.datetime().nullable(),
   /**
    * Users admin soft-delete marker (super-admin People page). Non-null means
-   * the person is filtered out of search/detail; the row itself stays for
-   * referential integrity. Set by DELETE /people/:personId; never cleared.
+   * the person is excluded from search by default (opt back in with
+   * `includeDeleted`) — the row itself stays for referential integrity. Set
+   * by DELETE /people/:personId; cleared by POST /people/:personId/restore.
    */
   deletedAt: z.iso.datetime().nullable(),
 });
@@ -59,6 +60,8 @@ export const personSearchQuerySchema = z
     q: z.string().min(1).optional(),
     limit: z.coerce.number().int().positive().max(100).default(25),
     offset: z.coerce.number().int().nonnegative().default(0),
+    /** Users admin "show disabled accounts" toggle — includes soft-deleted people, excluded by default. */
+    includeDeleted: z.coerce.boolean().default(false),
   })
   .strict();
 export type PersonSearchQuery = z.infer<typeof personSearchQuerySchema>;

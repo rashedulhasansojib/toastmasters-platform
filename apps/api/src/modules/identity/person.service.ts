@@ -33,6 +33,7 @@ export class PersonService {
     q?: string;
     limit: number;
     offset: number;
+    includeDeleted?: boolean;
   }): Promise<PersonSearchResponse> {
     const anchor = await this.orgUnits.findById(input.anchorOrgUnitId);
     if (!anchor) throw new NotFoundException('Org unit not found');
@@ -43,6 +44,7 @@ export class PersonService {
       q: input.q,
       limit: input.limit,
       offset: input.offset,
+      includeDeleted: input.includeDeleted,
     });
     return { items, total, limit: input.limit, offset: input.offset };
   }
@@ -99,6 +101,23 @@ export class PersonService {
   async softDelete(personId: string, anchorOrgUnitId: string, actorId: string): Promise<void> {
     const target = await this.assertVisible(personId, anchorOrgUnitId);
     await this.people.softDelete(personId, target.email, actorId);
+  }
+
+  /**
+   * Users admin "show disabled accounts" toggle's restore action. Same
+   * anchor + subtree check as getDetail() — not assertVisible(), which
+   * requires findById() to succeed and findById() excludes deleted people by
+   * design; the whole point here is reaching a person who is currently
+   * deleted.
+   */
+  async restore(personId: string, anchorOrgUnitId: string, actorId: string): Promise<Person> {
+    const anchor = await this.orgUnits.findById(anchorOrgUnitId);
+    if (!anchor) throw new NotFoundException('Org unit not found');
+
+    if (anchor.type !== 'region' && !(await this.people.isWithinSubtree(personId, anchor.path))) {
+      throw new NotFoundException('Person not found');
+    }
+    return this.people.restore(personId, actorId);
   }
 
   /**

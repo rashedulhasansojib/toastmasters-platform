@@ -16,12 +16,13 @@ import { authedFetch } from './session-proxy';
 /** Users admin search — returns null on 403/404/any failure, same convention as getPlatformConsole/getOrgTreeLevel. */
 export async function searchPeople(
   orgUnitId: string,
-  params: { q?: string; limit?: number; offset?: number } = {},
+  params: { q?: string; limit?: number; offset?: number; includeDeleted?: boolean } = {},
 ): Promise<PersonSearchResponse | null> {
   const query = new URLSearchParams();
   if (params.q) query.set('q', params.q);
   if (params.limit) query.set('limit', String(params.limit));
   if (params.offset) query.set('offset', String(params.offset));
+  if (params.includeDeleted) query.set('includeDeleted', 'true');
   const qs = query.toString();
   const response = await authedFetch(`/v1/org-units/${orgUnitId}/people${qs ? `?${qs}` : ''}`);
   if (!response.ok) return null;

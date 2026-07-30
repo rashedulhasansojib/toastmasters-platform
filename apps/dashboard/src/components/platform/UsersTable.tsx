@@ -61,6 +61,7 @@ export function UsersTable({
   initialTotal: number;
 }) {
   const [query, setQuery] = useState('');
+  const [includeDeleted, setIncludeDeleted] = useState(false);
   const [items, setItems] = useState(initialItems);
   const [total, setTotal] = useState(initialTotal);
   const [loading, setLoading] = useState(false);
@@ -71,6 +72,7 @@ export function UsersTable({
     debounceRef.current = setTimeout(() => {
       const params = new URLSearchParams({ limit: '100' });
       if (query.trim()) params.set('q', query.trim());
+      if (includeDeleted) params.set('includeDeleted', 'true');
       setLoading(true);
       fetch(`/api/org-units/${anchorOrgUnitId}/people?${params.toString()}`)
         .then((res) => (res.ok ? res.json() : null))
@@ -85,7 +87,7 @@ export function UsersTable({
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [query, anchorOrgUnitId]);
+  }, [query, includeDeleted, anchorOrgUnitId]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -104,9 +106,20 @@ export function UsersTable({
             className="h-9 pl-8"
           />
         </div>
-        <p className="text-xs text-muted-foreground">
-          {loading ? 'Searching…' : `${total} user${total === 1 ? '' : 's'}`}
-        </p>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={includeDeleted}
+              onChange={(event) => setIncludeDeleted(event.target.checked)}
+              className="size-3.5 rounded border-input"
+            />
+            Show disabled accounts
+          </label>
+          <p className="text-xs text-muted-foreground">
+            {loading ? 'Searching…' : `${total} user${total === 1 ? '' : 's'}`}
+          </p>
+        </div>
       </div>
 
       {items.length === 0 ? (
@@ -183,9 +196,13 @@ export function UsersTable({
                     <RoleBadges item={item} />
                   </td>
                   <td className="border-b border-border px-3 py-3 whitespace-nowrap group-last:border-b-0 group-hover:bg-muted">
-                    <Badge variant={statusVariant(item.status)}>
-                      {item.pendingInvitation ? 'invited' : item.status}
-                    </Badge>
+                    {item.deletedAt ? (
+                      <Badge variant="destructive">deleted</Badge>
+                    ) : (
+                      <Badge variant={statusVariant(item.status)}>
+                        {item.pendingInvitation ? 'invited' : item.status}
+                      </Badge>
+                    )}
                   </td>
                 </tr>
               ))}

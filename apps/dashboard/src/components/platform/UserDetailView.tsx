@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, KeyRound, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, KeyRound, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import type {
   ClubMemberType,
   OrgUnitWithCount,
@@ -55,6 +55,26 @@ export function UserDetailView({
 }) {
   const router = useRouter();
   const [assignOpen, setAssignOpen] = useState(false);
+
+  if (detail.deletedAt) {
+    return (
+      <div className="flex flex-col gap-6">
+        <div className="flex items-center gap-3">
+          <Link
+            href={`/platform/${regionUnitId}/users`}
+            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="size-4" /> All users
+          </Link>
+        </div>
+        <RestoreUserCard
+          regionUnitId={regionUnitId}
+          detail={detail}
+          onRestored={() => router.refresh()}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -264,9 +284,80 @@ function PasswordResetCard({ regionUnitId, personId }: { regionUnitId: string; p
 }
 
 /**
- * Users admin soft-delete (super-admin People page). One-way from the UI —
- * on success, we bounce back to the users list, since the detail page for a
- * deleted person 404s.
+ * Users admin "show disabled accounts" toggle's restore action — the
+ * detail page for a deleted person renders only this card (no edit form,
+ * roles, or password reset) until it's restored, since those all 404 server
+ * side for someone still marked deleted.
+ */
+function RestoreUserCard({
+  regionUnitId,
+  detail,
+  onRestored,
+}: {
+  regionUnitId: string;
+  detail: PersonDetail;
+  onRestored: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  async function onRestore(): Promise<void> {
+    setBusy(true);
+    try {
+      const result = await submitAction(
+        () =>
+          fetch(`/api/people/${detail.id}/restore?anchorOrgUnitId=${regionUnitId}`, {
+            method: 'POST',
+          }),
+        {
+          loading: 'Restoring user…',
+          success: 'User restored',
+          error: 'Could not restore this user.',
+        },
+      );
+      if (!result) return;
+      onRestored();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{detail.fullName}</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <p className="text-sm">
+          <Badge variant="destructive">deleted</Badge>{' '}
+          <span className="text-muted-foreground">
+            on {new Date(detail.deletedAt!).toLocaleString()}
+          </span>
+        </p>
+        <p className="text-sm text-muted-foreground">
+          {detail.email} — every role and club membership was ended at delete time and is not
+          reinstated automatically. Restoring clears the deleted marker and sets this account back
+          to &quot;invited&quot;, so you can re-invite them into a role or reset their password.
+        </p>
+        <div>
+          <Button
+            type="button"
+            size="lg"
+            className="h-11 lg:h-9"
+            disabled={busy}
+            onClick={() => void onRestore()}
+          >
+            <RotateCcw /> {busy ? 'Restoring…' : 'Restore user'}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Users admin soft-delete (super-admin People page). One-way from the UI
+ * until restored via RestoreUserCard — on success, we bounce back to the
+ * users list.
  */
 function DangerZoneCard({
   regionUnitId,
@@ -423,7 +514,11 @@ function ProfileCard({ regionUnitId, detail }: { regionUnitId: string; detail: P
           </div>
           <div className="flex flex-col gap-1.5 sm:max-w-xs">
             <Label htmlFor="edit-status">Status</Label>
-            <Select value={status} onValueChange={(v) => setStatus(v as 'active' | 'disabled')}>
+            <Select
+              items={{ active: 'Active', disabled: 'Disabled' }}
+              value={status}
+              onValueChange={(v) => setStatus(v as 'active' | 'disabled')}
+            >
               <SelectTrigger className="w-full" id="edit-status">
                 <SelectValue />
               </SelectTrigger>

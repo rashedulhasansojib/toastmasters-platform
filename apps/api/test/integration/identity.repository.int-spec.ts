@@ -97,6 +97,56 @@ describe('Identity repositories (integration)', () => {
       expect(credentials?.status).toBe('active');
       expect(credentials?.passwordHash).toBe('$argon2id$fake-hash');
     });
+
+    it('excludes a soft-deleted person from search unless includeDeleted is set', async () => {
+      const created = await people.create({
+        email: 'hidden@example.com',
+        fullName: 'Hidden Person',
+      });
+      await people.softDelete(created.id, created.email, created.id);
+
+      const defaultSearch = await people.search({
+        subtreePath: 'r1',
+        isRegionRoot: true,
+        q: 'Hidden Person',
+        limit: 10,
+        offset: 0,
+      });
+      expect(defaultSearch.items).toHaveLength(0);
+
+      const withDeleted = await people.search({
+        subtreePath: 'r1',
+        isRegionRoot: true,
+        q: 'Hidden Person',
+        limit: 10,
+        offset: 0,
+        includeDeleted: true,
+      });
+      expect(withDeleted.items.map((i) => i.id)).toContain(created.id);
+    });
+
+    it('restore() clears deletedAt and resets status to invited', async () => {
+      const created = await people.create({
+        email: 'restore-me@example.com',
+        fullName: 'Restore Me',
+      });
+      await people.softDelete(created.id, created.email, created.id);
+
+      const restored = await people.restore(created.id, created.id);
+      expect(restored.deletedAt).toBeNull();
+      expect(restored.status).toBe('invited');
+
+      const found = await people.findById(created.id);
+      expect(found?.id).toBe(created.id);
+    });
+
+    it('restore() rejects a person who is not deleted', async () => {
+      const created = await people.create({
+        email: 'not-deleted@example.com',
+        fullName: 'Not Deleted',
+      });
+      await expect(people.restore(created.id, created.id)).rejects.toThrow(ConflictException);
+    });
   });
 
   describe('ClubMembershipRepository', () => {

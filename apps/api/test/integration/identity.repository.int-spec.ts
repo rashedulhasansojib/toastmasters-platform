@@ -76,6 +76,17 @@ describe('Identity repositories (integration)', () => {
         people.create({ email: 'dupe@example.com', fullName: 'Second' }),
       ).rejects.toThrow();
     });
+
+    it('activates a still-invited person on an admin password reset', async () => {
+      const created = await people.create({ email: 'reset@example.com', fullName: 'Reset Me' });
+      expect(created.status).toBe('invited');
+
+      await people.setPassword(created.id, '$argon2id$fake-hash', created.id);
+
+      const credentials = await people.findCredentialsByEmail('reset@example.com');
+      expect(credentials?.status).toBe('active');
+      expect(credentials?.passwordHash).toBe('$argon2id$fake-hash');
+    });
   });
 
   describe('ClubMembershipRepository', () => {

@@ -120,13 +120,19 @@ export class PersonRepository {
    * plaintext — hashing happens in the service (argon2id, one place). The
    * transaction bumps permission_version so any live session is invalidated
    * on the next request (rbac-design.md §5) and writes an audit row in the
-   * same commit as the state change.
+   * same commit as the state change. Also flips status to 'active', same as
+   * setCredentials: a person created via createWithOptionalInvite sits at
+   * status='invited' until someone gives them a password, and an admin reset
+   * is as much an activation as an invite acceptance — otherwise the new
+   * password hashes correctly but login() still rejects them for a
+   * non-active status, so "reset the password" silently failed to unlock the
+   * account.
    */
   async setPassword(personId: string, passwordHash: string, actorId: string): Promise<void> {
     await this.db.$transaction(async (tx) => {
       await tx.person.update({
         where: { id: personId },
-        data: { passwordHash, permissionVersion: { increment: 1 } },
+        data: { passwordHash, status: 'active', permissionVersion: { increment: 1 } },
       });
       await tx.auditEvent.create({
         data: {

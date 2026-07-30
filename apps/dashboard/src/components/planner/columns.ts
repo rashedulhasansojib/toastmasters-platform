@@ -8,15 +8,17 @@ import type { MeetingRoleKey, PlannerCell, PlannerRow } from '@toastmasters/cont
 export const PLANNER_COLUMNS: Array<{
   roleKey: MeetingRoleKey;
   slotIndex: number | null;
+  /** Full name used in the desktop header, the mobile card, and tooltips — matches the legacy portal's `ROLE_COLUMNS`. */
   label: string;
+  /** Compact tag ('TMOD', 'TTM'…) used in the CSV import dialog's unresolved list. */
   short: string;
 }> = [
-  { roleKey: 'toastmaster', slotIndex: null, label: 'Toastmaster', short: 'TMOD' },
-  { roleKey: 'table_topics_master', slotIndex: null, label: 'Table Topics Master', short: 'TTM' },
+  { roleKey: 'toastmaster', slotIndex: null, label: 'TMOD', short: 'TMOD' },
+  { roleKey: 'table_topics_master', slotIndex: null, label: 'TTM', short: 'TTM' },
   {
     roleKey: 'table_topics_evaluator',
     slotIndex: null,
-    label: 'Table Topics Evaluator',
+    label: 'TT Evaluator',
     short: 'TT Eval',
   },
   { roleKey: 'speaker', slotIndex: 0, label: 'Speaker 1', short: 'Sp 1' },
@@ -25,9 +27,9 @@ export const PLANNER_COLUMNS: Array<{
   { roleKey: 'evaluator', slotIndex: 1, label: 'Evaluator 2', short: 'Ev 2' },
   { roleKey: 'speaker', slotIndex: 2, label: 'Speaker 3', short: 'Sp 3' },
   { roleKey: 'evaluator', slotIndex: 2, label: 'Evaluator 3', short: 'Ev 3' },
-  { roleKey: 'general_evaluator', slotIndex: null, label: 'General Evaluator', short: 'GE' },
+  { roleKey: 'general_evaluator', slotIndex: null, label: 'General Eval.', short: 'GE' },
   { roleKey: 'timer', slotIndex: null, label: 'Timer', short: 'Timer' },
-  { roleKey: 'ah_counter', slotIndex: null, label: 'Ah-Counter', short: 'Ah' },
+  { roleKey: 'ah_counter', slotIndex: null, label: 'Ah Counter', short: 'Ah' },
   { roleKey: 'grammarian', slotIndex: null, label: 'Grammarian', short: 'Gram' },
 ];
 

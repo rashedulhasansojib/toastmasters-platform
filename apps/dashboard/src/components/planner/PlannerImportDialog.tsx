@@ -15,17 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { submitAction } from '@/lib/toast';
 import { PLANNER_COLUMNS, formatMeetingDate } from './columns';
-import { TEMPLATE_HEADERS, parsePlannerCsv, type ParseOutcome } from './csv';
-
-function downloadTemplate() {
-  const csv = `${TEMPLATE_HEADERS.join(',')}\n`;
-  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = 'planner-template.csv';
-  link.click();
-  URL.revokeObjectURL(url);
-}
+import { downloadPlannerTemplate, parsePlannerCsv, type ParseOutcome } from './csv';
 
 const ROLE_LABEL = new Map(
   PLANNER_COLUMNS.map((c) => [`${c.roleKey}:${c.slotIndex ?? 'null'}`, c.label]),
@@ -180,7 +170,7 @@ function ImportForm({ clubUnitId, onDone }: { clubUnitId: string; onDone: () => 
 
       <button
         type="button"
-        onClick={downloadTemplate}
+        onClick={downloadPlannerTemplate}
         className="inline-flex items-center gap-1.5 self-start text-sm text-muted-foreground underline hover:text-foreground"
       >
         <DownloadIcon className="size-3.5" />

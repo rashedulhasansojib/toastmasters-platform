@@ -51,6 +51,17 @@ export const TEMPLATE_HEADERS = [
   'Grammarian',
 ];
 
+/** Trigger a blank template download — same CSV the header order expects. */
+export function downloadPlannerTemplate(): void {
+  const csv = `${TEMPLATE_HEADERS.join(',')}\n`;
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'planner-template.csv';
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function normaliseHeader(header: string): string {
   return header.trim().toLowerCase().replace(/[._]/g, ' ').replace(/\s+/g, ' ').replace(/\.$/, '');
 }

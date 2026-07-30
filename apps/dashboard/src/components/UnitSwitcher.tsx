@@ -3,7 +3,9 @@
 import { useState, type ChangeEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Building2, ChevronDown } from 'lucide-react';
+import { sessionResponseSchema } from '@toastmasters/contracts';
 import type { ActiveUnitSummary, SwitchableUnit } from '@toastmasters/contracts';
+import { unitLandingPath } from './app-shell/nav-config';
 
 const TIER_LABEL: Record<string, string> = {
   international: 'International',
@@ -50,11 +52,19 @@ export function UnitSwitcher({
     if (!orgUnitId || orgUnitId === activeUnit?.id) return;
     setSwitching(true);
     try {
-      await fetch('/api/session/switch-unit', {
+      const response = await fetch('/api/session/switch-unit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orgUnitId }),
       });
+      if (!response.ok) return;
+      // Navigate to the new unit's landing page. Without this, the URL stays
+      // on the previous unit's route — e.g. /clubs/A/guests — so refreshing
+      // alone leaves the old screen mounted while the sidebar rebuilds
+      // against a different tier.
+      const session = sessionResponseSchema.parse(await response.json());
+      const landing = session.activeUnit ? unitLandingPath(session.activeUnit) : null;
+      router.push(landing ?? '/');
       router.refresh();
     } finally {
       setSwitching(false);

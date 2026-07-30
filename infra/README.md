@@ -17,5 +17,7 @@ docker compose -f infra/docker-compose.yml down -v  # stop + wipe volumes
 Default credentials match `.env.example`. Production uses Neon (Postgres) and an
 S3-compatible bucket; nothing here is meant for production.
 
-Deployment Dockerfiles and the production runbook are written before M1 ships
-(see `roadmap.md`).
+Production runs the three apps under **pm2** on a single server, against Neon
+(Postgres) and managed Redis — no containers. See `../docs/deployment.md` for the
+runbook, `deploy/deploy.sh` for what a deploy actually does, and
+`deploy/ecosystem.config.cjs` for the pm2 process definitions.

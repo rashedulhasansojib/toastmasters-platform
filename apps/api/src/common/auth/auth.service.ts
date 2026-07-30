@@ -1,5 +1,11 @@
 import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import type { Person, SessionResponse, SwitchableUnit } from '@toastmasters/contracts';
+import type {
+  ActiveUnitSummary,
+  ClubMembership,
+  Person,
+  SessionResponse,
+  SwitchableUnit,
+} from '@toastmasters/contracts';
 import { PersonRepository } from '../../modules/identity/person.repository';
 import { ClubMembershipRepository } from '../../modules/identity/club-membership.repository';
 import { ProgramYearRepository } from '../../modules/identity/program-year.repository';
@@ -11,11 +17,16 @@ import { SessionService } from './session.service';
 import type { SessionClaims } from './session.types';
 import type { Principal } from '../authz/authz.types';
 
-function toSessionResponse(person: Person, claims: SessionClaims): SessionResponse {
+function toSessionResponse(
+  person: Person,
+  claims: SessionClaims,
+  activeUnit: ActiveUnitSummary | null,
+): SessionResponse {
   return {
     personId: person.id,
     fullName: person.fullName,
     activeUnitId: claims.activeUnitId,
+    activeUnit,
     programYearId: claims.programYearId,
   };
 }
@@ -57,15 +68,43 @@ export class AuthService {
     ]);
     if (!person) throw new UnauthorizedException('Invalid credentials');
 
-    const primary = memberships.find((m) => m.isPrimary && !m.leftAt);
+    const activeUnit = await this.defaultActiveUnit(person.id, memberships);
     const claims: SessionClaims = {
       sub: person.id,
-      activeUnitId: primary?.clubUnitId ?? null,
+      activeUnitId: activeUnit?.id ?? null,
       programYearId: currentYear?.id ?? null,
       v: person.permissionVersion,
     };
     const token = await this.session.issue(claims);
-    return { token, session: toSessionResponse(person, claims) };
+    return { token, session: toSessionResponse(person, claims, activeUnit) };
+  }
+
+  /**
+   * The unit the dashboard opens on, so nobody has to pick one by hand: the
+   * primary club membership, else any club they are still a member of, else
+   * the first club they hold a role at (an officer or admin appointed
+   * straight into a club, with no membership row). Null leaves the switcher
+   * on "Select a unit…" — the only case is a person with no club at all,
+   * e.g. an Area Director.
+   */
+  private async defaultActiveUnit(
+    personId: string,
+    memberships: ClubMembership[],
+  ): Promise<ActiveUnitSummary | null> {
+    const membershipClubId = (
+      memberships.find((m) => m.isPrimary && !m.leftAt) ?? memberships.find((m) => !m.leftAt)
+    )?.clubUnitId;
+    if (membershipClubId) return this.resolveUnit(membershipClubId);
+
+    const units = await this.unitsForPerson(personId);
+    const club = units.find((unit) => unit.type === 'club');
+    return club ? { id: club.id, name: club.name, type: club.type } : null;
+  }
+
+  /** A missing unit resolves to null rather than throwing — `activeUnitId` is a UI hint, and a deleted unit should not lock anyone out of the session. */
+  private async resolveUnit(orgUnitId: string): Promise<ActiveUnitSummary | null> {
+    const unit = await this.orgUnits.findById(orgUnitId);
+    return unit ? { id: unit.id, name: unit.name, type: unit.type } : null;
   }
 
   /** Reissues the session with only `activeUnitId` changed — `v`/`programYearId` carry forward from the current session, not re-fetched. */
@@ -87,19 +126,31 @@ export class AuthService {
       v: principal.v ?? person.permissionVersion,
     };
     const token = await this.session.issue(claims);
-    return { token, session: toSessionResponse(person, claims) };
+    return {
+      token,
+      session: toSessionResponse(person, claims, {
+        id: unit.id,
+        name: unit.name,
+        type: unit.type,
+      }),
+    };
   }
 
   /** A pure read — no cookie is (re)issued. Slice 6 (M2): the unit switcher's "who am I" query. */
   async me(principal: Principal): Promise<SessionResponse> {
     const person = await this.people.findById(principal.userId);
     if (!person) throw new UnauthorizedException('Invalid session');
-    return toSessionResponse(person, {
-      sub: principal.userId,
-      activeUnitId: principal.activeUnitId ?? null,
-      programYearId: principal.programYearId ?? null,
-      v: principal.v ?? person.permissionVersion,
-    });
+    const activeUnitId = principal.activeUnitId ?? null;
+    return toSessionResponse(
+      person,
+      {
+        sub: principal.userId,
+        activeUnitId,
+        programYearId: principal.programYearId ?? null,
+        v: principal.v ?? person.permissionVersion,
+      },
+      activeUnitId ? await this.resolveUnit(activeUnitId) : null,
+    );
   }
 
   /**
@@ -109,9 +160,13 @@ export class AuthService {
    * effectiveGrants would technically cover.
    */
   async switchableUnits(principal: Principal): Promise<SwitchableUnit[]> {
+    return this.unitsForPerson(principal.userId);
+  }
+
+  private async unitsForPerson(personId: string): Promise<SwitchableUnit[]> {
     const [roleUnitIds, platformUnitIds] = await Promise.all([
-      this.roleAssignments.findActiveOrgUnitIdsForPerson(principal.userId),
-      this.grantAdmin.findPlatformRoleOrgUnitIdsForPerson(principal.userId),
+      this.roleAssignments.findActiveOrgUnitIdsForPerson(personId),
+      this.grantAdmin.findPlatformRoleOrgUnitIdsForPerson(personId),
     ]);
     const unitIds = [...new Set([...roleUnitIds, ...platformUnitIds])];
     const units = await this.orgUnits.findByIds(unitIds);

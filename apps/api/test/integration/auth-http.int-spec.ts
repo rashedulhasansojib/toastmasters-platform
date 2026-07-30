@@ -140,6 +140,7 @@ describe('Login + session HTTP surface (integration)', () => {
       personId: expect.any(String),
       fullName: 'Login Person',
       activeUnitId: clubId,
+      activeUnit: { id: clubId, name: 'Club 1', type: 'club' },
       programYearId: '2026-2027',
     });
     expect(res.body.passwordHash).toBeUndefined();
@@ -214,6 +215,7 @@ describe('Login + session HTTP surface (integration)', () => {
       personId: expect.any(String),
       fullName: 'Login Person',
       activeUnitId: clubId,
+      activeUnit: { id: clubId, name: 'Club 1', type: 'club' },
       programYearId: '2026-2027',
     });
     expect(meRes.headers['set-cookie']).toBeUndefined();

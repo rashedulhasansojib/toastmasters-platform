@@ -3,9 +3,9 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { X } from 'lucide-react';
-import type { SessionResponse, SwitchableUnit } from '@toastmasters/contracts';
-import { UnitSwitcher } from '@/components/UnitSwitcher';
+import type { SessionResponse } from '@toastmasters/contracts';
 import { cn } from '@/lib/utils';
+import { LogoutButton } from './LogoutButton';
 import { buildNavSections } from './nav-config';
 
 function isActive(pathname: string, href: string): boolean {
@@ -15,18 +15,13 @@ function isActive(pathname: string, href: string): boolean {
 
 export function Sidebar({
   session,
-  units,
   onNavigate,
 }: {
   session: SessionResponse;
-  units: SwitchableUnit[];
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
-  // The session carries only the id; the unit's tier comes from the
-  // switchable-units list the layout already fetched.
-  const active = units.find((unit) => unit.id === session.activeUnitId);
-  const sections = buildNavSections(active ? { id: active.id, type: active.type } : null);
+  const sections = buildNavSections(session.activeUnit);
 
   return (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
@@ -92,11 +87,11 @@ export function Sidebar({
         ))}
       </nav>
 
-      <div className="border-t border-sidebar-border px-4 py-3">
-        <div className="mb-2 text-sm font-medium truncate" title={session.fullName}>
+      <div className="border-t border-sidebar-border px-2 py-3">
+        <div className="truncate px-2 pb-1 text-sm font-medium" title={session.fullName}>
           {session.fullName}
         </div>
-        <UnitSwitcher units={units} activeUnitId={session.activeUnitId} />
+        <LogoutButton onNavigate={onNavigate} />
       </div>
     </div>
   );

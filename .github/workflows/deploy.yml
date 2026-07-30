@@ -1,0 +1,114 @@
+name: Deploy
+
+# Production deploys. Two ways in:
+#   • automatic — a push to main whose CI run (lint, typecheck, tests, build,
+#     gitleaks) went green. A red CI never reaches the server.
+#   • manual — Actions ▸ Deploy ▸ Run workflow, optionally naming a ref. This is
+#     also the rollback path: deploy the previous good SHA.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit SHA, tag or branch to deploy'
+        required: false
+        default: main
+      seed:
+        description: 'Also run pnpm db:seed (overwrites edited reference data)'
+        type: boolean
+        required: false
+        default: false
+
+# One deploy at a time, and never cancel one in flight — a half-applied deploy
+# is worse than a queued one.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # workflow_run fires on failure too; only a green CI deploys.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    steps:
+      - name: Resolve target ref
+        id: target
+        run: |
+          if [[ '${{ github.event_name }}' == 'workflow_dispatch' ]]; then
+            echo "ref=${{ inputs.ref }}" >> "$GITHUB_OUTPUT"
+            echo "seed=${{ inputs.seed }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+            echo "seed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          test -n "$SSH_KEY" || { echo '::error::DEPLOY_SSH_KEY is not set — see docs/deployment.md'; exit 1; }
+          test -n "$KNOWN_HOSTS" || { echo '::error::DEPLOY_SSH_KNOWN_HOSTS is not set — see docs/deployment.md'; exit 1; }
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts
+
+      - name: Deploy over SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          TARGET_REF: ${{ steps.target.outputs.ref }}
+          RUN_SEED: ${{ steps.target.outputs.seed }}
+        run: |
+          # The remote side moves the working tree to the target commit, then
+          # hands off to that commit's own infra/deploy/deploy.sh (install,
+          # build, migrate, pm2 reload, health check). Splitting it this way
+          # means the deploy script is never rewritten underneath itself.
+          ssh -i ~/.ssh/deploy_key \
+              -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+              -o StrictHostKeyChecking=yes \
+              -o BatchMode=yes \
+              -p "$DEPLOY_PORT" \
+              "$DEPLOY_USER@$DEPLOY_HOST" \
+              "bash -s -- '$DEPLOY_PATH' '$TARGET_REF' '$RUN_SEED'" <<'REMOTE'
+          set -euo pipefail
+          DEPLOY_PATH="$1"; TARGET_REF="$2"; export RUN_SEED="$3"
+
+          cd "$DEPLOY_PATH"
+          echo "▸ Syncing $(pwd) to $TARGET_REF"
+          git fetch --prune --tags origin
+          # A bare SHA isn't covered by the refspec above; GitHub allows fetching
+          # one directly, so try that too before resolving.
+          git fetch origin "$TARGET_REF" 2>/dev/null || true
+          TARGET_SHA="$(
+            git rev-parse --verify "origin/$TARGET_REF^{commit}" 2>/dev/null \
+            || git rev-parse --verify "$TARGET_REF^{commit}" 2>/dev/null \
+            || git rev-parse --verify FETCH_HEAD
+          )"
+          echo "▸ Previous commit: $(git rev-parse --short HEAD)"
+          # Detach first so the local branch never diverges from origin.
+          git checkout --detach --quiet "$TARGET_SHA"
+          git reset --hard --quiet "$TARGET_SHA"
+          # No `git clean` on purpose: it would delete .env and node_modules.
+
+          exec bash ./infra/deploy/deploy.sh
+          REMOTE
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Deploy ${{ job.status }}"
+            echo
+            echo "- ref: \`${{ steps.target.outputs.ref }}\`"
+            echo "- trigger: \`${{ github.event_name }}\`"
+            echo "- seed: \`${{ steps.target.outputs.seed }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

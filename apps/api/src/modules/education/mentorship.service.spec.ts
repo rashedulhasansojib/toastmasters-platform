@@ -60,11 +60,11 @@ function membership(overrides: Partial<ClubMembership> = {}): ClubMembership {
     id: 'membership-1',
     personId: 'mentor-1',
     clubUnitId: 'club-1',
-    memberType: 'member',
+    memberType: 'new',
     joinedAt: '2026-01-01T00:00:00.000Z',
     leftAt: null,
     isPrimary: true,
-    tiStanding: 'active',
+    tiStanding: 'good',
     localStatus: 'active',
     provenance: 'portal',
     lastReconciledAt: null,
@@ -147,7 +147,7 @@ describe('MentorshipService.addCheckIn / end / list', () => {
   it('addCheckIn defaults nextDueOn to null when not supplied', async () => {
     const { service, pairings } = makeService();
     await service.addCheckIn('pairing-1', 'vpe-1', 'note');
-    expect(pairings.addCheckIn.mock.calls[0][1]).toMatchObject({ nextDueOn: null });
+    expect(pairings.addCheckIn.mock.calls[0]?.[1]).toMatchObject({ nextDueOn: null });
   });
 
   it('end delegates to the repository with the ended reason', async () => {
@@ -287,14 +287,14 @@ describe('MentorshipService.suggest', () => {
     // mentor-a: pathOverlap 1*10 + tenure(91/30≈3.03) - activeCount 1*5 - mismatch 0 ≈ 8.03
     // mentor-b: pathOverlap 2*10 + tenure(30/30=1) - activeCount 0 - mismatch 1*20 ≈ 1
     expect(result).toHaveLength(2);
-    expect(result[0].mentorPersonId).toBe('mentor-a');
-    expect(result[0].score).toBeCloseTo(8.033, 1);
-    expect(result[0].reasons).toEqual(
+    expect(result[0]?.mentorPersonId).toBe('mentor-a');
+    expect(result[0]?.score).toBeCloseTo(8.033, 1);
+    expect(result[0]?.reasons).toEqual(
       expect.arrayContaining(['shares 1 path(s) with the mentee', 'already mentoring 1']),
     );
-    expect(result[1].mentorPersonId).toBe('mentor-b');
-    expect(result[1].score).toBeCloseTo(1, 1);
-    expect(result[1].reasons).toEqual(
+    expect(result[1]?.mentorPersonId).toBe('mentor-b');
+    expect(result[1]?.score).toBeCloseTo(1, 1);
+    expect(result[1]?.reasons).toEqual(
       expect.arrayContaining([
         'shares 2 path(s) with the mentee',
         '1 prior mismatch with this mentee',

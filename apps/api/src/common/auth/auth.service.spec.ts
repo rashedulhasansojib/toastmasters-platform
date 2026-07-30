@@ -38,6 +38,21 @@ function membership(overrides: Partial<ClubMembership> = {}): ClubMembership {
   };
 }
 
+function orgUnit(overrides: Partial<OrgUnit> = {}): OrgUnit {
+  return {
+    id: 'club-B',
+    type: 'club',
+    parentId: 'd1',
+    path: 'r1.d1.cB',
+    depth: 2,
+    name: 'Club B',
+    code: 'cB',
+    status: 'active',
+    timezone: 'Asia/Dhaka',
+    ...overrides,
+  } as OrgUnit;
+}
+
 function makeService(overrides: {
   credentials?: {
     id: string;
@@ -133,6 +148,7 @@ describe('AuthService.login', () => {
   it('issues a session for correct credentials, resolving activeUnitId from the primary open membership', async () => {
     const { service, session } = makeService({
       credentials: { id: 'person-1', passwordHash: '$argon2id$hash', status: 'active' },
+      orgUnit: orgUnit(),
       memberships: [
         membership({ id: 'm1', clubUnitId: 'club-A', isPrimary: false }),
         membership({ id: 'm2', clubUnitId: 'club-B', isPrimary: true, leftAt: null }),
@@ -156,6 +172,7 @@ describe('AuthService.login', () => {
       personId: 'person-1',
       fullName: 'Karim Hossain',
       activeUnitId: 'club-B',
+      activeUnit: { id: 'club-B', name: 'Club B', type: 'club' },
       programYearId: '2026-2027',
     });
     expect(session.issue).toHaveBeenCalledWith({
@@ -166,7 +183,24 @@ describe('AuthService.login', () => {
     });
   });
 
-  it('logs in fine with no primary membership and no current program year — both nullable', async () => {
+  it('falls back to the first club the person holds a role at when they have no membership', async () => {
+    const { service } = makeService({
+      credentials: { id: 'person-1', passwordHash: '$argon2id$hash', status: 'active' },
+      memberships: [],
+      roleUnitIds: ['area-1', 'club-Z'],
+      // Area first, so picking the club proves a tier filter, not just "the first unit".
+      orgUnits: [
+        orgUnit({ id: 'area-1', type: 'area', name: 'Area 5', code: 'a5', path: 'r1.d1.a5' }),
+        orgUnit({ id: 'club-Z', name: 'Club Z', code: 'cZ', path: 'r1.d1.cZ' }),
+      ],
+    });
+
+    const { session: response } = await service.login('karim@example.com', 'correct');
+    expect(response.activeUnitId).toBe('club-Z');
+    expect(response.activeUnit).toEqual({ id: 'club-Z', name: 'Club Z', type: 'club' });
+  });
+
+  it('logs in fine with no membership, no club role, and no current program year — all nullable', async () => {
     const { service } = makeService({
       credentials: { id: 'person-1', passwordHash: '$argon2id$hash', status: 'active' },
       memberships: [],
@@ -174,6 +208,7 @@ describe('AuthService.login', () => {
     });
     const { session: response } = await service.login('karim@example.com', 'correct');
     expect(response.activeUnitId).toBeNull();
+    expect(response.activeUnit).toBeNull();
     expect(response.programYearId).toBeNull();
   });
 });
@@ -207,6 +242,7 @@ describe('AuthService.switchUnit', () => {
     const { session: response } = await service.switchUnit(principal, 'club-Z');
 
     expect(response.activeUnitId).toBe('club-Z');
+    expect(response.activeUnit).toEqual({ id: 'club-Z', name: 'Club Z', type: 'club' });
     expect(response.programYearId).toBe('2026-2027'); // unchanged
     expect(session.issue).toHaveBeenCalledWith({
       sub: 'person-1',
@@ -225,7 +261,9 @@ describe('AuthService.switchUnit', () => {
 
 describe('AuthService.me', () => {
   it('returns the current session without issuing a new token', async () => {
-    const { service, session } = makeService({});
+    const { service, session } = makeService({
+      orgUnit: orgUnit({ id: 'club-A', name: 'Club A', code: 'cA', path: 'r1.d1.cA' }),
+    });
     const principal = {
       userId: 'person-1',
       roles: [],
@@ -240,6 +278,7 @@ describe('AuthService.me', () => {
       personId: 'person-1',
       fullName: 'Karim Hossain',
       activeUnitId: 'club-A',
+      activeUnit: { id: 'club-A', name: 'Club A', type: 'club' },
       programYearId: '2026-2027',
     });
     expect(session.issue).not.toHaveBeenCalled();

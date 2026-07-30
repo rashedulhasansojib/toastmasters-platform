@@ -39,6 +39,26 @@ export type NavSection = {
 export type ActiveUnit = { id: string; type: OrgUnitType };
 
 /**
+ * Where a unit's section starts — the page a signed-in person is sent to
+ * instead of the marketing home, so nobody has to pick a unit by hand. Null
+ * for a tier with no pages of its own (`international`, `district`), which
+ * leaves the home page rendering.
+ */
+export function unitLandingPath(unit: ActiveUnit): string | null {
+  switch (unit.type) {
+    case 'club':
+      return `/clubs/${unit.id}/meetings`;
+    case 'area':
+    case 'division':
+      return `/${unit.type}s/${unit.id}/dashboard`;
+    case 'region':
+      return `/platform/${unit.id}/dashboard`;
+    default:
+      return null;
+  }
+}
+
+/**
  * The sidebar renders from grants once we wire `can()` in — for now every
  * signed-in person sees the sub-tree matching the tier of whichever unit
  * they've selected. The `authorize()` gate on each API route is still the

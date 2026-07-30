@@ -1,9 +1,22 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { fetchHealth } from '@/lib/api';
 import { getSession } from '@/lib/session';
+import { unitLandingPath } from '@/components/app-shell/nav-config';
 
 export default async function Home() {
-  const [health, session] = await Promise.all([fetchHealth().catch(() => null), getSession()]);
+  const session = await getSession();
+
+  // A person with a club lands in the club, not on the welcome page — the
+  // session already resolved which club that is (AuthService.defaultActiveUnit),
+  // so there is nothing to pick.
+  if (session?.activeUnit?.type === 'club') {
+    const landing = unitLandingPath(session.activeUnit);
+    if (landing) redirect(landing);
+  }
+
+  const health = await fetchHealth().catch(() => null);
+  const landing = session?.activeUnit ? unitLandingPath(session.activeUnit) : null;
 
   return (
     <main className="mx-auto flex min-h-[80vh] max-w-3xl flex-col items-center justify-center px-6 py-20 text-center">
@@ -26,12 +39,12 @@ export default async function Home() {
             <p className="text-sm text-muted-foreground">
               Welcome back, <span className="font-medium text-foreground">{session.fullName}</span>
             </p>
-            {session.activeUnitId && (
+            {landing && session.activeUnit && (
               <Link
-                href={`/clubs/${session.activeUnitId}/meetings`}
+                href={landing}
                 className="inline-flex items-center gap-2 rounded-xl bg-[#772432] px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#5c1c27]"
               >
-                Go to your club
+                Go to {session.activeUnit.name}
               </Link>
             )}
           </>

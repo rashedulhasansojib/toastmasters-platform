@@ -260,10 +260,25 @@ export const acceptInvitationRequestSchema = z
   .strict();
 export type AcceptInvitationRequest = z.infer<typeof acceptInvitationRequestSchema>;
 
+/**
+ * The active unit, resolved. The session claim carries only `activeUnitId`;
+ * the UI also needs the unit's tier to know which pages exist for it, and its
+ * name to label the switcher — neither is a permission, and `authorize()`
+ * still re-checks the real target scope on every request.
+ */
+export const activeUnitSummary = z.object({
+  id: z.uuid(),
+  name: z.string().min(1),
+  type: orgUnitType,
+});
+export type ActiveUnitSummary = z.infer<typeof activeUnitSummary>;
+
 export const sessionResponseSchema = z.object({
   personId: z.uuid(),
   fullName: z.string(),
   activeUnitId: z.uuid().nullable(),
+  /** Null when there is no active unit — or, defensively, when the unit it points at no longer exists. */
+  activeUnit: activeUnitSummary.nullable(),
   programYearId: z.string().nullable(),
 });
 export type SessionResponse = z.infer<typeof sessionResponseSchema>;

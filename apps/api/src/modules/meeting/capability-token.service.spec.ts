@@ -47,7 +47,7 @@ describe('CapabilityTokenService.issue', () => {
     });
 
     expect(tokens.create).toHaveBeenCalledTimes(1);
-    const createArgs = tokens.create.mock.calls[0][0];
+    const createArgs = tokens.create.mock.calls[0]?.[0];
     expect(createArgs.tokenHash).toBe(createHash('sha256').update(result.token).digest('hex'));
     expect(createArgs.tokenHash).not.toBe(result.token);
     expect(createArgs.meetingId).toBe('meeting-1');
@@ -61,7 +61,7 @@ describe('CapabilityTokenService.issue', () => {
 
     await service.issue({ meetingId: 'meeting-1', purpose: 'guest-checkin', actorId: 'officer-1' });
 
-    const createArgs = tokens.create.mock.calls[0][0];
+    const createArgs = tokens.create.mock.calls[0]?.[0];
     const ttlMs = createArgs.expiresAt.getTime() - before;
     expect(ttlMs).toBeGreaterThan(239 * 60 * 1000);
     expect(ttlMs).toBeLessThanOrEqual(240 * 60 * 1000 + 1000);
@@ -78,7 +78,7 @@ describe('CapabilityTokenService.issue', () => {
       actorId: 'officer-1',
     });
 
-    const createArgs = tokens.create.mock.calls[0][0];
+    const createArgs = tokens.create.mock.calls[0]?.[0];
     const ttlMs = createArgs.expiresAt.getTime() - before;
     expect(ttlMs).toBeLessThanOrEqual(720 * 60 * 1000 + 1000);
   });

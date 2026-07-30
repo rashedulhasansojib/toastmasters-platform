@@ -4,6 +4,7 @@ import { useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Check, X } from 'lucide-react';
 import type {
+  AgendaItem,
   Meeting,
   MeetingRoleAssignment,
   MeetingRoleKey,
@@ -31,6 +32,7 @@ export function AgendaTab({
   roleAssignments,
   speechSlots,
   pathways,
+  agendaItems,
 }: {
   clubUnitId: string;
   meeting: Meeting;
@@ -39,6 +41,7 @@ export function AgendaTab({
   roleAssignments: MeetingRoleAssignment[];
   speechSlots: SpeechSlot[];
   pathways: PathwayPath[];
+  agendaItems: AgendaItem[];
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -254,6 +257,11 @@ export function AgendaTab({
         <PreparedSpeakers base={base} slots={speechSlots} pathways={pathways} />
       </Section>
 
+      {/* ── Agenda items ────────────────────────────────────────────── */}
+      <Section title="Agenda Items">
+        <AgendaItemsList items={agendaItems} />
+      </Section>
+
       {/* ── Word of the day ─────────────────────────────────────────── */}
       <Section title="Word of the Day">
         <div className="grid grid-cols-2 gap-3">
@@ -300,5 +308,58 @@ export function AgendaTab({
         </div>
       </Section>
     </div>
+  );
+}
+
+/** mm:ss when under an hour, h:mm:ss otherwise — matches a stopwatch view. */
+function formatDuration(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+
+/**
+ * The list of persisted agenda_item rows for this meeting — populated by
+ * the planner's "Play" action (which appends the club's Default Toastmasters
+ * Agenda template), or by any other future flow that writes to
+ * `POST /agenda-items`. Empty state points back at the planner so the
+ * user isn't stuck wondering how to get anything here.
+ */
+function AgendaItemsList({ items }: { items: AgendaItem[] }) {
+  if (items.length === 0) {
+    return (
+      <p className="rounded-md border border-dashed border-border/70 px-3 py-4 text-sm text-muted-foreground">
+        No agenda items yet — press the play button on the planner row to create them from the
+        club&apos;s default template.
+      </p>
+    );
+  }
+  const sorted = [...items].sort((a, b) => a.position - b.position);
+  const total = sorted.reduce((sum, i) => sum + i.plannedDurationSeconds, 0);
+  return (
+    <ol className="flex flex-col divide-y divide-border rounded-md border border-border">
+      {sorted.map((item) => (
+        <li key={item.id} className="flex items-center gap-3 px-3 py-2">
+          <span className="w-8 shrink-0 text-right text-xs font-medium tabular-nums text-muted-foreground">
+            {item.position}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.title}</span>
+          {item.roleKey && (
+            <Badge variant="secondary" className="shrink-0 text-[10px]">
+              {ROLE_LABEL.get(item.roleKey as MeetingRoleKey) ?? item.roleKey}
+            </Badge>
+          )}
+          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+            {formatDuration(item.plannedDurationSeconds)}
+          </span>
+        </li>
+      ))}
+      <li className="flex items-center justify-between px-3 py-2 text-xs font-medium text-muted-foreground">
+        <span>Total planned</span>
+        <span className="tabular-nums">{formatDuration(total)}</span>
+      </li>
+    </ol>
   );
 }

@@ -12,6 +12,7 @@ import {
   UserPlus,
 } from 'lucide-react';
 import type {
+  AgendaItem,
   Ballot,
   ChecklistRun,
   ChecklistTemplate,
@@ -82,6 +83,7 @@ export type MeetingWorkspaceProps = {
   checklistTemplates: ChecklistTemplate[];
   checklistRuns: ChecklistRun[];
   ballots: Ballot[];
+  agendaItems: AgendaItem[];
 };
 
 function heading(meeting: Meeting, theme: string, meetingNumber: string): string {
@@ -242,6 +244,7 @@ export function MeetingWorkspace(props: MeetingWorkspaceProps) {
               roleAssignments={props.roleAssignments}
               speechSlots={props.speechSlots}
               pathways={props.pathways}
+              agendaItems={props.agendaItems}
             />
           )}
           {tab === 'tableTopics' && <TableTopicsTab draft={draft} update={update} />}

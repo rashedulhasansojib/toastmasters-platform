@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation';
 import {
+  getAgendaItems,
   getAttendanceRoster,
   getBallots,
   getChecklistRuns,
@@ -44,6 +45,7 @@ export default async function MeetingPage({
     checklistTemplates,
     checklistRuns,
     ballots,
+    agendaItems,
   ] = await Promise.all([
     getMeeting(clubUnitId, meetingId),
     getClubMembers(clubUnitId),
@@ -58,6 +60,7 @@ export default async function MeetingPage({
     getChecklistTemplates(clubUnitId),
     getChecklistRuns(clubUnitId, meetingId),
     getBallots(clubUnitId, meetingId),
+    getAgendaItems(clubUnitId, meetingId),
   ]);
 
   if (!meeting) notFound();
@@ -78,6 +81,7 @@ export default async function MeetingPage({
       checklistTemplates={checklistTemplates}
       checklistRuns={checklistRuns}
       ballots={ballots}
+      agendaItems={agendaItems}
     />
   );
 }

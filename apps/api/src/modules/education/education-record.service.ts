@@ -1,7 +1,12 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import type { EducationRecord, EducationRecordLevel } from '@toastmasters/contracts';
+import type {
+  EducationRecord,
+  EducationRecordLevel,
+  PathwaySuggestion,
+} from '@toastmasters/contracts';
 import { EducationRecordRepository } from './education-record.repository';
 import { PATH_LEVELS } from './club-education-progress';
+import { buildBackfillLevels } from './education-record-levels';
 
 function confirmedLevel(levels: EducationRecordLevel[], level: number): boolean {
   return levels.find((l) => l.level === level)?.vpeConfirmedAt != null;
@@ -35,12 +40,28 @@ export class EducationRecordService {
     personId: string;
     clubUnitId: string;
     pathCode: string;
+    startingLevel?: number;
+    confirmedBy?: string;
   }): Promise<EducationRecord> {
-    return this.records.create(input);
+    const { startingLevel, confirmedBy, ...rest } = input;
+    const levels =
+      startingLevel && startingLevel > 1
+        ? buildBackfillLevels(startingLevel, confirmedBy ?? null, new Date())
+        : [];
+    return this.records.create({ ...rest, levels });
   }
 
   list(clubUnitId: string, personId?: string): Promise<EducationRecord[]> {
     return this.records.findByClub(clubUnitId, personId);
+  }
+
+  /**
+   * What a VPE starting a path for this member would naturally pre-fill —
+   * derived from their most recently scheduled speech slot, delivered or
+   * not. `null` when they have no slot on record in the club at all.
+   */
+  suggestPathway(clubUnitId: string, personId: string): Promise<PathwaySuggestion> {
+    return this.records.findLatestSlotForPerson(personId, clubUnitId);
   }
 
   async markLevelComplete(recordId: string, level: number): Promise<EducationRecord> {
@@ -187,6 +208,7 @@ export class EducationRecordService {
       vpeConfirmedBy: null,
       tiAwardRecordedAt: null,
       provenance: 'portal' as const,
+      backfilledAt: null,
     };
     const updated = update(existing);
     const others = levels.filter((l) => l.level !== level);

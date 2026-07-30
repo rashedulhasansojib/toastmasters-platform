@@ -6,10 +6,21 @@ import type {
   SpeechApprovalStatus,
 } from '@toastmasters/contracts';
 import { PRISMA_CLIENT } from '../../common/db/prisma-client.token';
+import { buildAutoStarts } from './education-record-starts';
+import type { AutoRequestMeeting, AutoRequestSlot } from './speech-approval-requests';
 
 type EducationRecordRow = Awaited<ReturnType<PrismaClient['educationRecord']['create']>>;
 type PathwayProjectRow = Awaited<ReturnType<PrismaClient['pathwayProject']['findMany']>>[number];
 type SpeechSlotRow = Awaited<ReturnType<PrismaClient['speechSlot']['findMany']>>[number];
+/** Prisma's `TransactionClient` type — a callback tx or the top-level client both satisfy this. */
+type Tx = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0] | PrismaClient;
+
+export interface LatestSlotForPerson {
+  pathCode: string;
+  pathName: string;
+  projectCode: string;
+  level: number;
+}
 
 /**
  * M11 Slice 3: the join key from a delivered slot to its `SpeechApproval`
@@ -43,9 +54,83 @@ export class EducationRecordRepository {
     personId: string;
     clubUnitId: string;
     pathCode: string;
+    startedAt?: Date;
+    levels?: EducationRecordLevel[];
   }): Promise<EducationRecord> {
-    const row = await this.db.educationRecord.create({ data: { ...input, levels: [] } });
+    const { levels = [], ...rest } = input;
+    const row = await this.db.educationRecord.create({
+      data: { ...rest, levels: levels as never },
+    });
     return toEducationRecord(row);
+  }
+
+  /**
+   * M12: the meeting-close auto-start hook, mirroring
+   * `SpeechApprovalRepository.createManyForMeeting`'s shape exactly — a
+   * thin adapter around the pure `buildAutoStarts`. Runs inside the
+   * caller's transaction and relies on the `@@unique([personId,
+   * clubUnitId, pathCode])` constraint for idempotence: a person who
+   * already has a record for a path is skipped, never retroactively
+   * backfilled, and re-closing a meeting inserts zero rows.
+   */
+  async ensureStartedForMeeting(
+    tx: Tx,
+    meeting: AutoRequestMeeting,
+    meetingId: string,
+  ): Promise<{ createdCount: number }> {
+    const slots: AutoRequestSlot[] = await tx.speechSlot.findMany({
+      where: { meetingId },
+      select: {
+        id: true,
+        status: true,
+        pathCode: true,
+        projectCode: true,
+        level: true,
+        speakerPersonId: true,
+        requestedBy: true,
+      },
+    });
+    const starts = buildAutoStarts(meeting, slots);
+    if (starts.length === 0) return { createdCount: 0 };
+
+    const result = await tx.educationRecord.createMany({
+      data: starts.map((s) => ({
+        personId: s.personId,
+        clubUnitId: s.clubUnitId,
+        pathCode: s.pathCode,
+        startedAt: s.startedAt,
+        levels: s.levels as never,
+      })),
+      skipDuplicates: true,
+    });
+    return { createdCount: result.count };
+  }
+
+  /**
+   * The person's most recently scheduled speech slot in the club, regardless
+   * of delivery/approval status — what a VPE starting a path for them would
+   * naturally pre-fill. Matches `speakerPersonId ?? requestedBy` the same
+   * way `findDeliveredSlots` does.
+   */
+  async findLatestSlotForPerson(
+    personId: string,
+    clubUnitId: string,
+  ): Promise<LatestSlotForPerson | null> {
+    const slot = await this.db.speechSlot.findFirst({
+      where: {
+        meeting: { clubUnitId },
+        OR: [{ speakerPersonId: personId }, { speakerPersonId: null, requestedBy: personId }],
+      },
+      orderBy: { meeting: { scheduledAt: 'desc' } },
+      select: { pathCode: true, projectCode: true, level: true, path: { select: { name: true } } },
+    });
+    if (!slot) return null;
+    return {
+      pathCode: slot.pathCode,
+      pathName: slot.path.name,
+      projectCode: slot.projectCode,
+      level: slot.level,
+    };
   }
 
   async findById(id: string): Promise<EducationRecord | null> {

@@ -19,6 +19,7 @@ function level(overrides: Partial<EducationRecordLevel> & { level: number }): Ed
     vpeConfirmedBy: null,
     tiAwardRecordedAt: null,
     provenance: 'portal',
+    backfilledAt: null,
     ...overrides,
   };
 }

@@ -4,6 +4,7 @@ import {
   createEducationRecordRequestSchema,
   type CreateEducationRecordRequest,
   type EducationRecord,
+  type PathwaySuggestion,
 } from '@toastmasters/contracts';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { ResourceScope } from '../../common/authz/resource-scope.decorator';
@@ -25,8 +26,9 @@ export class EducationRecordController {
     @Param('clubUnitId', uuidPipe) clubUnitId: string,
     @Body(new ZodValidationPipe(createEducationRecordRequestSchema))
     body: CreateEducationRecordRequest,
+    @CurrentUser() principal: Principal,
   ): Promise<EducationRecord> {
-    return this.records.create({ clubUnitId, ...body });
+    return this.records.create({ clubUnitId, ...body, confirmedBy: principal.userId });
   }
 
   @Get()
@@ -36,6 +38,20 @@ export class EducationRecordController {
     @Query('personId') personId?: string,
   ): Promise<EducationRecord[]> {
     return this.records.list(clubUnitId, personId);
+  }
+
+  /**
+   * M12: what a VPE starting a path for this member would naturally
+   * pre-fill, derived from their most recently scheduled speech slot.
+   * `education.record:read` — the same grant `list()` already requires.
+   */
+  @Get('suggest')
+  @ResourceScope('education.record', 'read', { source: 'param', key: 'clubUnitId' })
+  suggest(
+    @Param('clubUnitId', uuidPipe) clubUnitId: string,
+    @Query('personId', uuidPipe) personId: string,
+  ): Promise<PathwaySuggestion> {
+    return this.records.suggestPathway(clubUnitId, personId);
   }
 
   @Post(':id/levels/:level/mark-complete')

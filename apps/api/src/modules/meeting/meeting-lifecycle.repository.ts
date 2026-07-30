@@ -10,6 +10,7 @@ import {
 } from '@toastmasters/contracts';
 import { PRISMA_CLIENT } from '../../common/db/prisma-client.token';
 import { SpeechApprovalRepository } from '../education/speech-approval.repository';
+import { EducationRecordRepository } from '../education/education-record.repository';
 
 type MeetingRow = Awaited<ReturnType<PrismaClient['meeting']['update']>>;
 
@@ -59,6 +60,7 @@ export class MeetingLifecycleRepository {
   constructor(
     @Inject(PRISMA_CLIENT) private readonly db: PrismaClient = getPrisma(),
     private readonly speechApprovals: SpeechApprovalRepository,
+    private readonly educationRecords: EducationRecordRepository,
   ) {}
 
   private async transition(
@@ -120,6 +122,16 @@ export class MeetingLifecycleRepository {
       // or neither; the unique on speech_slot_id keeps this idempotent if
       // the meeting were ever re-closed.
       await this.speechApprovals.createManyForMeeting(
+        tx,
+        { clubUnitId: meeting.clubUnitId, scheduledAt: meeting.scheduledAt },
+        meetingId,
+      );
+
+      // M12: auto-start an EducationRecord for every prepared speaker on
+      // this meeting who doesn't have one yet for the path they spoke on.
+      // Same transaction, same idempotence guarantee as the SpeechApproval
+      // hook above — a re-close inserts zero rows.
+      await this.educationRecords.ensureStartedForMeeting(
         tx,
         { clubUnitId: meeting.clubUnitId, scheduledAt: meeting.scheduledAt },
         meetingId,

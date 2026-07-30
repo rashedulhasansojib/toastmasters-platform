@@ -21,6 +21,15 @@ export const educationRecordLevel = z.object({
   vpeConfirmedBy: z.uuid().nullable(),
   tiAwardRecordedAt: z.iso.datetime().nullable(),
   provenance: z.enum(['portal', 'ti']),
+  /**
+   * Set only when this level was bulk-marked complete because the record
+   * started mid-path (a delivered speech landed on a higher level with no
+   * prior levels on file) — never on a genuine member-mark -> VPE-confirm.
+   * Distinguishes "completed elsewhere, not individually tracked" from a
+   * level a VPE actually reviewed project-by-project, even though both set
+   * `vpeConfirmedAt`.
+   */
+  backfilledAt: z.iso.datetime().nullable(),
 });
 export type EducationRecordLevel = z.infer<typeof educationRecordLevel>;
 
@@ -38,9 +47,34 @@ export const educationRecord = z.object({
 export type EducationRecord = z.infer<typeof educationRecord>;
 
 export const createEducationRecordRequestSchema = z
-  .object({ personId: z.uuid(), pathCode: z.string().min(1) })
+  .object({
+    personId: z.uuid(),
+    pathCode: z.string().min(1),
+    /**
+     * VPE-driven "start mid-path": levels below this one are bulk-marked
+     * complete (see `educationRecordLevel.backfilledAt`) rather than left
+     * to be individually delivered and confirmed. Omitted or `1` starts the
+     * record with no levels touched — today's behaviour.
+     */
+    startingLevel: z.number().int().min(1).max(5).optional(),
+  })
   .strict();
 export type CreateEducationRecordRequest = z.infer<typeof createEducationRecordRequestSchema>;
+
+/**
+ * The member's most recently scheduled speech (delivered or not) — what a
+ * VPE starting a path for them would naturally pre-fill. `null` when the
+ * person has no `SpeechSlot` on record in the club at all.
+ */
+export const pathwaySuggestion = z
+  .object({
+    pathCode: z.string(),
+    pathName: z.string(),
+    projectCode: z.string(),
+    level: z.number().int().min(1).max(5),
+  })
+  .nullable();
+export type PathwaySuggestion = z.infer<typeof pathwaySuggestion>;
 
 /** Member-initiated, but the service verifies the level's PathwayProject rows are actually delivered before accepting — never bare self-report. */
 export const markLevelCompleteRequestSchema = z.object({}).strict();
@@ -327,6 +361,13 @@ export const clubEducationProgressLevel = z.object({
   memberMarkedCompleteAt: z.iso.datetime().nullable(),
   /** The only date that ever feeds the DCP projection (FR-EDU-3). */
   vpeConfirmedAt: z.iso.datetime().nullable(),
+  /**
+   * M12: set when this level was bulk-marked complete on a mid-path start
+   * rather than delivered and individually reviewed — see
+   * `EducationRecordLevel.backfilledAt`. The roster renders this distinctly
+   * from a level the VPE actually confirmed project-by-project.
+   */
+  backfilledAt: z.iso.datetime().nullable(),
 });
 export type ClubEducationProgressLevel = z.infer<typeof clubEducationProgressLevel>;
 

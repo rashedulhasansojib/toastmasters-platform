@@ -190,6 +190,7 @@ describe('MentorshipService.suggest', () => {
                 vpeConfirmedBy: null,
                 tiAwardRecordedAt: null,
                 provenance: 'portal',
+                backfilledAt: null,
               },
             ],
           }),
@@ -208,6 +209,7 @@ describe('MentorshipService.suggest', () => {
                 vpeConfirmedBy: 'vpe-1',
                 tiAwardRecordedAt: null,
                 provenance: 'portal',
+                backfilledAt: null,
               },
             ],
           }),
@@ -255,6 +257,7 @@ describe('MentorshipService.suggest', () => {
       vpeConfirmedBy: 'vpe-1',
       tiAwardRecordedAt: null,
       provenance: 'portal' as const,
+      backfilledAt: null,
     };
     educationRecords.findByPersonAndClub.mockImplementation((personId: string) => {
       if (personId === 'mentee-1') return Promise.resolve(menteeRecords);

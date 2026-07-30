@@ -30,13 +30,18 @@ type SortDir = 'asc' | 'desc';
  */
 function LevelCell({ level }: { level: ClubEducationProgressLevel }) {
   if (level.vpeConfirmedAt) {
+    const title = level.backfilledAt
+      ? 'Marked complete on path start — not individually tracked'
+      : `Confirmed ${new Date(level.vpeConfirmedAt).toLocaleDateString()}`;
     return (
       <span
         className="inline-flex size-6 items-center justify-center rounded-full bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400"
-        title={`Confirmed ${new Date(level.vpeConfirmedAt).toLocaleDateString()}`}
+        title={title}
       >
         <Check className="size-3.5" aria-hidden />
-        <span className="sr-only">Level {level.level} confirmed</span>
+        <span className="sr-only">
+          Level {level.level} {level.backfilledAt ? 'marked complete on path start' : 'confirmed'}
+        </span>
       </span>
     );
   }

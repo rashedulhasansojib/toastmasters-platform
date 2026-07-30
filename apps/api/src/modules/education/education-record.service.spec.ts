@@ -72,6 +72,7 @@ function makeStubRepo(overrides: {
                 vpeConfirmedBy: null,
                 tiAwardRecordedAt: null,
                 provenance: 'portal',
+                backfilledAt: null,
               },
             ],
             createdAt: '2026-01-01T00:00:00.000Z',
@@ -240,5 +241,87 @@ describe('EducationRecordService — Slice 3 approval gating', () => {
     );
 
     await expect(service.markLevelComplete(RECORD_ID, 1)).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+/**
+ * M12: `create()` with `startingLevel` — the VPE "start pathway mid-level"
+ * flow. Levels below the starting level get bulk-marked complete with no
+ * `projectsDelivered` evidence (`backfilledAt` set), attributed to whoever
+ * the controller passes as `confirmedBy`.
+ */
+describe('EducationRecordService — create with startingLevel', () => {
+  function makeCreateStubRepo(): {
+    repo: EducationRecordRepository;
+    calls: Array<{ personId: string; clubUnitId: string; pathCode: string; levels?: unknown[] }>;
+  } {
+    const calls: Array<{
+      personId: string;
+      clubUnitId: string;
+      pathCode: string;
+      levels?: unknown[];
+    }> = [];
+    const repo = {
+      create: async (input: {
+        personId: string;
+        clubUnitId: string;
+        pathCode: string;
+        levels?: unknown[];
+      }) => {
+        calls.push(input);
+        return { id: RECORD_ID, ...input, startedAt: new Date().toISOString() } as never;
+      },
+    } as unknown as EducationRecordRepository;
+    return { repo, calls };
+  }
+
+  it('starts with no levels when startingLevel is omitted', async () => {
+    const { repo, calls } = makeCreateStubRepo();
+    const service = new EducationRecordService(repo);
+
+    await service.create({ personId: PERSON, clubUnitId: CLUB, pathCode: 'PM' });
+
+    expect(calls[0]!.levels).toEqual([]);
+  });
+
+  it('starts with no levels when startingLevel is 1', async () => {
+    const { repo, calls } = makeCreateStubRepo();
+    const service = new EducationRecordService(repo);
+
+    await service.create({ personId: PERSON, clubUnitId: CLUB, pathCode: 'PM', startingLevel: 1 });
+
+    expect(calls[0]!.levels).toEqual([]);
+  });
+
+  it('backfills levels below startingLevel, attributed to the passed confirmedBy', async () => {
+    const { repo, calls } = makeCreateStubRepo();
+    const service = new EducationRecordService(repo);
+
+    await service.create({
+      personId: PERSON,
+      clubUnitId: CLUB,
+      pathCode: 'PM',
+      startingLevel: 3,
+      confirmedBy: VPE,
+    });
+
+    const levels = calls[0]!.levels as Array<{
+      level: number;
+      vpeConfirmedBy: string | null;
+      backfilledAt: string | null;
+    }>;
+    expect(levels.map((l) => l.level)).toEqual([1, 2]);
+    expect(levels.every((l) => l.vpeConfirmedBy === VPE)).toBe(true);
+    expect(levels.every((l) => l.backfilledAt !== null)).toBe(true);
+  });
+
+  it('leaves vpeConfirmedBy null when no confirmedBy is passed', async () => {
+    const { repo, calls } = makeCreateStubRepo();
+    const service = new EducationRecordService(repo);
+
+    await service.create({ personId: PERSON, clubUnitId: CLUB, pathCode: 'PM', startingLevel: 2 });
+
+    const levels = calls[0]!.levels as Array<{ vpeConfirmedBy: string | null }>;
+    expect(levels[0]!.vpeConfirmedBy).toBeNull();
   });
 });

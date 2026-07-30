@@ -7,12 +7,15 @@ import { X } from 'lucide-react';
 import type {
   ClubEducationProgressRow,
   PathwayPath,
+  PathwayProject,
+  PathwaySuggestion,
   SpeechApprovalStatus,
 } from '@toastmasters/contracts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { submitAction } from '@/lib/toast';
 import { cn } from '@/lib/utils';
+import { PathwayPathPicker, PathwayProjectPicker } from '@/components/pathways/PathwayPickers';
 
 /** One line of the member's path: a catalogue project, plus what they have delivered against it. */
 interface ProjectRow {
@@ -202,6 +205,138 @@ function ApprovalActions({
 }
 
 /**
+ * M12: lets a VPE start a member's path from the drawer instead of the
+ * club-wide raw Person-ID/Path-code form. Suggests the member's most
+ * recently scheduled speech slot as a starting point; the VPE can pick a
+ * different path/project. Starting on a project above Level 1 bulk-marks
+ * the levels below it complete (see `EducationRecordLevel.backfilledAt`) —
+ * a deliberate, visible tradeoff, not silent data entry.
+ */
+function StartPathwayForm({
+  clubUnitId,
+  personId,
+  pathways,
+}: {
+  clubUnitId: string;
+  personId: string;
+  pathways: PathwayPath[];
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [loadingSuggestion, setLoadingSuggestion] = useState(false);
+  const [pathCode, setPathCode] = useState('');
+  const [projectCode, setProjectCode] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const path = pathways.find((p) => p.pathCode === pathCode) ?? null;
+  const project = path?.projects.find((p) => p.projectCode === projectCode) ?? null;
+
+  async function begin() {
+    setOpen(true);
+    setLoadingSuggestion(true);
+    try {
+      const response = await fetch(
+        `/api/clubs/${clubUnitId}/education-records/suggest?personId=${encodeURIComponent(personId)}`,
+      );
+      if (response.ok) {
+        const suggestion: PathwaySuggestion = await response.json();
+        if (suggestion) {
+          setPathCode(suggestion.pathCode);
+          setProjectCode(suggestion.projectCode);
+        }
+      }
+    } finally {
+      setLoadingSuggestion(false);
+    }
+  }
+
+  function pickPath(code: string) {
+    setPathCode(code);
+    setProjectCode('');
+  }
+
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!pathCode) return;
+    setSubmitting(true);
+    try {
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/education-records`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              personId,
+              pathCode,
+              ...(project && project.level > 1 ? { startingLevel: project.level } : {}),
+            }),
+          }),
+        {
+          loading: 'Starting pathway…',
+          success: 'Pathway started',
+          error: 'Could not start that pathway.',
+        },
+      );
+      if (!result) return;
+      router.refresh();
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <Button type="button" size="sm" onClick={begin}>
+        Start pathway
+      </Button>
+    );
+  }
+
+  return (
+    <form
+      onSubmit={onSubmit}
+      className="mt-3 flex flex-col gap-3 rounded-lg border border-border p-3"
+    >
+      {loadingSuggestion && (
+        <p className="text-xs text-muted-foreground">Looking up their most recent speech…</p>
+      )}
+      <div className="flex flex-col gap-1">
+        <span className="text-xs font-medium text-muted-foreground">Path</span>
+        <PathwayPathPicker value={pathCode} onChange={pickPath} pathways={pathways} />
+      </div>
+      <div className="flex flex-col gap-1">
+        <span className="text-xs font-medium text-muted-foreground">Starting project</span>
+        <PathwayProjectPicker
+          value={projectCode}
+          onChange={(p) => setProjectCode(p.projectCode)}
+          path={path}
+        />
+      </div>
+      {project && project.level > 1 && (
+        <p className="text-xs text-muted-foreground">
+          Levels 1&ndash;{project.level - 1} will be marked complete &mdash; not individually
+          tracked, since there is no delivered-speech evidence for them here.
+        </p>
+      )}
+      <div className="flex items-center gap-2">
+        <Button type="submit" size="sm" disabled={submitting || !pathCode}>
+          {submitting ? 'Starting…' : 'Start pathway'}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => setOpen(false)}
+          disabled={submitting}
+        >
+          Cancel
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/**
  * The per-member Pathways detail, as a right-hand drawer.
  *
  * The project list is the **seeded catalogue** for the member's path, so it
@@ -291,11 +426,25 @@ export function MemberPathwayPanel({
 
         <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6">
           {projectRows.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
-              {row.pathCode === null
-                ? 'Start a path for this member to see their project list.'
-                : `No projects are seeded in the Pathways catalogue for ${row.pathName} yet.`}
-            </p>
+            row.pathCode === null && canApprove ? (
+              <div className="rounded-lg border border-dashed border-border px-4 py-6 text-center">
+                <p className="mb-3 text-sm text-muted-foreground">
+                  This member has not started a path yet.
+                </p>
+                <StartPathwayForm
+                  key={row.personId}
+                  clubUnitId={clubUnitId}
+                  personId={row.personId}
+                  pathways={pathways}
+                />
+              </div>
+            ) : (
+              <p className="rounded-lg border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
+                {row.pathCode === null
+                  ? 'Start a path for this member to see their project list.'
+                  : `No projects are seeded in the Pathways catalogue for ${row.pathName} yet.`}
+              </p>
+            )
           ) : (
             <>
               {/* Desktop: the five-column table (Level, Project, Speech

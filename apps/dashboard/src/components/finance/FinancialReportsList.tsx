@@ -1,15 +1,24 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import type { FinancialReport } from '@toastmasters/contracts';
+import {
+  financialReport as financialReportSchema,
+  type FinancialReport,
+} from '@toastmasters/contracts';
 import { Card, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
 import { submitAction } from '@/lib/toast';
 
-function FinalizeButton({ clubUnitId, report }: { clubUnitId: string; report: FinancialReport }) {
-  const router = useRouter();
+function FinalizeButton({
+  clubUnitId,
+  report,
+  onSaved,
+}: {
+  clubUnitId: string;
+  report: FinancialReport;
+  onSaved: (report: FinancialReport) => void;
+}) {
   const [submitting, setSubmitting] = useState(false);
 
   if (report.status === 'final') return null;
@@ -29,7 +38,7 @@ function FinalizeButton({ clubUnitId, report }: { clubUnitId: string; report: Fi
         },
       );
       if (!result) return;
-      router.refresh();
+      onSaved(financialReportSchema.parse(await result.json()));
     } finally {
       setSubmitting(false);
     }
@@ -45,9 +54,11 @@ function FinalizeButton({ clubUnitId, report }: { clubUnitId: string; report: Fi
 export function FinancialReportsList({
   clubUnitId,
   reports,
+  onSaved,
 }: {
   clubUnitId: string;
   reports: FinancialReport[];
+  onSaved: (report: FinancialReport) => void;
 }) {
   if (reports.length === 0) {
     return <p className="text-sm text-muted-foreground">No financial reports yet.</p>;
@@ -68,7 +79,7 @@ export function FinancialReportsList({
                   Opening {r.openingBalance} → closing {r.closingBalance} {r.currency}
                 </p>
               </div>
-              <FinalizeButton clubUnitId={clubUnitId} report={r} />
+              <FinalizeButton clubUnitId={clubUnitId} report={r} onSaved={onSaved} />
             </div>
           </div>
         ))}

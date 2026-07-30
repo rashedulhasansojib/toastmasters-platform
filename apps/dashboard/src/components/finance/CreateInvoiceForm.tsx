@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
+import { invoice, type Invoice } from '@toastmasters/contracts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,11 +17,12 @@ import { submitAction, toast } from '@/lib/toast';
 export function CreateInvoiceForm({
   clubUnitId,
   programYearId,
+  onSaved,
 }: {
   clubUnitId: string;
   programYearId: string | null;
+  onSaved: (inv: Invoice) => void;
 }) {
-  const router = useRouter();
   const [duesRecordIds, setDuesRecordIds] = useState('');
   const [issuedToKind, setIssuedToKind] = useState<'member' | 'guest' | 'external'>('member');
   const [issuedToName, setIssuedToName] = useState('');
@@ -65,7 +66,7 @@ export function CreateInvoiceForm({
       setIssuedToName('');
       setIssuedToEmail('');
       setDueOn('');
-      router.refresh();
+      onSaved(invoice.parse(await result.json()));
     } finally {
       setSubmitting(false);
     }

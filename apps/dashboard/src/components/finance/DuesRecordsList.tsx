@@ -1,15 +1,21 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import type { DuesRecord } from '@toastmasters/contracts';
+import { duesRecord, type DuesRecord } from '@toastmasters/contracts';
 import { Card, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
 import { submitAction } from '@/lib/toast';
 
-function RecordPaymentForm({ clubUnitId, record }: { clubUnitId: string; record: DuesRecord }) {
-  const router = useRouter();
+function RecordPaymentForm({
+  clubUnitId,
+  record,
+  onSaved,
+}: {
+  clubUnitId: string;
+  record: DuesRecord;
+  onSaved: (record: DuesRecord) => void;
+}) {
   const [submitting, setSubmitting] = useState(false);
 
   async function pay(scope: 'ti' | 'local') {
@@ -35,7 +41,7 @@ function RecordPaymentForm({ clubUnitId, record }: { clubUnitId: string; record:
         },
       );
       if (!result) return;
-      router.refresh();
+      onSaved(duesRecord.parse(await result.json()));
     } finally {
       setSubmitting(false);
     }
@@ -68,9 +74,11 @@ function RecordPaymentForm({ clubUnitId, record }: { clubUnitId: string; record:
 export function DuesRecordsList({
   clubUnitId,
   records,
+  onSaved,
 }: {
   clubUnitId: string;
   records: DuesRecord[];
+  onSaved: (record: DuesRecord) => void;
 }) {
   if (records.length === 0) {
     return <p className="text-sm text-muted-foreground">No dues records yet.</p>;
@@ -93,7 +101,7 @@ export function DuesRecordsList({
                 </p>
               </div>
               {r.status !== 'paid' && r.status !== 'waived' && (
-                <RecordPaymentForm clubUnitId={clubUnitId} record={r} />
+                <RecordPaymentForm clubUnitId={clubUnitId} record={r} onSaved={onSaved} />
               )}
             </div>
           </div>

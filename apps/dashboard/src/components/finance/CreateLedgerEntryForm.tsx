@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
+import { ledgerEntry, type LedgerEntry } from '@toastmasters/contracts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,11 +17,12 @@ import { submitAction, toast } from '@/lib/toast';
 export function CreateLedgerEntryForm({
   clubUnitId,
   programYearId,
+  onSaved,
 }: {
   clubUnitId: string;
   programYearId: string | null;
+  onSaved: (entry: LedgerEntry) => void;
 }) {
-  const router = useRouter();
   const [direction, setDirection] = useState<'in' | 'out'>('in');
   const [category, setCategory] = useState('');
   const [amount, setAmount] = useState('');
@@ -68,7 +69,7 @@ export function CreateLedgerEntryForm({
       setOccurredOn('');
       setCounterpartyLabel('');
       setDescription('');
-      router.refresh();
+      onSaved(ledgerEntry.parse(await result.json()));
     } finally {
       setSubmitting(false);
     }

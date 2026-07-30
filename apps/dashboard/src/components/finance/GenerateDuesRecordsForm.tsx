@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
+import { duesRecord, type DuesRecord } from '@toastmasters/contracts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -10,11 +10,12 @@ import { submitAction, toast } from '@/lib/toast';
 export function GenerateDuesRecordsForm({
   clubUnitId,
   programYearId,
+  onGenerated,
 }: {
   clubUnitId: string;
   programYearId: string | null;
+  onGenerated: (records: DuesRecord[]) => void;
 }) {
-  const router = useRouter();
   const [duesPeriod, setDuesPeriod] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -41,7 +42,7 @@ export function GenerateDuesRecordsForm({
       );
       if (!result) return;
       setDuesPeriod('');
-      router.refresh();
+      onGenerated(duesRecord.array().parse(await result.json()));
     } finally {
       setSubmitting(false);
     }

@@ -1,15 +1,24 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import type { InstallmentPlan } from '@toastmasters/contracts';
+import {
+  installmentPlan as installmentPlanSchema,
+  type InstallmentPlan,
+} from '@toastmasters/contracts';
 import { Card, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
 import { submitAction } from '@/lib/toast';
 
-function PlanActions({ clubUnitId, plan }: { clubUnitId: string; plan: InstallmentPlan }) {
-  const router = useRouter();
+function PlanActions({
+  clubUnitId,
+  plan,
+  onSaved,
+}: {
+  clubUnitId: string;
+  plan: InstallmentPlan;
+  onSaved: (plan: InstallmentPlan) => void;
+}) {
   const [submitting, setSubmitting] = useState(false);
 
   async function payNext() {
@@ -36,7 +45,7 @@ function PlanActions({ clubUnitId, plan }: { clubUnitId: string; plan: Installme
         },
       );
       if (!result) return;
-      router.refresh();
+      onSaved(installmentPlanSchema.parse(await result.json()));
     } finally {
       setSubmitting(false);
     }
@@ -61,7 +70,7 @@ function PlanActions({ clubUnitId, plan }: { clubUnitId: string; plan: Installme
         },
       );
       if (!result) return;
-      router.refresh();
+      onSaved(installmentPlanSchema.parse(await result.json()));
     } finally {
       setSubmitting(false);
     }
@@ -84,9 +93,11 @@ function PlanActions({ clubUnitId, plan }: { clubUnitId: string; plan: Installme
 export function InstallmentPlansList({
   clubUnitId,
   plans,
+  onSaved,
 }: {
   clubUnitId: string;
   plans: InstallmentPlan[];
+  onSaved: (plan: InstallmentPlan) => void;
 }) {
   if (plans.length === 0) {
     return <p className="text-sm text-muted-foreground">No installment plans yet.</p>;
@@ -107,7 +118,7 @@ export function InstallmentPlansList({
                   {p.schedule.filter((s) => s.paidAt).length}/{p.schedule.length} installments paid
                 </p>
               </div>
-              <PlanActions clubUnitId={clubUnitId} plan={p} />
+              <PlanActions clubUnitId={clubUnitId} plan={p} onSaved={onSaved} />
             </div>
           </div>
         ))}

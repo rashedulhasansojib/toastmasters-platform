@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
+import { financialReport, type FinancialReport } from '@toastmasters/contracts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -19,11 +19,12 @@ type ReportType = 'monthly' | 'quarterly' | 'annual' | 'handover';
 export function GenerateReportForm({
   clubUnitId,
   programYearId,
+  onSaved,
 }: {
   clubUnitId: string;
   programYearId: string | null;
+  onSaved: (report: FinancialReport) => void;
 }) {
-  const router = useRouter();
   const [type, setType] = useState<ReportType>('monthly');
   const [periodFrom, setPeriodFrom] = useState('');
   const [periodTo, setPeriodTo] = useState('');
@@ -51,7 +52,7 @@ export function GenerateReportForm({
         },
       );
       if (!result) return;
-      router.refresh();
+      onSaved(financialReport.parse(await result.json()));
     } finally {
       setSubmitting(false);
     }

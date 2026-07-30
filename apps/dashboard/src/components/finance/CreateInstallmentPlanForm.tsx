@@ -1,14 +1,19 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
+import { installmentPlan, type InstallmentPlan } from '@toastmasters/contracts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { submitAction } from '@/lib/toast';
 
-export function CreateInstallmentPlanForm({ clubUnitId }: { clubUnitId: string }) {
-  const router = useRouter();
+export function CreateInstallmentPlanForm({
+  clubUnitId,
+  onSaved,
+}: {
+  clubUnitId: string;
+  onSaved: (plan: InstallmentPlan) => void;
+}) {
   const [duesRecordId, setDuesRecordId] = useState('');
   const [installmentCount, setInstallmentCount] = useState('2');
   const [firstDueOn, setFirstDueOn] = useState('');
@@ -38,7 +43,7 @@ export function CreateInstallmentPlanForm({ clubUnitId }: { clubUnitId: string }
       if (!result) return;
       setDuesRecordId('');
       setFirstDueOn('');
-      router.refresh();
+      onSaved(installmentPlan.parse(await result.json()));
     } finally {
       setSubmitting(false);
     }

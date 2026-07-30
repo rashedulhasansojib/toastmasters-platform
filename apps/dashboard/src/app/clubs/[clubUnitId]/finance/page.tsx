@@ -7,17 +7,11 @@ import {
   listFinancialReports,
 } from '@/lib/finance';
 import { getSession } from '@/lib/session';
-import { CreateLedgerEntryForm } from '@/components/finance/CreateLedgerEntryForm';
-import { LedgerEntriesList } from '@/components/finance/LedgerEntriesList';
-import { DuesSettingsForm } from '@/components/finance/DuesSettingsForm';
-import { GenerateDuesRecordsForm } from '@/components/finance/GenerateDuesRecordsForm';
-import { DuesRecordsList } from '@/components/finance/DuesRecordsList';
-import { CreateInvoiceForm } from '@/components/finance/CreateInvoiceForm';
-import { InvoicesList } from '@/components/finance/InvoicesList';
-import { CreateInstallmentPlanForm } from '@/components/finance/CreateInstallmentPlanForm';
-import { InstallmentPlansList } from '@/components/finance/InstallmentPlansList';
-import { GenerateReportForm } from '@/components/finance/GenerateReportForm';
-import { FinancialReportsList } from '@/components/finance/FinancialReportsList';
+import { LedgerSection } from '@/components/finance/LedgerSection';
+import { DuesRecordsSection } from '@/components/finance/DuesRecordsSection';
+import { InvoicesSection } from '@/components/finance/InvoicesSection';
+import { InstallmentPlansSection } from '@/components/finance/InstallmentPlansSection';
+import { FinancialReportsSection } from '@/components/finance/FinancialReportsSection';
 
 export default async function ClubFinancePage({
   params,
@@ -41,36 +35,32 @@ export default async function ClubFinancePage({
     <main className="page flex flex-col gap-6">
       <h1>Finance</h1>
 
-      <section className="flex flex-col gap-3">
-        <h2>Ledger</h2>
-        <CreateLedgerEntryForm clubUnitId={clubUnitId} programYearId={programYearId} />
-        <LedgerEntriesList clubUnitId={clubUnitId} entries={ledgerEntries} />
-      </section>
+      <LedgerSection
+        clubUnitId={clubUnitId}
+        programYearId={programYearId}
+        initialEntries={ledgerEntries}
+      />
 
-      <section className="flex flex-col gap-3">
-        <h2>Dues</h2>
-        <DuesSettingsForm clubUnitId={clubUnitId} settings={duesSettings} />
-        <GenerateDuesRecordsForm clubUnitId={clubUnitId} programYearId={programYearId} />
-        <DuesRecordsList clubUnitId={clubUnitId} records={duesRecords} />
-      </section>
+      <DuesRecordsSection
+        clubUnitId={clubUnitId}
+        programYearId={programYearId}
+        settings={duesSettings}
+        initialRecords={duesRecords}
+      />
 
-      <section className="flex flex-col gap-3">
-        <h2>Invoices</h2>
-        <CreateInvoiceForm clubUnitId={clubUnitId} programYearId={programYearId} />
-        <InvoicesList clubUnitId={clubUnitId} invoices={invoices} />
-      </section>
+      <InvoicesSection
+        clubUnitId={clubUnitId}
+        programYearId={programYearId}
+        initialInvoices={invoices}
+      />
 
-      <section className="flex flex-col gap-3">
-        <h2>Installment plans</h2>
-        <CreateInstallmentPlanForm clubUnitId={clubUnitId} />
-        <InstallmentPlansList clubUnitId={clubUnitId} plans={installmentPlans} />
-      </section>
+      <InstallmentPlansSection clubUnitId={clubUnitId} initialPlans={installmentPlans} />
 
-      <section className="flex flex-col gap-3">
-        <h2>Financial reports</h2>
-        <GenerateReportForm clubUnitId={clubUnitId} programYearId={programYearId} />
-        <FinancialReportsList clubUnitId={clubUnitId} reports={reports} />
-      </section>
+      <FinancialReportsSection
+        clubUnitId={clubUnitId}
+        programYearId={programYearId}
+        initialReports={reports}
+      />
     </main>
   );
 }

@@ -1,15 +1,21 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import type { LedgerEntry } from '@toastmasters/contracts';
+import { ledgerEntry, type LedgerEntry } from '@toastmasters/contracts';
 import { Card, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
 import { submitAction } from '@/lib/toast';
 
-function ReverseEntryButton({ clubUnitId, entryId }: { clubUnitId: string; entryId: string }) {
-  const router = useRouter();
+function ReverseEntryButton({
+  clubUnitId,
+  entryId,
+  onSaved,
+}: {
+  clubUnitId: string;
+  entryId: string;
+  onSaved: (entry: LedgerEntry) => void;
+}) {
   const [submitting, setSubmitting] = useState(false);
 
   async function onClick() {
@@ -31,7 +37,7 @@ function ReverseEntryButton({ clubUnitId, entryId }: { clubUnitId: string; entry
         },
       );
       if (!result) return;
-      router.refresh();
+      onSaved(ledgerEntry.parse(await result.json()));
     } finally {
       setSubmitting(false);
     }
@@ -47,9 +53,11 @@ function ReverseEntryButton({ clubUnitId, entryId }: { clubUnitId: string; entry
 export function LedgerEntriesList({
   clubUnitId,
   entries,
+  onSaved,
 }: {
   clubUnitId: string;
   entries: LedgerEntry[];
+  onSaved: (entry: LedgerEntry) => void;
 }) {
   if (entries.length === 0) {
     return <p className="text-sm text-muted-foreground">No ledger entries yet.</p>;
@@ -73,7 +81,7 @@ export function LedgerEntriesList({
                 </p>
               </div>
               {!e.reversalOfEntryId && (
-                <ReverseEntryButton clubUnitId={clubUnitId} entryId={e.id} />
+                <ReverseEntryButton clubUnitId={clubUnitId} entryId={e.id} onSaved={onSaved} />
               )}
             </div>
           </div>

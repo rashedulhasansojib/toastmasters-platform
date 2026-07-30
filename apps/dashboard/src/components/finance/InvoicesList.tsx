@@ -1,15 +1,21 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import type { Invoice } from '@toastmasters/contracts';
+import { invoice as invoiceSchema, type Invoice } from '@toastmasters/contracts';
 import { Card, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
 import { submitAction } from '@/lib/toast';
 
-function InvoiceActions({ clubUnitId, invoice }: { clubUnitId: string; invoice: Invoice }) {
-  const router = useRouter();
+function InvoiceActions({
+  clubUnitId,
+  invoice,
+  onSaved,
+}: {
+  clubUnitId: string;
+  invoice: Invoice;
+  onSaved: (invoice: Invoice) => void;
+}) {
   const [submitting, setSubmitting] = useState(false);
 
   async function recordPayment() {
@@ -33,7 +39,7 @@ function InvoiceActions({ clubUnitId, invoice }: { clubUnitId: string; invoice: 
         },
       );
       if (!result) return;
-      router.refresh();
+      onSaved(invoiceSchema.parse(await result.json()));
     } finally {
       setSubmitting(false);
     }
@@ -58,7 +64,7 @@ function InvoiceActions({ clubUnitId, invoice }: { clubUnitId: string; invoice: 
         },
       );
       if (!result) return;
-      router.refresh();
+      onSaved(invoiceSchema.parse(await result.json()));
     } finally {
       setSubmitting(false);
     }
@@ -83,7 +89,7 @@ function InvoiceActions({ clubUnitId, invoice }: { clubUnitId: string; invoice: 
         },
       );
       if (!result) return;
-      router.refresh();
+      onSaved(invoiceSchema.parse(await result.json()));
     } finally {
       setSubmitting(false);
     }
@@ -125,9 +131,11 @@ function InvoiceActions({ clubUnitId, invoice }: { clubUnitId: string; invoice: 
 export function InvoicesList({
   clubUnitId,
   invoices,
+  onSaved,
 }: {
   clubUnitId: string;
   invoices: Invoice[];
+  onSaved: (invoice: Invoice) => void;
 }) {
   if (invoices.length === 0) {
     return <p className="text-sm text-muted-foreground">No invoices yet.</p>;
@@ -149,7 +157,7 @@ export function InvoicesList({
                   {inv.creditNoteForInvoiceId && ` · credit note for ${inv.creditNoteForInvoiceId}`}
                 </p>
               </div>
-              <InvoiceActions clubUnitId={clubUnitId} invoice={inv} />
+              <InvoiceActions clubUnitId={clubUnitId} invoice={inv} onSaved={onSaved} />
             </div>
           </div>
         ))}

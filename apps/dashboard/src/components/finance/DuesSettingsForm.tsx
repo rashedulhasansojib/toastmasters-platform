@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
 import type { ClubDuesSettings } from '@toastmasters/contracts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,7 +14,6 @@ export function DuesSettingsForm({
   clubUnitId: string;
   settings: ClubDuesSettings | null;
 }) {
-  const router = useRouter();
   const [localDuesAmount, setLocalDuesAmount] = useState(
     settings?.localDuesAmount != null ? String(settings.localDuesAmount) : '',
   );
@@ -47,7 +45,6 @@ export function DuesSettingsForm({
         },
       );
       if (!result) return;
-      router.refresh();
     } finally {
       setSubmitting(false);
     }

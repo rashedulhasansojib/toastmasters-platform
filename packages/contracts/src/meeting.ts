@@ -241,12 +241,14 @@ export const plannerCell = z.object({
   /** Null when the slot is unfilled — the grid renders an empty, clickable cell. */
   assignmentId: z.uuid().nullable(),
   /**
-   * Which pool the assignee came from. Null when the slot is unfilled. Members
-   * and cross-club assignees carry `personId`; guests carry `guestId`.
+   * Which pool the assignee came from. Members and cross-club assignees
+   * carry `personId`; guests carry `guestId`. `nullish()` (not `nullable()`)
+   * so a mid-deploy API that hasn't been rebuilt yet — and simply omits the
+   * field — doesn't hard-crash the page.
    */
-  kind: meetingRoleAssigneeKind.nullable(),
-  personId: z.uuid().nullable(),
-  guestId: z.uuid().nullable(),
+  kind: meetingRoleAssigneeKind.nullish(),
+  personId: z.uuid().nullish(),
+  guestId: z.uuid().nullish(),
   fullName: z.string().nullable(),
   status: meetingRoleAssignmentStatus.nullable(),
 });

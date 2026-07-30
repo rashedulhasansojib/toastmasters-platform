@@ -36,8 +36,10 @@ export class PlannerRepository {
             slotIndex: true,
             assigneeKind: true,
             assigneePersonId: true,
+            assigneeGuestId: true,
             status: true,
             assigneePerson: { select: { fullName: true } },
+            assigneeGuest: { select: { fullName: true, piiRedactedAt: true } },
           },
           orderBy: [{ roleKey: 'asc' }, { slotIndex: 'asc' }],
         },
@@ -54,8 +56,19 @@ export class PlannerRepository {
         roleKey: a.roleKey,
         slotIndex: a.slotIndex,
         assignmentId: a.id,
+        kind: a.assigneeKind,
         personId: a.assigneePersonId,
-        fullName: a.assigneePerson?.fullName ?? null,
+        guestId: a.assigneeGuestId,
+        // If the guest has been anonymised by the retention job (§ CLAUDE.md
+        // §2 decision 4), surface a neutral placeholder rather than the
+        // now-empty fullName.
+        fullName:
+          a.assigneePerson?.fullName ??
+          (a.assigneeGuest
+            ? a.assigneeGuest.piiRedactedAt
+              ? '(guest, redacted)'
+              : a.assigneeGuest.fullName
+            : null),
         status: a.status,
       })),
     }));

@@ -203,7 +203,8 @@ export function AgendaTab({
           {AGENDA_ROLE_KEYS.map((roleKey) => {
             const assignment = assignmentFor(roleKey);
             const personId =
-              assignment && assignment.assignee.kind !== 'unfilled'
+              assignment &&
+              (assignment.assignee.kind === 'member' || assignment.assignee.kind === 'cross_club')
                 ? assignment.assignee.personId
                 : null;
             return (

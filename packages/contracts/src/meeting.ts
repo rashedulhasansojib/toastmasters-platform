@@ -160,14 +160,20 @@ export const meetingRoleAssignmentStatus = z.enum([
 export type MeetingRoleAssignmentStatus = z.infer<typeof meetingRoleAssignmentStatus>;
 
 /**
- * M3 Slice 3 scoping: `guest` (§9.2) is deferred — it references a Guest
- * row that doesn't exist until M4.
+ * Kinds a role can be assigned to. `guest` was deferred in M3 Slice 3 (Guest
+ * didn't exist yet); enabled in M4 alongside the planner UX parity work — see
+ * system-design.md §9.2. Guests still never authenticate — this is a
+ * plan-side reference.
  */
+export const meetingRoleAssigneeKind = z.enum(['member', 'cross_club', 'guest', 'unfilled']);
+export type MeetingRoleAssigneeKind = z.infer<typeof meetingRoleAssigneeKind>;
+
 export const meetingRoleAssignee = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('member'), personId: z.uuid() }).strict(),
   z
     .object({ kind: z.literal('cross_club'), personId: z.uuid(), homeClubUnitId: z.uuid() })
     .strict(),
+  z.object({ kind: z.literal('guest'), guestId: z.uuid() }).strict(),
   z.object({ kind: z.literal('unfilled') }).strict(),
 ]);
 export type MeetingRoleAssignee = z.infer<typeof meetingRoleAssignee>;
@@ -234,7 +240,13 @@ export const plannerCell = z.object({
   slotIndex: z.number().int().nonnegative().nullable(),
   /** Null when the slot is unfilled — the grid renders an empty, clickable cell. */
   assignmentId: z.uuid().nullable(),
+  /**
+   * Which pool the assignee came from. Null when the slot is unfilled. Members
+   * and cross-club assignees carry `personId`; guests carry `guestId`.
+   */
+  kind: meetingRoleAssigneeKind.nullable(),
   personId: z.uuid().nullable(),
+  guestId: z.uuid().nullable(),
   fullName: z.string().nullable(),
   status: meetingRoleAssignmentStatus.nullable(),
 });

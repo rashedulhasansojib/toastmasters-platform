@@ -562,13 +562,17 @@ enum MeetingRoleKey {
 }
 
 /**
- * M3 Slice 3 scoping: `guest` (assignee.kind === "guest", §9.2) is deferred —
- * it references a Guest row that doesn't exist until M4. Only member and
- * cross_club assignees, which reference models that already exist, ship now.
+ * `guest` was deferred in M3 Slice 3 because Guest didn't exist yet; enabled
+ * in M4 alongside the planner UX parity work — see system-design.md §9.2.
+ * A guest cell references a real Guest row (identity, not a name string) and
+ * a Guest can hold planning roles like TMOD or Timer for a meeting they're
+ * invited to. Guests still never authenticate (FR-MEM-4) — this is a
+ * plan-side reference, not a login.
  */
 enum MeetingRoleAssigneeKind {
   member
   cross_club
+  guest
   unfilled
 
   @@map("meeting_role_assignee_kind")
@@ -601,6 +605,8 @@ model MeetingRoleAssignment {
   assigneePerson         Person?                     @relation(fields: [assigneePersonId], references: [id])
   assigneeHomeClubUnitId String?                     @map("assignee_home_club_unit_id") @db.Uuid
   assigneeHomeClubUnit   OrgUnit?                    @relation(fields: [assigneeHomeClubUnitId], references: [id])
+  assigneeGuestId        String?                     @map("assignee_guest_id") @db.Uuid
+  assigneeGuest          Guest?                      @relation(fields: [assigneeGuestId], references: [id])
   status                 MeetingRoleAssignmentStatus @default(proposed)
   confirmedAt            DateTime?                   @map("confirmed_at")
   fulfilledAt            DateTime?                   @map("fulfilled_at")
@@ -1004,6 +1010,7 @@ model Guest {
   /// "correct with a new fact, don't destroy the old one" reasoning as append-only ledger rows.
   piiRedactedAt       DateTime?              @map("pii_redacted_at")
   speechEvaluations   SpeechEvaluation[]
+  meetingRoleAssignments MeetingRoleAssignment[]
 
   @@map("guest")
 }

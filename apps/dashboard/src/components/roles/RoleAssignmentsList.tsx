@@ -10,6 +10,8 @@ function assigneeLabel(assignment: MeetingRoleAssignment): string {
       return assignment.assignee.personId;
     case 'cross_club':
       return `${assignment.assignee.personId} (cross-club)`;
+    case 'guest':
+      return `${assignment.assignee.guestId} (guest)`;
     case 'unfilled':
       return 'Unfilled';
   }

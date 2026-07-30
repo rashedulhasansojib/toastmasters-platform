@@ -13,6 +13,7 @@ import { ProgramYearRepository } from '../../src/modules/identity/program-year.r
 import { PersonRepository } from '../../src/modules/identity/person.repository';
 import { RoleAssignmentRepository } from '../../src/modules/identity/role-assignment.repository';
 import { MeetingRepository } from '../../src/modules/meeting/meeting.repository';
+import { GuestRepository } from '../../src/modules/membership/guest.repository';
 
 /** M3 Slice 3: roles-as-entities on a meeting. */
 describe('M3 Slice 3: meeting role assignments (integration)', () => {
@@ -28,6 +29,7 @@ describe('M3 Slice 3: meeting role assignments (integration)', () => {
   let vpeId: string;
   let memberId: string;
   let outsiderId: string;
+  let guestId: string;
 
   const jwtFor = (personId: string) =>
     new SignJWT({ roles: [], scopes: [] })
@@ -128,6 +130,17 @@ describe('M3 Slice 3: meeting role assignments (integration)', () => {
     });
     meetingId = meeting.id;
 
+    // A guest for the guest-assignee test — matches the M4 planner UX where a
+    // VPE can plan a demo meeting with a visiting speaker before they join.
+    const guests = new GuestRepository();
+    const guest = await guests.create({
+      orgUnitId: clubId,
+      fullName: 'Guest Speaker',
+      deleteAfter: new Date('2028-01-30T00:00:00Z'),
+      createdBy: vpe.id,
+    });
+    guestId = guest.id;
+
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     app.use(cookieParser());
@@ -183,6 +196,38 @@ describe('M3 Slice 3: meeting role assignments (integration)', () => {
       ['speaker', 'cross_club', 'proposed'],
       ['timer', 'unfilled', 'proposed'],
     ]);
+  });
+
+  it('a VPE can assign a guest to a role, and the planner grid returns the guest identity', async () => {
+    const token = await jwtFor(vpeId);
+    const base = `/v1/clubs/${clubId}/meetings/${meetingId}/role-assignments`;
+
+    const created = await request(app.getHttpServer())
+      .post(base)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ roleKey: 'speaker', slotIndex: 2, assignee: { kind: 'guest', guestId } })
+      .expect(201);
+
+    expect(created.body.assignee).toEqual({ kind: 'guest', guestId });
+
+    const grid = await request(app.getHttpServer())
+      .get(`/v1/clubs/${clubId}/planner`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    const row = grid.body.find((r: { meetingId: string }) => r.meetingId === meetingId);
+    expect(row).toBeTruthy();
+    const cell = row.cells.find(
+      (c: { roleKey: string; slotIndex: number | null }) =>
+        c.roleKey === 'speaker' && c.slotIndex === 2,
+    );
+    expect(cell).toMatchObject({
+      kind: 'guest',
+      guestId,
+      personId: null,
+      fullName: 'Guest Speaker',
+      status: 'proposed',
+    });
   });
 
   it('a member of a different club is denied — sibling-club isolation', async () => {

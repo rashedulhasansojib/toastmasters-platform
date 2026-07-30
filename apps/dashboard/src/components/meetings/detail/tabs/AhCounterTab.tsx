@@ -59,13 +59,17 @@ export function AhCounterTab({
         .filter(
           (a) =>
             a.status !== 'declined' &&
-            a.assignee.kind !== 'unfilled' &&
+            (a.assignee.kind === 'member' || a.assignee.kind === 'cross_club') &&
             (a.roleKey === 'speaker' || a.roleKey === 'evaluator'),
         )
         .map((a) => ({
           id: `role-${a.id}`,
           clientKey: `ah-role-${a.id}`,
-          name: memberName(a.assignee.kind === 'unfilled' ? null : a.assignee.personId),
+          name: memberName(
+            a.assignee.kind === 'member' || a.assignee.kind === 'cross_club'
+              ? a.assignee.personId
+              : null,
+          ),
           counts: {},
         })),
     [roleAssignments, memberName],

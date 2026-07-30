@@ -60,10 +60,13 @@ export type ScheduleInput = {
   speechSlots: SpeechSlot[];
   /** Resolves a person id to a display name. */
   nameOf: (personId: string | null | undefined) => string;
+  /** Resolves a guest id to a display name. Falls back to `nameOf` behaviour ('—') for unknown ids. */
+  guestNameOf?: (guestId: string | null | undefined) => string;
 };
 
 export function buildAgendaSchedule(input: ScheduleInput): AgendaRow[] {
   const { startMinutes, roleAssignments, speechSlots, nameOf } = input;
+  const guestNameOf = input.guestNameOf ?? (() => '—');
 
   /** A declined assignment leaves the seat open, so it never reaches the agenda. */
   const holder = (roleKey: MeetingRoleKey): string | undefined => {
@@ -71,6 +74,7 @@ export function buildAgendaSchedule(input: ScheduleInput): AgendaRow[] {
       (a) => a.roleKey === roleKey && a.status !== 'declined' && a.assignee.kind !== 'unfilled',
     );
     if (!assignment || assignment.assignee.kind === 'unfilled') return undefined;
+    if (assignment.assignee.kind === 'guest') return guestNameOf(assignment.assignee.guestId);
     return nameOf(assignment.assignee.personId);
   };
 

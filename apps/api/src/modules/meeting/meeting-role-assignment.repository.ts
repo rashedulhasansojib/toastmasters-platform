@@ -18,6 +18,9 @@ function toAssignee(row: MeetingRoleAssignmentRow): MeetingRoleAssignee {
       homeClubUnitId: row.assigneeHomeClubUnitId!,
     };
   }
+  if (row.assigneeKind === 'guest') {
+    return { kind: 'guest', guestId: row.assigneeGuestId! };
+  }
   return { kind: 'unfilled' };
 }
 
@@ -53,9 +56,13 @@ export class MeetingRoleAssignmentRepository {
         roleKey: input.roleKey,
         slotIndex: input.slotIndex ?? null,
         assigneeKind: input.assignee.kind,
-        assigneePersonId: input.assignee.kind === 'unfilled' ? null : input.assignee.personId,
+        assigneePersonId:
+          input.assignee.kind === 'member' || input.assignee.kind === 'cross_club'
+            ? input.assignee.personId
+            : null,
         assigneeHomeClubUnitId:
           input.assignee.kind === 'cross_club' ? input.assignee.homeClubUnitId : null,
+        assigneeGuestId: input.assignee.kind === 'guest' ? input.assignee.guestId : null,
       },
     });
     return toMeetingRoleAssignment(row);

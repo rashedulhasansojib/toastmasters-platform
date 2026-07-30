@@ -128,7 +128,9 @@ export function TimerReportTab({
                 : null;
         if (!category) return;
         const personId =
-          assignment.assignee.kind === 'unfilled' ? null : assignment.assignee.personId;
+          assignment.assignee.kind === 'member' || assignment.assignee.kind === 'cross_club'
+            ? assignment.assignee.personId
+            : null;
         out.push({
           id: `role-${assignment.id}`,
           clientKey: `timer-role-${assignment.id}`,

@@ -1,8 +1,5 @@
 import { Module } from '@nestjs/common';
-import Redis from 'ioredis';
 import { getPrisma } from '@toastmasters/db';
-import { redisConnectionOptions, type Env } from '@toastmasters/config';
-import { ENV } from '../../config/config.module';
 import { AccessRepository } from './access.repository';
 import { GrantAdminRepository } from './grant-admin.repository';
 import { GrantCacheService } from './grant-cache.service';
@@ -18,8 +15,12 @@ import { PRISMA_CLIENT } from '../../common/db/prisma-client.token';
     { provide: PRISMA_CLIENT, useFactory: () => getPrisma() },
     {
       provide: REDIS_CLIENT,
-      inject: [ENV],
-      useFactory: (env: Env) => new Redis(redisConnectionOptions(env.REDIS_URL)),
+      // Redis is disabled in code — the free plan's quota is exhausted, so
+      // even when REDIS_URL is set we do not open a connection.
+      // GrantCacheService and InvitationRateLimiter guard on this null and
+      // no-op. To re-enable: restore the ioredis factory that reads
+      // env.REDIS_URL via redisConnectionOptions() from @toastmasters/config.
+      useValue: null,
     },
     GrantCacheService,
     AccessRepository,

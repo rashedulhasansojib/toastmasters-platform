@@ -1,9 +1,8 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
-import { BullModule } from '@nestjs/bullmq';
 import { buildLoggerOptions } from '@toastmasters/logger';
-import { redisConnectionOptions, type Env } from '@toastmasters/config';
+import { type Env } from '@toastmasters/config';
 import { ConfigModule, ENV } from './config/config.module';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './common/auth/auth.module';
@@ -33,10 +32,6 @@ import { PlatformModule } from './modules/platform/platform.module';
           pretty: env.NODE_ENV === 'development',
         }),
       }),
-    }),
-    BullModule.forRootAsync({
-      inject: [ENV],
-      useFactory: (env: Env) => ({ connection: redisConnectionOptions(env.REDIS_URL) }),
     }),
     AuthModule,
     AuthzModule,

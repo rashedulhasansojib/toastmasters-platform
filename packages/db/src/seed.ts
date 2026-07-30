@@ -624,6 +624,10 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       // evaluator assigned up front), not only approving member self-requests.
       { resource: 'meeting.speech_slot', action: 'create' },
       { resource: 'meeting.speech_slot', action: 'approve' },
+      // M9: editing an already-built slot (speaker/evaluator/path/project/
+      // duration/notes/order) and removing one are ordinary `update`, same
+      // as the PATCH .../details and DELETE routes gate on.
+      { resource: 'meeting.speech_slot', action: 'update' },
       { resource: 'meeting.checklist', action: 'create' },
       { resource: 'meeting.checklist', action: 'read' },
       { resource: 'meeting.checklist', action: 'update' },

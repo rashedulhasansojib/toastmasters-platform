@@ -97,6 +97,7 @@ model OrgUnit {
   excomMeetings          ExComMeeting[]
   minutes                Minutes[]
   supportRequests        SupportRequest[]
+  memberHealthSignals    MemberHealthSignal[]
 
   @@index([parentId])
   @@map("org_unit")
@@ -194,6 +195,7 @@ model Person {
   speechApprovalsForMe      SpeechApproval[]    @relation("SpeechApprovalPerson")
   speechApprovalsApproved   SpeechApproval[]    @relation("SpeechApprovalApprover")
   speechApprovalsDenied     SpeechApproval[]    @relation("SpeechApprovalDenier")
+  memberHealthSignals       MemberHealthSignal[]
 
   // Users admin (super-admin People search): search-by-name / search-by-TI-number.
   // email is already indexed via its own @unique.
@@ -245,6 +247,7 @@ model ClubMembership {
   provenance       ClubMembershipProvenance  @default(portal)
   lastReconciledAt DateTime?                 @map("last_reconciled_at")
   duesRecords      DuesRecord[]
+  healthSignal     MemberHealthSignal?
 
   @@index([clubUnitId, localStatus])
   @@map("club_membership")
@@ -315,6 +318,7 @@ model ProgramYear {
   mentorshipPairings MentorshipPairing[]
   excomMeetings      ExComMeeting[]
   minutes            Minutes[]
+  memberHealthSignals MemberHealthSignal[]
 
   @@map("program_year")
 }
@@ -2254,6 +2258,45 @@ model Minutes {
   supersededBy      Minutes?          @relation("MinutesVersion")
 
   @@map("minutes")
+}
+
+enum MemberHealthBand {
+  healthy
+  watch
+  at_risk
+  disengaged
+
+  @@map("member_health_band")
+}
+
+/**
+ * CLAUDE.md §2 decision 11 (2026-07-30): a narrow, VPM-only v1 of
+ * system-design.md §11.3's `MemberHealthSignal` — band computed from
+ * `daysSinceLastSpeech` alone, recomputed nightly (one row per
+ * `ClubMembership`, upserted). `dataSource` is stamped so this is never
+ * mistaken for the full multi-signal design; the remaining inputs
+ * (attendance, dues, pathway progress) and `RetentionAlert` stay deferred
+ * to M8 per the decision record.
+ */
+model MemberHealthSignal {
+  id                 String           @id @default(uuid()) @db.Uuid
+  orgUnitId          String           @map("org_unit_id") @db.Uuid
+  orgUnit            OrgUnit          @relation(fields: [orgUnitId], references: [id])
+  personId           String           @map("person_id") @db.Uuid
+  person             Person           @relation(fields: [personId], references: [id])
+  clubMembershipId   String           @unique @map("club_membership_id") @db.Uuid
+  clubMembership     ClubMembership   @relation(fields: [clubMembershipId], references: [id])
+  programYearId      String           @map("program_year_id")
+  programYear        ProgramYear      @relation(fields: [programYearId], references: [id])
+  computedAt         DateTime         @default(now()) @map("computed_at")
+  lastSpeechAt       DateTime?        @map("last_speech_at")
+  daysSinceLastSpeech Int?            @map("days_since_last_speech")
+  band               MemberHealthBand
+  reasons            Json             @default("[]")
+  dataSource         String           @default("speech_only_v1") @map("data_source")
+
+  @@index([orgUnitId, band])
+  @@map("member_health_signal")
 }
 
 /** M8 Slice 5: system-design.md §17, FR-SUP-1/2. Opt-in (default false), coarse geohash only — never raw coordinates. */

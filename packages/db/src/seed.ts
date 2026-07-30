@@ -742,6 +742,12 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'governance.motion', action: 'read' },
       { resource: 'governance.minutes', action: 'read' },
       { resource: 'identity.club_member', action: 'read' },
+      // CLAUDE.md §2 decision 11 (2026-07-30): VP Membership dashboard —
+      // the restricted health-signal read is what keeps the roster
+      // (name/email/phone/band) VPM-only; speech_slot read backs the
+      // per-member speech-history drill-down.
+      { resource: 'membership.health_signal', action: 'read' },
+      { resource: 'meeting.speech_slot', action: 'read' },
     ],
   },
   {

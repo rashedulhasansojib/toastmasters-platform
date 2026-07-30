@@ -3,9 +3,23 @@
 import { useState, type ChangeEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Building2, ChevronDown } from 'lucide-react';
-import { sessionResponseSchema } from '@toastmasters/contracts';
+import { sessionResponseSchema, roleAssignment } from '@toastmasters/contracts';
 import type { ActiveUnitSummary, SwitchableUnit } from '@toastmasters/contracts';
 import { unitLandingPath } from './app-shell/nav-config';
+
+/**
+ * Client-safe counterpart to `lib/membership-landing.ts`'s server version —
+ * that one calls `authedFetch` directly (server-only, via `next/headers`),
+ * so this goes through the thin `/api/clubs/:id/role-assignments/mine`
+ * proxy route instead. CLAUDE.md §2 decision 11 (2026-07-30).
+ */
+async function vpmLandingOverride(clubUnitId: string): Promise<string | null> {
+  const response = await fetch(`/api/clubs/${clubUnitId}/role-assignments/mine`);
+  if (!response.ok) return null;
+  const roles = roleAssignment.array().safeParse(await response.json());
+  if (!roles.success) return null;
+  return roles.data.some((r) => r.role === 'club_vpm') ? `/clubs/${clubUnitId}/membership` : null;
+}
 
 const TIER_LABEL: Record<string, string> = {
   international: 'International',
@@ -63,8 +77,14 @@ export function UnitSwitcher({
       // alone leaves the old screen mounted while the sidebar rebuilds
       // against a different tier.
       const session = sessionResponseSchema.parse(await response.json());
-      const landing = session.activeUnit ? unitLandingPath(session.activeUnit) : null;
-      router.push(landing ?? '/');
+      const tierLanding = session.activeUnit ? unitLandingPath(session.activeUnit) : null;
+      // CLAUDE.md §2 decision 11 (2026-07-30): send the VP Membership
+      // straight to their dashboard instead of the tier default.
+      const vpmLanding =
+        session.activeUnit?.type === 'club'
+          ? await vpmLandingOverride(session.activeUnit.id)
+          : null;
+      router.push(vpmLanding ?? tierLanding ?? '/');
       router.refresh();
     } finally {
       setSwitching(false);

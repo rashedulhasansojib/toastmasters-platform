@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { person, clubMembership } from './identity';
+import { person, clubMembership, clubMemberType, clubMembershipLocalStatus } from './identity';
 
 /**
  * M4 Slice 1: system-design.md §11.1. Guests are club-local,
@@ -139,3 +139,58 @@ export const convertGuestResponseSchema = z.object({
   wasExistingPerson: z.boolean(),
 });
 export type ConvertGuestResponse = z.infer<typeof convertGuestResponseSchema>;
+
+/**
+ * CLAUDE.md §2 decision 11 (2026-07-30): the VP Membership dashboard's
+ * member-health signal v1 — `daysSinceLastSpeech` only, `dataSource`
+ * stamped so this is never mistaken for the full multi-signal design
+ * (system-design.md §11.3). Restricted resource (`membership.health_signal`)
+ * — never returned to a non-VPM caller.
+ */
+export const memberHealthBand = z.enum(['healthy', 'watch', 'at_risk', 'disengaged']);
+export type MemberHealthBand = z.infer<typeof memberHealthBand>;
+
+export const memberHealthSignal = z.object({
+  id: z.uuid(),
+  clubMembershipId: z.uuid(),
+  computedAt: z.iso.datetime(),
+  lastSpeechAt: z.iso.datetime().nullable(),
+  daysSinceLastSpeech: z.number().int().nonnegative().nullable(),
+  band: memberHealthBand,
+  reasons: z.array(z.string()),
+  dataSource: z.string(),
+});
+export type MemberHealthSignal = z.infer<typeof memberHealthSignal>;
+
+/**
+ * The VPM roster: `identity.club_member`'s `clubMemberSummary` is
+ * deliberately narrow (read by every club role); this is gated on the
+ * restricted `membership.health_signal` resource instead, which is what
+ * makes email/phone/band visible to the VPM only (FR-OVS-3, FR-MEM-5).
+ */
+export const membershipRosterEntry = z.object({
+  personId: z.uuid(),
+  fullName: z.string().min(1),
+  email: z.email().nullable(),
+  phone: z.string().nullable(),
+  photoUrl: z.string().nullable(),
+  memberType: clubMemberType,
+  localStatus: clubMembershipLocalStatus,
+  joinedAt: z.iso.datetime(),
+  healthSignal: memberHealthSignal.nullable(),
+});
+export type MembershipRosterEntry = z.infer<typeof membershipRosterEntry>;
+
+/** One delivered/approved prepared speech, for a member's speech-history drill-down. */
+export const speechHistoryEntry = z.object({
+  speechSlotId: z.uuid(),
+  meetingId: z.uuid(),
+  meetingScheduledAt: z.iso.datetime(),
+  title: z.string(),
+  pathCode: z.string(),
+  projectCode: z.string(),
+  level: z.number().int(),
+  evaluatorPersonId: z.uuid().nullable(),
+  evaluatorFullName: z.string().nullable(),
+});
+export type SpeechHistoryEntry = z.infer<typeof speechHistoryEntry>;

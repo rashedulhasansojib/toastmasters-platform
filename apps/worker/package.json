@@ -9,6 +9,7 @@
     "dev": "dotenv -e ../../.env -- nest start --watch",
     "start": "dotenv -e ../../.env -- node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
     "lint": "eslint .",
     "clean": "rm -rf dist .turbo"
   },

@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
 import { z } from 'zod';
 import {
   createRoleAssignmentRequestSchema,
@@ -6,12 +6,14 @@ import {
   type CreateRoleAssignmentRequest,
   type CreateRoleAssignmentResponse,
   type EndRoleAssignmentRequest,
+  type RoleAssignment,
 } from '@toastmasters/contracts';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { ResourceScope } from '../../common/authz/resource-scope.decorator';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
 import type { Principal } from '../../common/authz/authz.types';
 import { RoleAssignmentService } from './role-assignment.service';
+import { RoleAssignmentRepository } from './role-assignment.repository';
 
 const uuidPipe = new ZodValidationPipe(z.uuid());
 
@@ -22,7 +24,24 @@ const uuidPipe = new ZodValidationPipe(z.uuid());
  */
 @Controller()
 export class RoleAssignmentController {
-  constructor(private readonly roleAssignments: RoleAssignmentService) {}
+  constructor(
+    private readonly roleAssignments: RoleAssignmentService,
+    private readonly roleAssignmentRepository: RoleAssignmentRepository,
+  ) {}
+
+  /**
+   * CLAUDE.md §2 decision 11 (2026-07-30): backs the VP Membership
+   * dashboard's landing redirect — the caller's own active roles in one
+   * club. No `@ResourceScope`: this is the caller's own data, same
+   * reasoning as `/auth/me`, not a lookup of someone else's assignments.
+   */
+  @Get('clubs/:clubUnitId/role-assignments/mine')
+  mine(
+    @Param('clubUnitId', uuidPipe) clubUnitId: string,
+    @CurrentUser() principal: Principal,
+  ): Promise<RoleAssignment[]> {
+    return this.roleAssignmentRepository.findActiveByPersonAndUnit(principal.userId, clubUnitId);
+  }
 
   @Post('org-units/:orgUnitId/role-assignments')
   @ResourceScope('identity.role_assignment', 'create', { source: 'param', key: 'orgUnitId' })

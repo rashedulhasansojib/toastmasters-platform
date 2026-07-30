@@ -3,11 +3,17 @@ import {
   guestVisit,
   guestCommunication,
   publicMeetingSummary,
+  membershipRosterEntry,
+  speechHistoryEntry,
+  roleAssignment,
   type Guest,
   type GuestVisit,
   type GuestCommunication,
   type ConvertGuestResponse,
   type PublicMeetingSummary,
+  type MembershipRosterEntry,
+  type SpeechHistoryEntry,
+  type RoleAssignment,
 } from '@toastmasters/contracts';
 import { authedFetch, callApi } from './session-proxy';
 
@@ -45,6 +51,31 @@ export async function getUpcomingMeetings(clubUnitId: string): Promise<PublicMee
   });
   if (!response.ok) return [];
   return publicMeetingSummary.array().parse(await response.json());
+}
+
+/** CLAUDE.md §2 decision 11 (2026-07-30): the VP Membership dashboard's roster. */
+export async function getMembershipRoster(clubUnitId: string): Promise<MembershipRosterEntry[]> {
+  const response = await authedFetch(`/v1/clubs/${clubUnitId}/membership/roster`);
+  if (!response.ok) return [];
+  return membershipRosterEntry.array().parse(await response.json());
+}
+
+export async function getMemberSpeechHistory(
+  clubUnitId: string,
+  personId: string,
+): Promise<SpeechHistoryEntry[]> {
+  const response = await authedFetch(
+    `/v1/clubs/${clubUnitId}/membership/${personId}/speech-history`,
+  );
+  if (!response.ok) return [];
+  return speechHistoryEntry.array().parse(await response.json());
+}
+
+/** Backs the landing redirect: the signed-in person's own active roles in one club. */
+export async function getMyRoleAssignments(clubUnitId: string): Promise<RoleAssignment[]> {
+  const response = await authedFetch(`/v1/clubs/${clubUnitId}/role-assignments/mine`);
+  if (!response.ok) return [];
+  return roleAssignment.array().parse(await response.json());
 }
 
 export type { ConvertGuestResponse };

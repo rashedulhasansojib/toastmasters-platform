@@ -138,6 +138,19 @@ export class RoleAssignmentRepository {
     return rows.map(toRoleAssignment);
   }
 
+  /**
+   * The caller's own active roles in one club — backs the VP Membership
+   * dashboard's landing redirect (CLAUDE.md §2 decision 11). No
+   * `@ResourceScope` needed at the controller: it's the caller's own data,
+   * same reasoning as `/auth/me`.
+   */
+  async findActiveByPersonAndUnit(personId: string, orgUnitId: string): Promise<RoleAssignment[]> {
+    const rows = await this.db.roleAssignment.findMany({
+      where: { personId, orgUnitId, status: 'active' },
+    });
+    return rows.map(toRoleAssignment);
+  }
+
   /** The unit switcher's candidate list (Slice 6) — places actually appointed, not a scope-prefix walk. */
   async findActiveOrgUnitIdsForPerson(personId: string): Promise<string[]> {
     const rows = await this.db.roleAssignment.findMany({

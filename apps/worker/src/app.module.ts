@@ -12,6 +12,9 @@ import { DcpProjectionScheduler } from './processors/dcp-projection.scheduler';
 import { CLUB_HEALTH_SNAPSHOT_QUEUE } from './processors/club-health-snapshot.processor';
 import { ClubHealthSnapshotProcessor } from './processors/club-health-snapshot.processor';
 import { ClubHealthSnapshotScheduler } from './processors/club-health-snapshot.scheduler';
+import { MEMBER_HEALTH_SIGNAL_QUEUE } from './processors/member-health-signal.processor';
+import { MemberHealthSignalProcessor } from './processors/member-health-signal.processor';
+import { MemberHealthSignalScheduler } from './processors/member-health-signal.scheduler';
 
 // The worker is a long-running process; validate env once at module load.
 const env: Env = parseEnv();
@@ -33,6 +36,7 @@ const env: Env = parseEnv();
     BullModule.registerQueue({ name: GUEST_RETENTION_QUEUE }),
     BullModule.registerQueue({ name: DCP_PROJECTION_QUEUE }),
     BullModule.registerQueue({ name: CLUB_HEALTH_SNAPSHOT_QUEUE }),
+    BullModule.registerQueue({ name: MEMBER_HEALTH_SIGNAL_QUEUE }),
   ],
   providers: [
     GuestRetentionProcessor,
@@ -41,6 +45,8 @@ const env: Env = parseEnv();
     DcpProjectionScheduler,
     ClubHealthSnapshotProcessor,
     ClubHealthSnapshotScheduler,
+    MemberHealthSignalProcessor,
+    MemberHealthSignalScheduler,
   ],
 })
 export class AppModule {}

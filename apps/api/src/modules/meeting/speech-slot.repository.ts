@@ -165,6 +165,60 @@ export class SpeechSlotRepository {
     return toSpeechSlot(row);
   }
 
+  /**
+   * VP Membership dashboard's per-member speech-history drill-down
+   * (CLAUDE.md §2 decision 11): every approved, already-delivered slot
+   * where this person spoke, across every meeting in the club, newest
+   * first.
+   */
+  async findDeliveredBySpeaker(
+    clubUnitId: string,
+    personId: string,
+  ): Promise<
+    Array<{
+      speechSlotId: string;
+      meetingId: string;
+      meetingScheduledAt: Date;
+      title: string;
+      pathCode: string;
+      projectCode: string;
+      level: number;
+      evaluatorPersonId: string | null;
+      evaluatorFullName: string | null;
+    }>
+  > {
+    const rows = await this.db.speechSlot.findMany({
+      where: {
+        speakerPersonId: personId,
+        status: 'approved',
+        meeting: { clubUnitId, scheduledAt: { lte: new Date() } },
+      },
+      select: {
+        id: true,
+        meetingId: true,
+        title: true,
+        pathCode: true,
+        projectCode: true,
+        level: true,
+        evaluatorPersonId: true,
+        evaluatorPerson: { select: { fullName: true } },
+        meeting: { select: { scheduledAt: true } },
+      },
+      orderBy: { meeting: { scheduledAt: 'desc' } },
+    });
+    return rows.map((row) => ({
+      speechSlotId: row.id,
+      meetingId: row.meetingId,
+      meetingScheduledAt: row.meeting.scheduledAt,
+      title: row.title,
+      pathCode: row.pathCode,
+      projectCode: row.projectCode,
+      level: row.level,
+      evaluatorPersonId: row.evaluatorPersonId,
+      evaluatorFullName: row.evaluatorPerson?.fullName ?? null,
+    }));
+  }
+
   /** The seeded Pathways catalogue, for the agenda's path/project pickers. */
   async listPathways(): Promise<PathwayPath[]> {
     const paths = await this.db.pathwayPath.findMany({

@@ -90,6 +90,7 @@ import { PathwayCatalogController } from './pathway-catalog.controller';
     CapabilityTokenRepository,
     CapabilityTokenService,
     MeetingRoleAssignmentRepository,
+    SpeechSlotRepository,
   ],
 })
 export class MeetingModule {}

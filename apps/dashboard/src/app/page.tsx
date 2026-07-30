@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { fetchHealth } from '@/lib/api';
 import { getSession } from '@/lib/session';
 import { unitLandingPath } from '@/components/app-shell/nav-config';
+import { vpmLandingOverride } from '@/lib/membership-landing';
 
 export default async function Home() {
   const session = await getSession();
@@ -11,7 +12,8 @@ export default async function Home() {
   // session already resolved which club that is (AuthService.defaultActiveUnit),
   // so there is nothing to pick.
   if (session?.activeUnit?.type === 'club') {
-    const landing = unitLandingPath(session.activeUnit);
+    const landing =
+      (await vpmLandingOverride(session.activeUnit.id)) ?? unitLandingPath(session.activeUnit);
     if (landing) redirect(landing);
   }
 

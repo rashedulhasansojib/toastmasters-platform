@@ -13,6 +13,8 @@ import { GuestCommunicationController } from './guest-communication.controller';
 import { GuestConversionService } from './guest-conversion.service';
 import { PublicGuestRegistrationService } from './public-guest-registration.service';
 import { PublicGuestRegistrationController } from './public-guest-registration.controller';
+import { MemberHealthSignalRepository } from './member-health-signal.repository';
+import { MemberHealthController } from './member-health.controller';
 
 @Module({
   imports: [IdentityModule, MeetingModule],
@@ -24,12 +26,14 @@ import { PublicGuestRegistrationController } from './public-guest-registration.c
     GuestCommunicationRepository,
     GuestConversionService,
     PublicGuestRegistrationService,
+    MemberHealthSignalRepository,
   ],
   controllers: [
     GuestController,
     GuestVisitController,
     GuestCommunicationController,
     PublicGuestRegistrationController,
+    MemberHealthController,
   ],
 })
 export class MembershipModule {}

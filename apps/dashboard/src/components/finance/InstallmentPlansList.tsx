@@ -6,6 +6,7 @@ import type { InstallmentPlan } from '@toastmasters/contracts';
 import { Card, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
+import { submitAction } from '@/lib/toast';
 
 function PlanActions({ clubUnitId, plan }: { clubUnitId: string; plan: InstallmentPlan }) {
   const router = useRouter();
@@ -18,14 +19,23 @@ function PlanActions({ clubUnitId, plan }: { clubUnitId: string; plan: Installme
     if (!ledgerEntryId) return;
     setSubmitting(true);
     try {
-      await fetch(
-        `/api/clubs/${clubUnitId}/installment-plans/${plan.id}/schedule/${nextEntry.seq}/payments`,
+      const result = await submitAction(
+        () =>
+          fetch(
+            `/api/clubs/${clubUnitId}/installment-plans/${plan.id}/schedule/${nextEntry.seq}/payments`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ledgerEntryId }),
+            },
+          ),
         {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ledgerEntryId }),
+          loading: 'Recording payment…',
+          success: 'Payment recorded',
+          error: 'Could not record that payment.',
         },
       );
+      if (!result) return;
       router.refresh();
     } finally {
       setSubmitting(false);
@@ -37,11 +47,20 @@ function PlanActions({ clubUnitId, plan }: { clubUnitId: string; plan: Installme
     if (!reason) return;
     setSubmitting(true);
     try {
-      await fetch(`/api/clubs/${clubUnitId}/installment-plans/${plan.id}/cancel`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason }),
-      });
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/installment-plans/${plan.id}/cancel`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason }),
+          }),
+        {
+          loading: 'Cancelling plan…',
+          success: 'Plan cancelled',
+          error: 'Could not cancel that plan.',
+        },
+      );
+      if (!result) return;
       router.refresh();
     } finally {
       setSubmitting(false);

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { MeetingStatus } from '@toastmasters/contracts';
 import { Button } from '@/components/ui/button';
+import { submitAction } from '@/lib/toast';
 
 const TRANSITIONS: Record<MeetingStatus, { action: string; label: string }[]> = {
   draft: [
@@ -19,6 +20,13 @@ const TRANSITIONS: Record<MeetingStatus, { action: string; label: string }[]> = 
   cancelled: [],
 };
 
+const ACTION_TOASTS: Record<string, { loading: string; success: string }> = {
+  publish: { loading: 'Publishing meeting…', success: 'Meeting published' },
+  cancel: { loading: 'Cancelling meeting…', success: 'Meeting cancelled' },
+  start: { loading: 'Starting meeting…', success: 'Meeting started' },
+  close: { loading: 'Closing meeting…', success: 'Meeting closed' },
+};
+
 /** M3 Slice 11's guarded lifecycle: only the transitions valid from the current status render. The `close` guard (no proposed roles left) is enforced server-side — a 409 here surfaces as an inline error, not silently swallowed. */
 export function MeetingStatusActions({
   clubUnitId,
@@ -31,20 +39,26 @@ export function MeetingStatusActions({
 }) {
   const router = useRouter();
   const [pending, setPending] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   async function run(action: string) {
     setPending(action);
-    setError(null);
     try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/${action}`, {
-        method: 'POST',
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        setError(body.message ?? `Could not ${action} this meeting.`);
-        return;
-      }
+      const toasts = ACTION_TOASTS[action] ?? {
+        loading: `Running ${action}…`,
+        success: `Meeting ${action}d`,
+      };
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/${action}`, {
+            method: 'POST',
+          }),
+        {
+          loading: toasts.loading,
+          success: toasts.success,
+          error: `Could not ${action} this meeting.`,
+        },
+      );
+      if (!result) return;
       router.refresh();
     } finally {
       setPending(null);
@@ -68,7 +82,6 @@ export function MeetingStatusActions({
           </Button>
         ))}
       </div>
-      {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
   );
 }

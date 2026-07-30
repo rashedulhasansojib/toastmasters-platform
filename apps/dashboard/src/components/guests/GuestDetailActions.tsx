@@ -19,7 +19,7 @@ import { isRedacted } from './pipeline';
  */
 export function GuestDetailActions({ clubUnitId, guest }: { clubUnitId: string; guest: Guest }) {
   const router = useRouter();
-  const { moveTo, remove, pendingId, error, clearError } = useGuestActions(clubUnitId);
+  const { moveTo, remove, pendingId } = useGuestActions(clubUnitId);
   const [moveOpen, setMoveOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [convertOpen, setConvertOpen] = useState(false);
@@ -93,25 +93,12 @@ export function GuestDetailActions({ clubUnitId, guest }: { clubUnitId: string; 
         </Button>
       )}
 
-      {error && (
-        <div
-          role="alert"
-          className="flex items-start justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-        >
-          <span>{error}</span>
-          <button type="button" onClick={clearError} className="shrink-0 underline">
-            Dismiss
-          </button>
-        </div>
-      )}
-
       <MoveGuestDialog
         guest={moveOpen ? guest : null}
         open={moveOpen}
         onOpenChange={setMoveOpen}
         onMove={moveTo}
         pending={pending}
-        error={error}
       />
 
       <GuestFormDialog

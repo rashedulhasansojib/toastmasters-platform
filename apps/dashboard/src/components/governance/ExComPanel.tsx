@@ -8,6 +8,7 @@ import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { submitAction, toast } from '@/lib/toast';
 
 function CreateMeetingForm({
   clubUnitId,
@@ -19,32 +20,35 @@ function CreateMeetingForm({
   const router = useRouter();
   const [heldAt, setHeldAt] = useState('');
   const [location, setLocation] = useState('');
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!programYearId) {
-      setError('No active program year.');
+      toast.error('No active program year.');
       return;
     }
-    setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/excom-meetings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          programYearId,
-          heldAt: new Date(heldAt).toISOString(),
-          location,
-          quorumRule: 'majority of serving officers',
-        }),
-      });
-      if (!res.ok) {
-        setError('Could not schedule that meeting.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/excom-meetings`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              programYearId,
+              heldAt: new Date(heldAt).toISOString(),
+              location,
+              quorumRule: 'majority of serving officers',
+            }),
+          }),
+        {
+          loading: 'Scheduling meeting…',
+          success: 'Meeting scheduled',
+          error: 'Could not schedule that meeting.',
+        },
+      );
+      if (!result) return;
       setHeldAt('');
       setLocation('');
       router.refresh();
@@ -77,7 +81,6 @@ function CreateMeetingForm({
       <Button type="submit" disabled={submitting}>
         {submitting ? 'Scheduling…' : 'Schedule ExCom meeting'}
       </Button>
-      {error && <p className="w-full text-sm text-destructive">{error}</p>}
     </form>
   );
 }
@@ -99,11 +102,20 @@ function MoveMotionAction({
     if (!text) return;
     setBusy(true);
     try {
-      await fetch(`/api/clubs/${clubUnitId}/excom-meetings/${meeting.id}/motions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, movedByPersonId: meeting.calledBy }),
-      });
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/excom-meetings/${meeting.id}/motions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, movedByPersonId: meeting.calledBy }),
+          }),
+        {
+          loading: 'Moving motion…',
+          success: 'Motion moved',
+          error: 'Could not move that motion.',
+        },
+      );
+      if (!result) return;
       router.refresh();
     } finally {
       setBusy(false);
@@ -112,16 +124,25 @@ function MoveMotionAction({
 
   async function draftMinutes() {
     if (!programYearId) {
-      window.alert('No active program year.');
+      toast.error('No active program year.');
       return;
     }
     setBusy(true);
     try {
-      await fetch(`/api/clubs/${clubUnitId}/excom-meetings/${meeting.id}/minutes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ programYearId, visibility: 'officers' }),
-      });
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/excom-meetings/${meeting.id}/minutes`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ programYearId, visibility: 'officers' }),
+          }),
+        {
+          loading: 'Drafting minutes…',
+          success: 'Minutes drafted',
+          error: 'Could not draft minutes.',
+        },
+      );
+      if (!result) return;
       router.refresh();
     } finally {
       setBusy(false);

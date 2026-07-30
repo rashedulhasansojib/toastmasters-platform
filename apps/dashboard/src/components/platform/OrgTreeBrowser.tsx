@@ -15,6 +15,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { describeOrgUnitFailure } from '@/lib/org-unit-errors';
+import { submitAction } from '@/lib/toast';
 import { OrgUnitCard } from './OrgUnitCard';
 
 export function OrgTreeBrowser({
@@ -127,30 +128,36 @@ function AddForm({
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
   const [timezone, setTimezone] = useState(defaultTimezone ?? '');
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    setError(null);
     setSubmitting(true);
     try {
-      const response = await fetch(
-        parentId
-          ? `/api/org-units/${parentId}/children`
-          : `/api/platform/${regionUnitId}/org-tree/regions`,
+      const result = await submitAction(
+        async () => {
+          const response = await fetch(
+            parentId
+              ? `/api/org-units/${parentId}/children`
+              : `/api/platform/${regionUnitId}/org-tree/regions`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(
+                parentId ? { type: childTier, name, code, timezone } : { name, code, timezone },
+              ),
+            },
+          );
+          if (!response.ok) throw new Error(await describeOrgUnitFailure(response));
+          return response;
+        },
         {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(
-            parentId ? { type: childTier, name, code, timezone } : { name, code, timezone },
-          ),
+          loading: `Creating ${childTier}…`,
+          success: `${childTier} created`,
+          error: `Could not create that ${childTier}.`,
         },
       );
-      if (!response.ok) {
-        setError(await describeOrgUnitFailure(response));
-        return;
-      }
+      if (!result) return;
       onDone();
       router.refresh();
     } finally {
@@ -193,7 +200,6 @@ function AddForm({
           required
         />
       </div>
-      {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <Button
           type="button"

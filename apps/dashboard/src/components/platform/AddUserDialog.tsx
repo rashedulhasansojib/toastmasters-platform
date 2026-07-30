@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { submitAction, toast } from '@/lib/toast';
 import { OrgUnitCascadePicker } from './OrgUnitCascadePicker';
 
 const MEMBER_TYPES: ClubMemberType[] = [
@@ -84,7 +85,6 @@ function AddUserForm({
   const [selectedUnit, setSelectedUnit] = useState<OrgUnitWithCount | null>(null);
   const [role, setRole] = useState('');
   const [memberType, setMemberType] = useState<ClubMemberType | ''>('');
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [inviteResult, setInviteResult] = useState<InviteResult>(null);
   const [copied, setCopied] = useState(false);
@@ -95,38 +95,42 @@ function AddUserForm({
 
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    setError(null);
 
     if (assignNow && selectedUnit?.type === 'club' && !memberType) {
-      setError('Choose a member type for a club-tier assignment.');
+      toast.error('Choose a member type for a club-tier assignment.');
       return;
     }
 
     setSubmitting(true);
     try {
-      const response = await fetch(`/api/org-units/${regionUnitId}/people`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fullName: fullName.trim(),
-          email: email.trim(),
-          phone: phone.trim() || undefined,
-          tiMemberNumber: tiMemberNumber.trim() || undefined,
-          invite:
-            assignNow && selectedUnit && role && defaultProgramYearId
-              ? {
-                  orgUnitId: selectedUnit.id,
-                  role,
-                  programYearId: defaultProgramYearId,
-                  memberType: memberType || undefined,
-                }
-              : undefined,
-        }),
-      });
-      if (!response.ok) {
-        setError('Could not create that user.');
-        return;
-      }
+      const response = await submitAction(
+        () =>
+          fetch(`/api/org-units/${regionUnitId}/people`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fullName: fullName.trim(),
+              email: email.trim(),
+              phone: phone.trim() || undefined,
+              tiMemberNumber: tiMemberNumber.trim() || undefined,
+              invite:
+                assignNow && selectedUnit && role && defaultProgramYearId
+                  ? {
+                      orgUnitId: selectedUnit.id,
+                      role,
+                      programYearId: defaultProgramYearId,
+                      memberType: memberType || undefined,
+                    }
+                  : undefined,
+            }),
+          }),
+        {
+          loading: 'Creating user…',
+          success: 'User created',
+          error: 'Could not create that user.',
+        },
+      );
+      if (!response) return;
       const data = await response.json();
       if (data.invitation?.inviteUrl) {
         setInviteResult({ inviteUrl: data.invitation.inviteUrl });
@@ -134,8 +138,6 @@ function AddUserForm({
         router.refresh();
         onClose();
       }
-    } catch {
-      setError('Network error — nothing was saved.');
     } finally {
       setSubmitting(false);
     }
@@ -285,8 +287,6 @@ function AddUserForm({
           )}
         </div>
       )}
-
-      {error && <p className="text-sm text-destructive">{error}</p>}
 
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <Button type="button" variant="outline" size="lg" className="h-11 lg:h-9" onClick={onClose}>

@@ -26,6 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { submitAction, toast } from '@/lib/toast';
 import { OrgUnitCascadePicker } from './OrgUnitCascadePicker';
 
 const MEMBER_TYPES: ClubMemberType[] = [
@@ -175,40 +176,37 @@ function PasswordResetCard({ regionUnitId, personId }: { regionUnitId: string; p
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    setError(null);
-    setSuccess(false);
 
     if (password.length < 8) {
-      setError('Password must be at least 8 characters.');
+      toast.error('Password must be at least 8 characters.');
       return;
     }
     if (password !== confirmPassword) {
-      setError('The two passwords do not match.');
+      toast.error('The two passwords do not match.');
       return;
     }
 
     setBusy(true);
     try {
-      const response = await fetch(
-        `/api/people/${personId}/password?anchorOrgUnitId=${regionUnitId}`,
+      const result = await submitAction(
+        () =>
+          fetch(`/api/people/${personId}/password?anchorOrgUnitId=${regionUnitId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password }),
+          }),
         {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password }),
+          loading: 'Resetting password…',
+          success: 'Password updated',
+          error: 'Could not reset the password.',
         },
       );
-      if (!response.ok) {
-        setError('Could not reset the password.');
-        return;
-      }
+      if (!result) return;
       setPassword('');
       setConfirmPassword('');
-      setSuccess(true);
     } finally {
       setBusy(false);
     }
@@ -254,8 +252,6 @@ function PasswordResetCard({ regionUnitId, personId }: { regionUnitId: string; p
               />
             </div>
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
-          {success && <p className="text-sm text-emerald-600">Password updated.</p>}
           <div className="flex justify-end">
             <Button type="submit" size="lg" className="h-11 lg:h-9" disabled={busy}>
               {busy ? 'Saving…' : 'Reset password'}
@@ -283,7 +279,6 @@ function DangerZoneCard({
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   async function onDelete(): Promise<void> {
     if (
@@ -293,16 +288,20 @@ function DangerZoneCard({
     ) {
       return;
     }
-    setError(null);
     setBusy(true);
     try {
-      const response = await fetch(`/api/people/${personId}?anchorOrgUnitId=${regionUnitId}`, {
-        method: 'DELETE',
-      });
-      if (!response.ok) {
-        setError('Could not delete this user.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/people/${personId}?anchorOrgUnitId=${regionUnitId}`, {
+            method: 'DELETE',
+          }),
+        {
+          loading: 'Deleting user…',
+          success: 'User deleted',
+          error: 'Could not delete this user.',
+        },
+      );
+      if (!result) return;
       router.push(`/platform/${regionUnitId}/users`);
       router.refresh();
     } finally {
@@ -323,7 +322,6 @@ function DangerZoneCard({
           revokes any pending invitation. Historical records (ledger, minutes, attendance, audit)
           are kept — this is not a hard delete.
         </p>
-        {error && <p className="text-sm text-destructive">{error}</p>}
         <div>
           <Button
             type="button"
@@ -350,27 +348,30 @@ function ProfileCard({ regionUnitId, detail }: { regionUnitId: string; detail: P
     detail.status === 'disabled' ? 'disabled' : 'active',
   );
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    setError(null);
     setSaving(true);
     try {
-      const response = await fetch(`/api/people/${detail.id}?anchorOrgUnitId=${regionUnitId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fullName,
-          phone: phone.trim() || null,
-          tiMemberNumber: tiMemberNumber.trim() || null,
-          status,
-        }),
-      });
-      if (!response.ok) {
-        setError('Could not save those changes.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/people/${detail.id}?anchorOrgUnitId=${regionUnitId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fullName,
+              phone: phone.trim() || null,
+              tiMemberNumber: tiMemberNumber.trim() || null,
+              status,
+            }),
+          }),
+        {
+          loading: 'Saving changes…',
+          success: 'Changes saved',
+          error: 'Could not save those changes.',
+        },
+      );
+      if (!result) return;
       router.refresh();
     } finally {
       setSaving(false);
@@ -432,7 +433,6 @@ function ProfileCard({ regionUnitId, detail }: { regionUnitId: string; detail: P
               </SelectContent>
             </Select>
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
           <div className="flex justify-end">
             <Button type="submit" size="lg" className="h-11 lg:h-9" disabled={saving}>
               {saving ? 'Saving…' : 'Save changes'}
@@ -457,8 +457,15 @@ function PendingInvitationCard({
   async function resend(): Promise<void> {
     setBusy(true);
     try {
-      const response = await fetch(`/api/invitations/${invitation.id}/resend`, { method: 'POST' });
-      if (response.ok) {
+      const response = await submitAction(
+        () => fetch(`/api/invitations/${invitation.id}/resend`, { method: 'POST' }),
+        {
+          loading: 'Resending invitation…',
+          success: 'Invitation resent',
+          error: 'Could not resend that invitation.',
+        },
+      );
+      if (response) {
         const data = await response.json();
         setLastLink(data.inviteUrl ?? null);
       }
@@ -472,7 +479,14 @@ function PendingInvitationCard({
     if (!confirm('Revoke this invitation? The link will stop working.')) return;
     setBusy(true);
     try {
-      await fetch(`/api/invitations/${invitation.id}/revoke`, { method: 'POST' });
+      await submitAction(
+        () => fetch(`/api/invitations/${invitation.id}/revoke`, { method: 'POST' }),
+        {
+          loading: 'Revoking invitation…',
+          success: 'Invitation revoked',
+          error: 'Could not revoke that invitation.',
+        },
+      );
       onChanged();
     } finally {
       setBusy(false);
@@ -535,11 +549,19 @@ function RoleRow({
     if (!reason || !END_REASONS.includes(reason as RoleAssignmentEndedReason)) return;
     setBusy(true);
     try {
-      await fetch(`/api/role-assignments/${roleAssignmentId}/end`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason }),
-      });
+      await submitAction(
+        () =>
+          fetch(`/api/role-assignments/${roleAssignmentId}/end`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason }),
+          }),
+        {
+          loading: 'Ending role…',
+          success: 'Role ended',
+          error: 'Could not end that role.',
+        },
+      );
       onChanged();
     } finally {
       setBusy(false);
@@ -586,7 +608,6 @@ function AssignRoleForm({
   const [memberType, setMemberType] = useState<ClubMemberType | ''>('');
   const [termStart, setTermStart] = useState(programYear?.startsOn ?? '');
   const [termEnd, setTermEnd] = useState(programYear?.endsOn ?? '');
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const eligibleRoles = selectedUnit
@@ -595,38 +616,40 @@ function AssignRoleForm({
 
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    setError(null);
 
     if (!selectedUnit || !role || !defaultProgramYearId) {
-      setError('Choose an org unit, a role, and make sure a current program year exists.');
+      toast.error('Choose an org unit, a role, and make sure a current program year exists.');
       return;
     }
     if (selectedUnit.type === 'club' && !memberType) {
-      setError('Choose a member type for a club-tier assignment.');
+      toast.error('Choose a member type for a club-tier assignment.');
       return;
     }
 
     setSubmitting(true);
     try {
-      const response = await fetch(`/api/org-units/${selectedUnit.id}/role-assignments`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          personId,
-          role,
-          programYearId: defaultProgramYearId,
-          termStart,
-          termEnd,
-          memberType: memberType || undefined,
-        }),
-      });
-      if (!response.ok) {
-        setError('Could not assign that role.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/org-units/${selectedUnit.id}/role-assignments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              personId,
+              role,
+              programYearId: defaultProgramYearId,
+              termStart,
+              termEnd,
+              memberType: memberType || undefined,
+            }),
+          }),
+        {
+          loading: 'Assigning role…',
+          success: 'Role assigned',
+          error: 'Could not assign that role.',
+        },
+      );
+      if (!result) return;
       onDone();
-    } catch {
-      setError('Network error — nothing was saved.');
     } finally {
       setSubmitting(false);
     }
@@ -704,8 +727,6 @@ function AssignRoleForm({
           />
         </div>
       </div>
-
-      {error && <p className="text-sm text-destructive">{error}</p>}
 
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <Button

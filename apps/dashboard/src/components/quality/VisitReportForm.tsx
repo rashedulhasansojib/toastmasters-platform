@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { submitAction, toast } from '@/lib/toast';
 
 const STANDARDS: MomentOfTruthStandard[] = [
   'first_impressions',
@@ -36,39 +37,42 @@ export function VisitReportForm({
   const [round, setRound] = useState<AreaVisitRound>('R1');
   const [visitedAt, setVisitedAt] = useState('');
   const [ratings, setRatings] = useState<Record<string, number>>({});
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!areaUnitId || !programYearId) {
-      setError('Missing area or program year.');
+      toast.error('Missing area or program year.');
       return;
     }
-    setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/visit-reports`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          areaUnitId,
-          programYearId,
-          round,
-          visitedAt,
-          visitMode: 'in_person',
-          momentsOfTruth: STANDARDS.map((standard) => ({
-            standard,
-            rating: ratings[standard] ?? 3,
-            observations: '',
-            recommendations: '',
-          })),
-        }),
-      });
-      if (!res.ok) {
-        setError('Could not save that visit report.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/visit-reports`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              areaUnitId,
+              programYearId,
+              round,
+              visitedAt,
+              visitMode: 'in_person',
+              momentsOfTruth: STANDARDS.map((standard) => ({
+                standard,
+                rating: ratings[standard] ?? 3,
+                observations: '',
+                recommendations: '',
+              })),
+            }),
+          }),
+        {
+          loading: 'Filing visit report…',
+          success: 'Visit report filed',
+          error: 'Could not save that visit report.',
+        },
+      );
+      if (!result) return;
       setVisitedAt('');
       router.refresh();
     } finally {
@@ -131,7 +135,6 @@ export function VisitReportForm({
           </label>
         ))}
       </div>
-      {error && <p className="text-sm text-destructive">{error}</p>}
     </form>
   );
 }

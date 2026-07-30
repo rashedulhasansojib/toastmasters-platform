@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { submitAction } from '@/lib/toast';
 
 export function CreateTicketForm({ defaultScopeUnitId }: { defaultScopeUnitId: string | null }) {
   const router = useRouter();
@@ -20,23 +21,26 @@ export function CreateTicketForm({ defaultScopeUnitId }: { defaultScopeUnitId: s
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [severity, setSeverity] = useState<TicketSeverity>('medium');
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/tickets?scope=${encodeURIComponent(scopeUnitId)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scopeUnitId, title, body, severity }),
-      });
-      if (!res.ok) {
-        setError('Could not create that ticket.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/tickets?scope=${encodeURIComponent(scopeUnitId)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ scopeUnitId, title, body, severity }),
+          }),
+        {
+          loading: 'Opening ticket…',
+          success: 'Ticket opened',
+          error: 'Could not create that ticket.',
+        },
+      );
+      if (!result) return;
       setTitle('');
       setBody('');
       router.refresh();
@@ -85,7 +89,6 @@ export function CreateTicketForm({ defaultScopeUnitId }: { defaultScopeUnitId: s
       <Button type="submit" disabled={submitting}>
         {submitting ? 'Creating…' : 'Open ticket'}
       </Button>
-      {error && <p className="w-full text-sm text-destructive">{error}</p>}
     </form>
   );
 }

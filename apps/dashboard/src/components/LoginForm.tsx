@@ -6,29 +6,33 @@ import { Eye, EyeOff, Lock, Mail } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { submitAction } from '@/lib/toast';
 
 export function LoginForm() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch('/api/session/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-      if (!res.ok) {
-        setError('Invalid email or password.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch('/api/session/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password }),
+          }),
+        {
+          loading: 'Logging in…',
+          success: 'Signed in',
+          error: 'Invalid email or password.',
+        },
+      );
+      if (!result) return;
       router.push('/');
       router.refresh();
     } finally {
@@ -90,15 +94,6 @@ export function LoginForm() {
           </button>
         </div>
       </div>
-
-      {error && (
-        <p
-          role="alert"
-          className="rounded-lg bg-destructive/10 px-3 py-2.5 text-sm text-destructive"
-        >
-          {error}
-        </p>
-      )}
 
       <Button
         type="submit"

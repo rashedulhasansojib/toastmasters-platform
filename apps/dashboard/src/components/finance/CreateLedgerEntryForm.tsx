@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { submitAction, toast } from '@/lib/toast';
 
 export function CreateLedgerEntryForm({
   clubUnitId,
@@ -28,37 +29,40 @@ export function CreateLedgerEntryForm({
   const [occurredOn, setOccurredOn] = useState('');
   const [counterpartyLabel, setCounterpartyLabel] = useState('');
   const [description, setDescription] = useState('');
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!programYearId) {
-      setError('No active program year for this unit.');
+      toast.error('No active program year for this unit.');
       return;
     }
-    setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/ledger-entries`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          programYearId,
-          direction,
-          category,
-          amount: Number(amount),
-          currency,
-          occurredOn,
-          counterpartyKind: 'other',
-          counterpartyLabel,
-          description,
-        }),
-      });
-      if (!res.ok) {
-        setError('Could not record that entry.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/ledger-entries`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              programYearId,
+              direction,
+              category,
+              amount: Number(amount),
+              currency,
+              occurredOn,
+              counterpartyKind: 'other',
+              counterpartyLabel,
+              description,
+            }),
+          }),
+        {
+          loading: 'Recording entry…',
+          success: 'Entry recorded',
+          error: 'Could not record that entry.',
+        },
+      );
+      if (!result) return;
       setCategory('');
       setAmount('');
       setOccurredOn('');
@@ -145,7 +149,6 @@ export function CreateLedgerEntryForm({
       <Button type="submit" disabled={submitting}>
         {submitting ? 'Recording…' : 'Record entry'}
       </Button>
-      {error && <p className="w-full text-sm text-destructive">{error}</p>}
     </form>
   );
 }

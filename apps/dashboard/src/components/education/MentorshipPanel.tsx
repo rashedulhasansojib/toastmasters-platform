@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { submitAction, toast } from '@/lib/toast';
 
 function CreateForm({
   clubUnitId,
@@ -27,27 +28,30 @@ function CreateForm({
   const [mentorPersonId, setMentorPersonId] = useState('');
   const [menteePersonId, setMenteePersonId] = useState('');
   const [purpose, setPurpose] = useState<MentorshipPurpose>('new_member_onboarding');
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!programYearId) {
-      setError('No active program year.');
+      toast.error('No active program year.');
       return;
     }
-    setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/mentorship/pairings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ programYearId, mentorPersonId, menteePersonId, purpose }),
-      });
-      if (!res.ok) {
-        setError('Could not create that pairing.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/mentorship/pairings`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ programYearId, mentorPersonId, menteePersonId, purpose }),
+          }),
+        {
+          loading: 'Creating pairing…',
+          success: 'Pairing created',
+          error: 'Could not create that pairing.',
+        },
+      );
+      if (!result) return;
       setMentorPersonId('');
       setMenteePersonId('');
       router.refresh();
@@ -94,7 +98,6 @@ function CreateForm({
       <Button type="submit" disabled={submitting}>
         {submitting ? 'Pairing…' : 'Create pairing'}
       </Button>
-      {error && <p className="w-full text-sm text-destructive">{error}</p>}
     </form>
   );
 }
@@ -107,11 +110,20 @@ function EndAction({ clubUnitId, pairing }: { clubUnitId: string; pairing: Mento
   async function end() {
     setBusy(true);
     try {
-      await fetch(`/api/clubs/${clubUnitId}/mentorship/pairings/${pairing.id}/end`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: 'completed' }),
-      });
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/mentorship/pairings/${pairing.id}/end`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason: 'completed' }),
+          }),
+        {
+          loading: 'Ending pairing…',
+          success: 'Pairing ended',
+          error: 'Could not end that pairing.',
+        },
+      );
+      if (!result) return;
       router.refresh();
     } finally {
       setBusy(false);

@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { submitAction } from '@/lib/toast';
 
 export function BallotCard({
   clubUnitId,
@@ -24,25 +25,25 @@ export function BallotCard({
   const router = useRouter();
   const [candidatePersonId, setCandidatePersonId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   async function vote() {
     if (!candidatePersonId) return;
     setPending(true);
-    setError(null);
     try {
-      const res = await fetch(
-        `/api/clubs/${clubUnitId}/meetings/${meetingId}/ballots/${ballot.id}/votes`,
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/ballots/${ballot.id}/votes`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ candidatePersonId }),
+          }),
         {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ candidatePersonId }),
+          loading: 'Casting vote…',
+          success: 'Vote cast',
+          error: 'Could not cast that vote.',
         },
       );
-      if (!res.ok) {
-        setError('Could not cast that vote.');
-        return;
-      }
+      if (!result) return;
       router.refresh();
     } finally {
       setPending(false);
@@ -51,16 +52,19 @@ export function BallotCard({
 
   async function tally() {
     setPending(true);
-    setError(null);
     try {
-      const res = await fetch(
-        `/api/clubs/${clubUnitId}/meetings/${meetingId}/ballots/${ballot.id}/tally`,
-        { method: 'POST' },
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/ballots/${ballot.id}/tally`, {
+            method: 'POST',
+          }),
+        {
+          loading: 'Tallying ballot…',
+          success: 'Ballot tallied',
+          error: 'Could not tally this ballot.',
+        },
       );
-      if (!res.ok) {
-        setError('Could not tally this ballot.');
-        return;
-      }
+      if (!result) return;
       router.refresh();
     } finally {
       setPending(false);
@@ -114,7 +118,6 @@ export function BallotCard({
           </ul>
         </div>
       )}
-      {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
   );
 }

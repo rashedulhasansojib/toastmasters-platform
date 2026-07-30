@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { submitAction } from '@/lib/toast';
 import { MEETING_ROLE_KEYS } from './roleKeys';
 
 type AssigneeKind = 'member' | 'cross_club' | 'unfilled';
@@ -30,7 +31,6 @@ export function AssignRoleForm({
   const [personId, setPersonId] = useState('');
   const [homeClubUnitId, setHomeClubUnitId] = useState('');
   const [suggestions, setSuggestions] = useState<RoleRotationSuggestion[]>([]);
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -52,7 +52,6 @@ export function AssignRoleForm({
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
     setSubmitting(true);
     try {
       const assignee =
@@ -62,15 +61,20 @@ export function AssignRoleForm({
             ? { kind, personId, homeClubUnitId }
             : { kind };
 
-      const res = await fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/role-assignments`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ roleKey, assignee }),
-      });
-      if (!res.ok) {
-        setError('Could not assign that role.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/role-assignments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ roleKey, assignee }),
+          }),
+        {
+          loading: 'Assigning role…',
+          success: 'Role assigned',
+          error: 'Could not assign that role.',
+        },
+      );
+      if (!result) return;
       setPersonId('');
       setHomeClubUnitId('');
       router.refresh();
@@ -144,7 +148,6 @@ export function AssignRoleForm({
           {submitting ? 'Assigning…' : 'Assign'}
         </Button>
       </div>
-      {error && <p className="text-sm text-destructive">{error}</p>}
 
       {suggestions.length > 0 && (
         <div className="flex flex-col gap-1 text-sm text-muted-foreground">

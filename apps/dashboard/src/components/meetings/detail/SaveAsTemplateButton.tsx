@@ -6,6 +6,7 @@ import { BookmarkPlus, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { submitAction } from '@/lib/toast';
 
 /**
  * "Save as reusable template" — the legacy portal's `isTemplate` checkbox,
@@ -26,23 +27,26 @@ export function SaveAsTemplateButton({
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(defaultName);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
   async function submit() {
     if (!name.trim()) return;
     setSaving(true);
-    setError(null);
     try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/meeting-templates/from-meeting`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ meetingId, name: name.trim() }),
-      });
-      if (!res.ok) {
-        setError('Could not save this meeting as a template.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/meeting-templates/from-meeting`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ meetingId, name: name.trim() }),
+          }),
+        {
+          loading: 'Saving template…',
+          success: 'Template saved',
+          error: 'Could not save this meeting as a template.',
+        },
+      );
+      if (!result) return;
       setSaved(true);
       setOpen(false);
       setTimeout(() => setSaved(false), 2500);
@@ -106,8 +110,6 @@ export function SaveAsTemplateButton({
                 maxLength={100}
               />
             </div>
-
-            {error && <p className="text-xs text-destructive">{error}</p>}
 
             <div className="flex justify-end gap-2">
               <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>

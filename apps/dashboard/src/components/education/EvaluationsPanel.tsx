@@ -8,6 +8,7 @@ import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { submitAction } from '@/lib/toast';
 
 function CreateForm({ clubUnitId }: { clubUnitId: string }) {
   const router = useRouter();
@@ -15,33 +16,36 @@ function CreateForm({ clubUnitId }: { clubUnitId: string }) {
   const [speakerPersonId, setSpeakerPersonId] = useState('');
   const [excelledAt, setExcelledAt] = useState('');
   const [workOn, setWorkOn] = useState('');
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/evaluations`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          meetingId,
-          subjectKind: 'prepared_speech',
-          speakerPersonId,
-          mode: 'form',
-          formScales: [{ criterion: 'overall', value: 4 }],
-          formExcelledAt: excelledAt || undefined,
-          formWorkOn: workOn || undefined,
-          formChallengeYourself: 'Try a new project next time.',
-          visibility: 'speaker_and_vpe',
-        }),
-      });
-      if (!res.ok) {
-        setError('Could not submit that evaluation.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/evaluations`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              meetingId,
+              subjectKind: 'prepared_speech',
+              speakerPersonId,
+              mode: 'form',
+              formScales: [{ criterion: 'overall', value: 4 }],
+              formExcelledAt: excelledAt || undefined,
+              formWorkOn: workOn || undefined,
+              formChallengeYourself: 'Try a new project next time.',
+              visibility: 'speaker_and_vpe',
+            }),
+          }),
+        {
+          loading: 'Submitting evaluation…',
+          success: 'Evaluation submitted',
+          error: 'Could not submit that evaluation.',
+        },
+      );
+      if (!result) return;
       setMeetingId('');
       setSpeakerPersonId('');
       setExcelledAt('');
@@ -87,7 +91,6 @@ function CreateForm({ clubUnitId }: { clubUnitId: string }) {
       <Button type="submit" disabled={submitting}>
         {submitting ? 'Submitting…' : 'Submit evaluation'}
       </Button>
-      {error && <p className="w-full text-sm text-destructive">{error}</p>}
     </form>
   );
 }

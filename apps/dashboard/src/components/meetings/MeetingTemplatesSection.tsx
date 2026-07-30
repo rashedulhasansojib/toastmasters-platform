@@ -6,6 +6,7 @@ import { Clock, FileText, Trash2, Users } from 'lucide-react';
 import type { MeetingTemplate } from '@toastmasters/contracts';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { submitAction } from '@/lib/toast';
 
 /**
  * The legacy portal's Templates section on the events screen. A template is
@@ -21,19 +22,22 @@ export function MeetingTemplatesSection({
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
   function remove(id: string) {
     startTransition(async () => {
-      setError(null);
-      const res = await fetch(`/api/clubs/${clubUnitId}/meeting-templates/${id}`, {
-        method: 'DELETE',
-      });
-      if (!res.ok && res.status !== 204) {
-        setError('Could not delete that template.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/meeting-templates/${id}`, {
+            method: 'DELETE',
+          }),
+        {
+          loading: 'Deleting template…',
+          success: 'Template deleted',
+          error: 'Could not delete that template.',
+        },
+      );
+      if (!result) return;
       setConfirmingId(null);
       router.refresh();
     });
@@ -48,12 +52,6 @@ export function MeetingTemplatesSection({
           <span className="ml-1 text-muted-foreground/60 normal-case">({templates.length})</span>
         </h2>
       </div>
-
-      {error && (
-        <p role="alert" className="text-xs text-destructive">
-          {error}
-        </p>
-      )}
 
       {templates.length === 0 ? (
         <p className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">

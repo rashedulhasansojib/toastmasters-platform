@@ -5,33 +5,37 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { submitAction } from '@/lib/toast';
 
 export function CreateInstallmentPlanForm({ clubUnitId }: { clubUnitId: string }) {
   const router = useRouter();
   const [duesRecordId, setDuesRecordId] = useState('');
   const [installmentCount, setInstallmentCount] = useState('2');
   const [firstDueOn, setFirstDueOn] = useState('');
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/installment-plans`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          duesRecordId,
-          installmentCount: Number(installmentCount),
-          firstDueOn,
-        }),
-      });
-      if (!res.ok) {
-        setError('Could not create that installment plan.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/installment-plans`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              duesRecordId,
+              installmentCount: Number(installmentCount),
+              firstDueOn,
+            }),
+          }),
+        {
+          loading: 'Creating plan…',
+          success: 'Plan created',
+          error: 'Could not create that installment plan.',
+        },
+      );
+      if (!result) return;
       setDuesRecordId('');
       setFirstDueOn('');
       router.refresh();
@@ -76,7 +80,6 @@ export function CreateInstallmentPlanForm({ clubUnitId }: { clubUnitId: string }
       <Button type="submit" disabled={submitting}>
         {submitting ? 'Creating…' : 'Create plan'}
       </Button>
-      {error && <p className="w-full text-sm text-destructive">{error}</p>}
     </form>
   );
 }

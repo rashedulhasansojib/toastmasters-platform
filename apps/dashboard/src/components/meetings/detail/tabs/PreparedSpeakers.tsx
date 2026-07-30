@@ -7,6 +7,7 @@ import type { PathwayPath, SpeechSlot } from '@toastmasters/contracts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { submitAction, toast } from '@/lib/toast';
 import { MemberCombobox } from '../MemberCombobox';
 import { EmptyState, Field } from '../primitives';
 
@@ -33,19 +34,21 @@ export function PreparedSpeakers({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [adding, setAdding] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   function refresh() {
     startTransition(() => router.refresh());
   }
 
   async function remove(slotId: string) {
-    setError(null);
-    const res = await fetch(`${base}/speech-slots/${slotId}`, { method: 'DELETE' });
-    if (!res.ok && res.status !== 204) {
-      setError('Could not remove that speaker.');
-      return;
-    }
+    const result = await submitAction(
+      () => fetch(`${base}/speech-slots/${slotId}`, { method: 'DELETE' }),
+      {
+        loading: 'Removing speaker…',
+        success: 'Speaker removed',
+        error: 'Could not remove that speaker.',
+      },
+    );
+    if (!result) return;
     refresh();
   }
 
@@ -53,36 +56,39 @@ export function PreparedSpeakers({
   async function move(index: number, direction: -1 | 1) {
     const target = index + direction;
     if (target < 0 || target >= slots.length) return;
-    setError(null);
     const a = slots[index];
     const b = slots[target];
-    const results = await Promise.all([
-      fetch(`${base}/speech-slots/${a.id}/details`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ position: b.position }),
-      }),
-      fetch(`${base}/speech-slots/${b.id}/details`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ position: a.position }),
-      }),
-    ]);
-    if (results.some((r) => !r.ok)) {
-      setError('Could not reorder the speakers.');
-      return;
-    }
+    const result = await submitAction(
+      async () => {
+        const results = await Promise.all([
+          fetch(`${base}/speech-slots/${a.id}/details`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ position: b.position }),
+          }),
+          fetch(`${base}/speech-slots/${b.id}/details`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ position: a.position }),
+          }),
+        ]);
+        if (results.some((r) => !r.ok)) {
+          throw new Error('Could not reorder the speakers.');
+        }
+        return true;
+      },
+      {
+        loading: 'Reordering speakers…',
+        success: 'Speakers reordered',
+        error: 'Could not reorder the speakers.',
+      },
+    );
+    if (!result) return;
     refresh();
   }
 
   return (
     <div className="flex flex-col gap-4">
-      {error && (
-        <p role="alert" className="text-xs text-destructive">
-          {error}
-        </p>
-      )}
-
       {slots.length === 0 && !adding && (
         <EmptyState
           title="No prepared speakers yet"
@@ -186,7 +192,6 @@ function SpeakerCard({
   );
   const [notes, setNotes] = useState(slot?.notes ?? '');
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const path = pathways.find((p) => p.pathCode === pathCode) ?? null;
   const project = path?.projects.find((p) => p.projectCode === projectCode) ?? null;
@@ -206,11 +211,10 @@ function SpeakerCard({
 
   async function save() {
     if (!title.trim() || !pathCode || !projectCode || !minutes) {
-      setError('Title, path, project and duration are all required.');
+      toast.error('Title, path, project and duration are all required.');
       return;
     }
     setSaving(true);
-    setError(null);
     try {
       const body = {
         title: title.trim(),
@@ -222,30 +226,31 @@ function SpeakerCard({
         ...(notes.trim() ? { notes: notes.trim() } : {}),
       };
 
-      const res = isNew
-        ? await fetch(`${base}/speech-slots`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-          })
-        : await fetch(`${base}/speech-slots/${slot.id}/details`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              ...body,
-              speakerPersonId: speakerPersonId,
-              evaluatorPersonId: evaluatorPersonId,
-              notes: notes.trim() || null,
-            }),
-          });
-
-      if (!res.ok) {
-        // The API rejects a duration outside the project's bounds with a
-        // specific message — surface it rather than a generic failure.
-        const detail = await res.json().catch(() => null);
-        setError(detail?.detail ?? detail?.message ?? 'Could not save this speaker.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          isNew
+            ? fetch(`${base}/speech-slots`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+              })
+            : fetch(`${base}/speech-slots/${slot.id}/details`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  ...body,
+                  speakerPersonId: speakerPersonId,
+                  evaluatorPersonId: evaluatorPersonId,
+                  notes: notes.trim() || null,
+                }),
+              }),
+        {
+          loading: isNew ? 'Adding speaker…' : 'Saving speaker…',
+          success: isNew ? 'Speaker added' : 'Speaker saved',
+          error: 'Could not save this speaker.',
+        },
+      );
+      if (!result) return;
       onSaved();
     } finally {
       setSaving(false);
@@ -393,12 +398,6 @@ function SpeakerCard({
           ? `Level and duration bounds (${project.minMinutes}–${project.maxMinutes} min) come from the Pathways project.`
           : 'Level is set by the Pathways project you choose.'}
       </p>
-
-      {error && (
-        <p role="alert" className="text-xs text-destructive">
-          {error}
-        </p>
-      )}
 
       <div className="flex justify-end">
         <Button type="button" size="sm" onClick={save} disabled={saving || disabled}>

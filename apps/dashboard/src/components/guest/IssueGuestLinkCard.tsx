@@ -6,6 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
+import { submitAction } from '@/lib/toast';
 
 type IssuedToken = {
   id: string;
@@ -31,23 +32,26 @@ export function IssueGuestLinkCard({
 }) {
   const [purpose, setPurpose] = useState('timer');
   const [issuing, setIssuing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [tokens, setTokens] = useState<IssuedToken[]>([]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
     setIssuing(true);
     try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/capability-tokens`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ purpose }),
-      });
-      if (!res.ok) {
-        setError('Could not issue a guest link.');
-        return;
-      }
+      const res = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/capability-tokens`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ purpose }),
+          }),
+        {
+          loading: 'Issuing guest link…',
+          success: 'Guest link issued',
+          error: 'Could not issue a guest link.',
+        },
+      );
+      if (!res) return;
       const data = await res.json();
       const url = `${window.location.origin}/guest/${data.token}`;
       setTokens((prev) => [
@@ -60,9 +64,18 @@ export function IssueGuestLinkCard({
   }
 
   async function revoke(id: string) {
-    await fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/capability-tokens/${id}/revoke`, {
-      method: 'PATCH',
-    });
+    const result = await submitAction(
+      () =>
+        fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/capability-tokens/${id}/revoke`, {
+          method: 'PATCH',
+        }),
+      {
+        loading: 'Revoking link…',
+        success: 'Link revoked',
+        error: 'Could not revoke that link.',
+      },
+    );
+    if (!result) return;
     setTokens((prev) => prev.map((t) => (t.id === id ? { ...t, revoked: true } : t)));
   }
 
@@ -83,7 +96,6 @@ export function IssueGuestLinkCard({
         <Button type="submit" disabled={issuing}>
           {issuing ? 'Issuing…' : 'Issue guest link'}
         </Button>
-        {error && <p className="text-sm text-destructive">{error}</p>}
       </form>
 
       {tokens.length > 0 && (

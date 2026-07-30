@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { submitAction } from '@/lib/toast';
 
 const CATEGORIES: BallotCategory[] = [
   'best_speaker',
@@ -38,7 +39,6 @@ export function CreateBallotForm({
     { personId: '', label: '' },
     { personId: '', label: '' },
   ]);
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   function updateCandidate(index: number, patch: Partial<DraftCandidate>) {
@@ -47,18 +47,22 @@ export function CreateBallotForm({
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/ballots`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category, eligibility, candidates }),
-      });
-      if (!res.ok) {
-        setError('Could not open that ballot.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/ballots`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ category, eligibility, candidates }),
+          }),
+        {
+          loading: 'Opening ballot…',
+          success: 'Ballot opened',
+          error: 'Could not open that ballot.',
+        },
+      );
+      if (!result) return;
       setCandidates([
         { personId: '', label: '' },
         { personId: '', label: '' },
@@ -152,7 +156,6 @@ export function CreateBallotForm({
           {submitting ? 'Opening…' : 'Open ballot'}
         </Button>
       </div>
-      {error && <p className="text-sm text-destructive">{error}</p>}
     </form>
   );
 }

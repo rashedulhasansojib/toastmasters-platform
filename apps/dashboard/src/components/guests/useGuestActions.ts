@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { GuestPipelineStatus } from '@toastmasters/contracts';
 
+import { submitAction, toast } from '@/lib/toast';
 import { isMovableStatus } from './pipeline';
 
 /**
@@ -20,10 +21,18 @@ import { isMovableStatus } from './pipeline';
 export function useGuestActions(clubUnitId: string) {
   const router = useRouter();
   const [pendingId, setPendingId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   const moveTo = useCallback(
     async (guestId: string, target: GuestPipelineStatus): Promise<boolean> => {
+      if (target === 'new') {
+        toast.error('A guest cannot be moved back to New.');
+        return false;
+      }
+      if (target !== 'joined' && !isMovableStatus(target)) {
+        toast.error(`Cannot move a guest to ${target}.`);
+        return false;
+      }
+
       const base = `/api/clubs/${clubUnitId}/guests/${guestId}`;
       const request: RequestInit =
         target === 'joined'
@@ -34,32 +43,22 @@ export function useGuestActions(clubUnitId: string) {
               body: JSON.stringify({ pipelineStatus: target }),
             };
 
-      if (target === 'new') {
-        setError('A guest cannot be moved back to New.');
-        return false;
-      }
-      if (target !== 'joined' && !isMovableStatus(target)) {
-        setError(`Cannot move a guest to ${target}.`);
-        return false;
-      }
-
-      setError(null);
       setPendingId(guestId);
       try {
-        const response = await fetch(target === 'joined' ? `${base}/convert` : base, request);
-        if (!response.ok) {
-          setError(
-            target === 'joined'
-              ? 'Could not convert this guest — they need an email on file.'
-              : 'Could not update that guest.',
-          );
-          return false;
-        }
+        const result = await submitAction(
+          () => fetch(target === 'joined' ? `${base}/convert` : base, request),
+          {
+            loading: target === 'joined' ? 'Converting guest…' : 'Updating guest…',
+            success: target === 'joined' ? 'Guest converted to member' : 'Guest updated',
+            error:
+              target === 'joined'
+                ? 'Could not convert this guest — they need an email on file.'
+                : 'Could not update that guest.',
+          },
+        );
+        if (!result) return false;
         router.refresh();
         return true;
-      } catch {
-        setError('Network error — that change was not saved.');
-        return false;
       } finally {
         setPendingId(null);
       }
@@ -69,25 +68,29 @@ export function useGuestActions(clubUnitId: string) {
 
   const remove = useCallback(
     async (guestId: string): Promise<boolean> => {
-      setError(null);
       setPendingId(guestId);
       try {
-        const response = await fetch(`/api/clubs/${clubUnitId}/guests/${guestId}`, {
-          method: 'DELETE',
-        });
-        if (!response.ok) {
-          setError(
-            response.status === 409
-              ? 'This guest has already converted to a member and cannot be deleted here.'
-              : 'Could not delete that guest.',
-          );
-          return false;
-        }
+        const result = await submitAction(
+          async () => {
+            const response = await fetch(`/api/clubs/${clubUnitId}/guests/${guestId}`, {
+              method: 'DELETE',
+            });
+            if (response.status === 409) {
+              throw new Error(
+                'This guest has already converted to a member and cannot be deleted here.',
+              );
+            }
+            return response;
+          },
+          {
+            loading: 'Deleting guest…',
+            success: 'Guest deleted',
+            error: 'Could not delete that guest.',
+          },
+        );
+        if (!result) return false;
         router.refresh();
         return true;
-      } catch {
-        setError('Network error — that change was not saved.');
-        return false;
       } finally {
         setPendingId(null);
       }
@@ -95,5 +98,5 @@ export function useGuestActions(clubUnitId: string) {
     [clubUnitId, router],
   );
 
-  return { moveTo, remove, pendingId, error, clearError: () => setError(null) };
+  return { moveTo, remove, pendingId };
 }

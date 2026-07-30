@@ -6,6 +6,7 @@ import { Plus, Save, Trash2 } from 'lucide-react';
 import type { MeetingLiveRecord, WordOfDay } from '@toastmasters/contracts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { submitAction } from '@/lib/toast';
 import { EmptyState, Field, TabSectionHeading } from '../primitives';
 
 type Correction = { said: string; shouldHaveBeen: string };
@@ -32,7 +33,6 @@ export function GrammarianTab({
   const [said, setSaid] = useState('');
   const [shouldHaveBeen, setShouldHaveBeen] = useState('');
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const savedCount = liveRecords.filter((r) => r.kind === 'grammarian').length;
 
@@ -48,22 +48,26 @@ export function GrammarianTab({
 
   async function save() {
     setSaving(true);
-    setError(null);
     try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/live-records`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          kind: 'grammarian',
-          // One grammarian report per meeting, so the key is the meeting.
-          clientKey: `grammarian-${meetingId}`,
-          payload: { wordOfDayUses: uses, corrections },
-        }),
-      });
-      if (!res.ok) {
-        setError('Could not save the report — press Save again to retry.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/live-records`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              kind: 'grammarian',
+              // One grammarian report per meeting, so the key is the meeting.
+              clientKey: `grammarian-${meetingId}`,
+              payload: { wordOfDayUses: uses, corrections },
+            }),
+          }),
+        {
+          loading: 'Saving report…',
+          success: 'Report saved',
+          error: 'Could not save the report — press Save again to retry.',
+        },
+      );
+      if (!result) return;
       router.refresh();
     } finally {
       setSaving(false);
@@ -72,12 +76,6 @@ export function GrammarianTab({
 
   return (
     <div className="flex flex-col gap-5">
-      {error && (
-        <p role="alert" className="text-xs text-destructive">
-          {error}
-        </p>
-      )}
-
       {/* Word of the day counter */}
       <section className="flex flex-col gap-2">
         <TabSectionHeading>Word of the Day</TabSectionHeading>

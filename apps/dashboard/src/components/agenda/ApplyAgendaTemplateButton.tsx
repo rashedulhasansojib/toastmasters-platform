@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { submitAction } from '@/lib/toast';
 
 export function ApplyAgendaTemplateButton({
   clubUnitId,
@@ -24,27 +25,27 @@ export function ApplyAgendaTemplateButton({
   const router = useRouter();
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   if (templates.length === 0) return null;
 
   async function onApply() {
     if (!templateId) return;
     setApplying(true);
-    setError(null);
     try {
-      const res = await fetch(
-        `/api/clubs/${clubUnitId}/meetings/${meetingId}/agenda-items/from-template`,
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/agenda-items/from-template`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ templateId }),
+          }),
         {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ templateId }),
+          loading: 'Applying template…',
+          success: 'Template applied',
+          error: 'Could not apply that template.',
         },
       );
-      if (!res.ok) {
-        setError('Could not apply that template.');
-        return;
-      }
+      if (!result) return;
       router.refresh();
     } finally {
       setApplying(false);
@@ -68,7 +69,6 @@ export function ApplyAgendaTemplateButton({
       <Button type="button" variant="outline" disabled={!templateId || applying} onClick={onApply}>
         {applying ? 'Applying…' : 'Apply'}
       </Button>
-      {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
   );
 }

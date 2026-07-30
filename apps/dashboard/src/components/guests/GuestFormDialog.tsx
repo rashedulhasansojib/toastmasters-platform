@@ -9,6 +9,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { submitAction } from '@/lib/toast';
 
 type Fields = {
   fullName: string;
@@ -100,7 +101,6 @@ function GuestForm({
   const router = useRouter();
   const editing = guest !== undefined;
   const [fields, setFields] = useState<Fields>(() => (guest ? fieldsOf(guest) : EMPTY));
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   function set<K extends keyof Fields>(key: K, value: string) {
@@ -109,7 +109,6 @@ function GuestForm({
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
     setSubmitting(true);
 
     // `updateGuestRequestSchema` is strict and has no `fullName` — sending
@@ -125,22 +124,27 @@ function GuestForm({
     };
 
     try {
-      const response = await fetch(
-        editing ? `/api/clubs/${clubUnitId}/guests/${guest.id}` : `/api/clubs/${clubUnitId}/guests`,
+      const result = await submitAction(
+        () =>
+          fetch(
+            editing
+              ? `/api/clubs/${clubUnitId}/guests/${guest.id}`
+              : `/api/clubs/${clubUnitId}/guests`,
+            {
+              method: editing ? 'PATCH' : 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            },
+          ),
         {
-          method: editing ? 'PATCH' : 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
+          loading: editing ? 'Saving guest…' : 'Adding guest…',
+          success: editing ? 'Guest saved' : 'Guest added',
+          error: editing ? 'Could not save those changes.' : 'Could not add that guest.',
         },
       );
-      if (!response.ok) {
-        setError(editing ? 'Could not save those changes.' : 'Could not add that guest.');
-        return;
-      }
+      if (!result) return;
       onDone();
       router.refresh();
-    } catch {
-      setError('Network error — nothing was saved.');
     } finally {
       setSubmitting(false);
     }
@@ -239,8 +243,6 @@ function GuestForm({
           onChange={(e) => set('bio', e.target.value)}
         />
       </div>
-
-      {error && <p className="text-sm text-destructive">{error}</p>}
 
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <Button

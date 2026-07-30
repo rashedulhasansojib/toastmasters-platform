@@ -6,6 +6,7 @@ import type { ClubSuccessPlan } from '@toastmasters/contracts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { submitAction } from '@/lib/toast';
 
 function CreatePlanForm({
   clubUnitId,
@@ -17,27 +18,30 @@ function CreatePlanForm({
   const router = useRouter();
   const [membershipTarget, setMembershipTarget] = useState('20');
   const [strengths, setStrengths] = useState('');
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/success-plan`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          programYearId,
-          membershipTarget: Number(membershipTarget),
-          strengths: strengths || undefined,
-        }),
-      });
-      if (!res.ok) {
-        setError('Could not create the plan.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/success-plan`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              programYearId,
+              membershipTarget: Number(membershipTarget),
+              strengths: strengths || undefined,
+            }),
+          }),
+        {
+          loading: 'Creating plan…',
+          success: 'Plan created',
+          error: 'Could not create the plan.',
+        },
+      );
+      if (!result) return;
       router.refresh();
     } finally {
       setSubmitting(false);
@@ -66,7 +70,6 @@ function CreatePlanForm({
       <Button type="submit" disabled={submitting}>
         {submitting ? 'Creating…' : 'Create Club Success Plan'}
       </Button>
-      {error && <p className="w-full text-sm text-destructive">{error}</p>}
     </form>
   );
 }
@@ -79,7 +82,15 @@ function SubmitPlanButton({ clubUnitId, plan }: { clubUnitId: string; plan: Club
   async function submit() {
     setBusy(true);
     try {
-      await fetch(`/api/clubs/${clubUnitId}/success-plan/${plan.id}/submit`, { method: 'POST' });
+      const result = await submitAction(
+        () => fetch(`/api/clubs/${clubUnitId}/success-plan/${plan.id}/submit`, { method: 'POST' }),
+        {
+          loading: 'Submitting to TI…',
+          success: 'Plan submitted',
+          error: 'Could not submit the plan.',
+        },
+      );
+      if (!result) return;
       router.refresh();
     } finally {
       setBusy(false);

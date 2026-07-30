@@ -6,6 +6,7 @@ import type { DuesRecord } from '@toastmasters/contracts';
 import { Card, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
+import { submitAction } from '@/lib/toast';
 
 function RecordPaymentForm({ clubUnitId, record }: { clubUnitId: string; record: DuesRecord }) {
   const router = useRouter();
@@ -20,11 +21,20 @@ function RecordPaymentForm({ clubUnitId, record }: { clubUnitId: string; record:
     if (!amount) return;
     setSubmitting(true);
     try {
-      await fetch(`/api/clubs/${clubUnitId}/dues-records/${record.id}/payments`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scope, amount: Number(amount), ledgerEntryId }),
-      });
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/dues-records/${record.id}/payments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ scope, amount: Number(amount), ledgerEntryId }),
+          }),
+        {
+          loading: 'Recording payment…',
+          success: 'Payment recorded',
+          error: 'Could not record that payment.',
+        },
+      );
+      if (!result) return;
       router.refresh();
     } finally {
       setSubmitting(false);

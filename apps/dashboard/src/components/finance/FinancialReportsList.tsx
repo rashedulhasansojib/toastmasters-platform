@@ -6,6 +6,7 @@ import type { FinancialReport } from '@toastmasters/contracts';
 import { Card, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
+import { submitAction } from '@/lib/toast';
 
 function FinalizeButton({ clubUnitId, report }: { clubUnitId: string; report: FinancialReport }) {
   const router = useRouter();
@@ -16,9 +17,18 @@ function FinalizeButton({ clubUnitId, report }: { clubUnitId: string; report: Fi
   async function onClick() {
     setSubmitting(true);
     try {
-      await fetch(`/api/clubs/${clubUnitId}/financial-reports/${report.id}/finalize`, {
-        method: 'POST',
-      });
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/financial-reports/${report.id}/finalize`, {
+            method: 'POST',
+          }),
+        {
+          loading: 'Finalizing report…',
+          success: 'Report finalized',
+          error: 'Could not finalize that report.',
+        },
+      );
+      if (!result) return;
       router.refresh();
     } finally {
       setSubmitting(false);

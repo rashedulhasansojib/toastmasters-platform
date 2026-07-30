@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { submitAction } from '@/lib/toast';
 
 type DraftItem = { title: string; minutes: string; roleKey: string };
 
@@ -16,7 +17,6 @@ export function CreateAgendaTemplateForm({ clubUnitId }: { clubUnitId: string })
   const router = useRouter();
   const [name, setName] = useState('');
   const [items, setItems] = useState<DraftItem[]>([blankItem()]);
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   function updateItem(index: number, patch: Partial<DraftItem>) {
@@ -25,25 +25,29 @@ export function CreateAgendaTemplateForm({ clubUnitId }: { clubUnitId: string })
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/agenda-templates`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name,
-          items: items.map((item) => ({
-            title: item.title,
-            plannedDurationSeconds: Math.max(1, Number(item.minutes)) * 60,
-            roleKey: item.roleKey || null,
-          })),
-        }),
-      });
-      if (!res.ok) {
-        setError('Could not save that template.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/agenda-templates`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name,
+              items: items.map((item) => ({
+                title: item.title,
+                plannedDurationSeconds: Math.max(1, Number(item.minutes)) * 60,
+                roleKey: item.roleKey || null,
+              })),
+            }),
+          }),
+        {
+          loading: 'Saving template…',
+          success: 'Template saved',
+          error: 'Could not save that template.',
+        },
+      );
+      if (!result) return;
       setName('');
       setItems([blankItem()]);
       router.refresh();
@@ -126,7 +130,6 @@ export function CreateAgendaTemplateForm({ clubUnitId }: { clubUnitId: string })
           {submitting ? 'Saving…' : 'Save template'}
         </Button>
       </div>
-      {error && <p className="text-sm text-destructive">{error}</p>}
     </form>
   );
 }

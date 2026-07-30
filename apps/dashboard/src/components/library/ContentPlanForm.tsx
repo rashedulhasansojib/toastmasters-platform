@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { submitAction, toast } from '@/lib/toast';
 
 export function ContentPlanForm({
   clubUnitId,
@@ -25,32 +26,35 @@ export function ContentPlanForm({
   const [title, setTitle] = useState('');
   const [channel, setChannel] = useState<ContentPlanChannel>('facebook');
   const [scheduledFor, setScheduledFor] = useState('');
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!programYearId) {
-      setError('No active program year for this unit.');
+      toast.error('No active program year for this unit.');
       return;
     }
-    setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/content-plan`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          programYearId,
-          title,
-          channel,
-          scheduledFor: new Date(scheduledFor).toISOString(),
-        }),
-      });
-      if (!res.ok) {
-        setError('Could not save that plan item.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/content-plan`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              programYearId,
+              title,
+              channel,
+              scheduledFor: new Date(scheduledFor).toISOString(),
+            }),
+          }),
+        {
+          loading: 'Saving plan item…',
+          success: 'Plan item saved',
+          error: 'Could not save that plan item.',
+        },
+      );
+      if (!result) return;
       setTitle('');
       setScheduledFor('');
       router.refresh();
@@ -100,7 +104,6 @@ export function ContentPlanForm({
       <Button type="submit" disabled={submitting}>
         {submitting ? 'Saving…' : 'Add to plan'}
       </Button>
-      {error && <p className="w-full text-sm text-destructive">{error}</p>}
     </form>
   );
 }

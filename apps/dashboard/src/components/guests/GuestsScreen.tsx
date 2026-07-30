@@ -44,7 +44,7 @@ export function GuestsScreen({ clubUnitId, guests }: { clubUnitId: string; guest
   const [editTarget, setEditTarget] = useState<Guest | undefined>();
   const [moveTarget, setMoveTarget] = useState<Guest | null>(null);
 
-  const { moveTo, pendingId, error, clearError } = useGuestActions(clubUnitId);
+  const { moveTo, pendingId } = useGuestActions(clubUnitId);
 
   const counts = useMemo(() => {
     const base = Object.fromEntries(PIPELINE_STATUSES.map((s) => [s, 0])) as Record<
@@ -187,18 +187,6 @@ export function GuestsScreen({ clubUnitId, guests }: { clubUnitId: string; guest
         </div>
       </div>
 
-      {error && (
-        <div
-          role="alert"
-          className="flex items-start justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-        >
-          <span>{error}</span>
-          <button type="button" onClick={clearError} className="shrink-0 underline">
-            Dismiss
-          </button>
-        </div>
-      )}
-
       {view === 'list' && (
         <div className="flex flex-col gap-4">
           {/* Wraps rather than scrolls: a horizontal rail hid the later stages
@@ -317,7 +305,6 @@ export function GuestsScreen({ clubUnitId, guests }: { clubUnitId: string; guest
         onOpenChange={(open) => !open && setMoveTarget(null)}
         onMove={moveTo}
         pending={pendingId !== null}
-        error={error}
       />
     </div>
   );

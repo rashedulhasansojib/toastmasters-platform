@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { getSession, getSwitchableUnits } from '@/lib/session';
 import { AppShell } from '@/components/app-shell/AppShell';
+import { Toaster } from '@/components/ui/sonner';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -31,6 +32,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             {children}
           </>
         )}
+        <Toaster />
       </body>
     </html>
   );

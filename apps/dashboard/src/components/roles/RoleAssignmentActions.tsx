@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { submitAction } from '@/lib/toast';
 
 export function RoleAssignmentActions({
   clubUnitId,
@@ -18,26 +19,29 @@ export function RoleAssignmentActions({
   const [declining, setDeclining] = useState(false);
   const [reason, setReason] = useState('');
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   async function decide(status: 'confirmed' | 'declined') {
     setPending(true);
-    setError(null);
     try {
-      const res = await fetch(
-        `/api/clubs/${clubUnitId}/meetings/${meetingId}/role-assignments/${roleAssignmentId}`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(
-            status === 'declined' && reason ? { status, declinedReason: reason } : { status },
+      const result = await submitAction(
+        () =>
+          fetch(
+            `/api/clubs/${clubUnitId}/meetings/${meetingId}/role-assignments/${roleAssignmentId}`,
+            {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(
+                status === 'declined' && reason ? { status, declinedReason: reason } : { status },
+              ),
+            },
           ),
+        {
+          loading: 'Updating role…',
+          success: 'Role updated',
+          error: 'Could not update that role.',
         },
       );
-      if (!res.ok) {
-        setError('Could not update that role.');
-        return;
-      }
+      if (!result) return;
       router.refresh();
     } finally {
       setPending(false);
@@ -64,7 +68,6 @@ export function RoleAssignmentActions({
         <Button size="sm" variant="ghost" disabled={pending} onClick={() => setDeclining(false)}>
           Cancel
         </Button>
-        {error && <p className="text-sm text-destructive">{error}</p>}
       </div>
     );
   }
@@ -77,7 +80,6 @@ export function RoleAssignmentActions({
       <Button size="sm" variant="outline" disabled={pending} onClick={() => setDeclining(true)}>
         Decline
       </Button>
-      {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
   );
 }

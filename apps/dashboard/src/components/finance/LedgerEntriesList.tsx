@@ -6,6 +6,7 @@ import type { LedgerEntry } from '@toastmasters/contracts';
 import { Card, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
+import { submitAction } from '@/lib/toast';
 
 function ReverseEntryButton({ clubUnitId, entryId }: { clubUnitId: string; entryId: string }) {
   const router = useRouter();
@@ -16,11 +17,20 @@ function ReverseEntryButton({ clubUnitId, entryId }: { clubUnitId: string; entry
     if (!reason) return;
     setSubmitting(true);
     try {
-      await fetch(`/api/clubs/${clubUnitId}/ledger-entries/${entryId}/reverse`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason }),
-      });
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/ledger-entries/${entryId}/reverse`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason }),
+          }),
+        {
+          loading: 'Reversing entry…',
+          success: 'Entry reversed',
+          error: 'Could not reverse that entry.',
+        },
+      );
+      if (!result) return;
       router.refresh();
     } finally {
       setSubmitting(false);

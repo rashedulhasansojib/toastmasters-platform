@@ -6,6 +6,7 @@ import type { ClubDuesSettings } from '@toastmasters/contracts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { submitAction } from '@/lib/toast';
 
 export function DuesSettingsForm({
   clubUnitId,
@@ -22,27 +23,30 @@ export function DuesSettingsForm({
     settings?.tiDuesAmount != null ? String(settings.tiDuesAmount) : '',
   );
   const [currency, setCurrency] = useState(settings?.currency ?? 'USD');
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/dues-settings`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          localDuesAmount: localDuesAmount ? Number(localDuesAmount) : undefined,
-          tiDuesAmount: tiDuesAmount ? Number(tiDuesAmount) : undefined,
-          currency: currency || undefined,
-        }),
-      });
-      if (!res.ok) {
-        setError('Could not save dues settings.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/dues-settings`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              localDuesAmount: localDuesAmount ? Number(localDuesAmount) : undefined,
+              tiDuesAmount: tiDuesAmount ? Number(tiDuesAmount) : undefined,
+              currency: currency || undefined,
+            }),
+          }),
+        {
+          loading: 'Saving dues rates…',
+          success: 'Dues rates saved',
+          error: 'Could not save dues settings.',
+        },
+      );
+      if (!result) return;
       router.refresh();
     } finally {
       setSubmitting(false);
@@ -80,7 +84,6 @@ export function DuesSettingsForm({
       <Button type="submit" disabled={submitting}>
         {submitting ? 'Saving…' : 'Save dues rates'}
       </Button>
-      {error && <p className="w-full text-sm text-destructive">{error}</p>}
     </form>
   );
 }

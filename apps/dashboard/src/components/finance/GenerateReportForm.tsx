@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { submitAction, toast } from '@/lib/toast';
 
 type ReportType = 'monthly' | 'quarterly' | 'annual' | 'handover';
 
@@ -26,27 +27,30 @@ export function GenerateReportForm({
   const [type, setType] = useState<ReportType>('monthly');
   const [periodFrom, setPeriodFrom] = useState('');
   const [periodTo, setPeriodTo] = useState('');
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!programYearId) {
-      setError('No active program year for this unit.');
+      toast.error('No active program year for this unit.');
       return;
     }
-    setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/financial-reports`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ programYearId, type, periodFrom, periodTo }),
-      });
-      if (!res.ok) {
-        setError('Could not generate that report.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/financial-reports`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ programYearId, type, periodFrom, periodTo }),
+          }),
+        {
+          loading: 'Generating report…',
+          success: 'Report generated',
+          error: 'Could not generate that report.',
+        },
+      );
+      if (!result) return;
       router.refresh();
     } finally {
       setSubmitting(false);
@@ -92,7 +96,6 @@ export function GenerateReportForm({
       <Button type="submit" disabled={submitting}>
         {submitting ? 'Generating…' : 'Generate report'}
       </Button>
-      {error && <p className="w-full text-sm text-destructive">{error}</p>}
     </form>
   );
 }

@@ -7,6 +7,7 @@ import type { MeetingLiveRecord, MeetingRoleAssignment } from '@toastmasters/con
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { submitAction } from '@/lib/toast';
 import { MemberCombobox } from '../MemberCombobox';
 import { useMemberName } from '../MembersContext';
 import { EmptyState, TabSectionHeading } from '../primitives';
@@ -50,7 +51,6 @@ export function AhCounterTab({
   const [newName, setNewName] = useState('');
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   /** Seed one row per person on the agenda — speakers and evaluators alike. */
   const seeded = useMemo<CountedSpeaker[]>(
@@ -156,28 +156,37 @@ export function AhCounterTab({
   /** One record per speaker; a stable clientKey makes the retry idempotent. */
   async function saveReport() {
     setSaving(true);
-    setError(null);
     try {
-      for (const speaker of speakers) {
-        const counts = fillerWords
-          .map((word) => ({ word, count: speaker.counts[word] ?? 0 }))
-          .filter((c) => c.count > 0);
-        if (counts.length === 0) continue;
-        const res = await fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/live-records`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            kind: 'ah_counter',
-            clientKey: speaker.clientKey,
-            targetLabel: speaker.name,
-            payload: { counts },
-          }),
-        });
-        if (!res.ok) {
-          setError('Could not save the report — press Save again to retry.');
-          return;
-        }
-      }
+      const result = await submitAction(
+        async () => {
+          for (const speaker of speakers) {
+            const counts = fillerWords
+              .map((word) => ({ word, count: speaker.counts[word] ?? 0 }))
+              .filter((c) => c.count > 0);
+            if (counts.length === 0) continue;
+            const res = await fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/live-records`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                kind: 'ah_counter',
+                clientKey: speaker.clientKey,
+                targetLabel: speaker.name,
+                payload: { counts },
+              }),
+            });
+            if (!res.ok) {
+              throw new Error('Could not save the report — press Save again to retry.');
+            }
+          }
+          return true;
+        },
+        {
+          loading: 'Saving report…',
+          success: 'Report saved',
+          error: 'Could not save the report — press Save again to retry.',
+        },
+      );
+      if (!result) return;
       router.refresh();
     } finally {
       setSaving(false);
@@ -189,12 +198,6 @@ export function AhCounterTab({
 
   return (
     <div className="flex flex-col gap-5">
-      {error && (
-        <p role="alert" className="text-xs text-destructive">
-          {error}
-        </p>
-      )}
-
       {/* Filler words */}
       <section className="flex flex-col gap-2">
         <TabSectionHeading>Filler Words</TabSectionHeading>

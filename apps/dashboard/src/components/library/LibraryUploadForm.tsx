@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { submitAction } from '@/lib/toast';
 
 /** Governance docs are created under a different route/resource (`library.governance_document`) than everything else (`library.item`) — see the M5 plan doc's "two library resources" note. `isGovernance` picks the base path; the category field is hidden and forced when true. */
 export function LibraryUploadForm({
@@ -32,12 +33,10 @@ export function LibraryUploadForm({
   const [file, setFile] = useState<File | null>(null);
   const [externalUrl, setExternalUrl] = useState('');
   const [reviewBy, setReviewBy] = useState('');
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
     setSubmitting(true);
     try {
       let fileUrl: string | undefined;
@@ -45,44 +44,55 @@ export function LibraryUploadForm({
       let fileSizeBytes: number | undefined;
 
       if (file) {
-        const urlRes = await fetch(`/api/clubs/${clubUnitId}/${base}/upload-url`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contentType: file.type || 'application/octet-stream' }),
-        });
-        if (!urlRes.ok) {
-          setError('Could not get an upload URL.');
-          return;
-        }
+        const urlRes = await submitAction(
+          () =>
+            fetch(`/api/clubs/${clubUnitId}/${base}/upload-url`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ contentType: file.type || 'application/octet-stream' }),
+            }),
+          {
+            loading: 'Requesting upload URL…',
+            success: 'Upload URL ready',
+            error: 'Could not get an upload URL.',
+          },
+        );
+        if (!urlRes) return;
         const { url, key } = (await urlRes.json()) as { url: string; key: string };
-        const putRes = await fetch(url, { method: 'PUT', body: file });
-        if (!putRes.ok) {
-          setError('Upload failed.');
-          return;
-        }
+        const putRes = await submitAction(() => fetch(url, { method: 'PUT', body: file }), {
+          loading: 'Uploading file…',
+          success: 'File uploaded',
+          error: 'Upload failed.',
+        });
+        if (!putRes) return;
         fileUrl = key;
         fileMimeType = file.type || 'application/octet-stream';
         fileSizeBytes = file.size;
       }
 
-      const res = await fetch(`/api/clubs/${clubUnitId}/${base}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          kind,
-          title,
-          ...(isGovernance ? {} : { category }),
-          fileUrl,
-          fileMimeType,
-          fileSizeBytes,
-          externalUrl: externalUrl || undefined,
-          reviewBy: reviewBy || undefined,
-        }),
-      });
-      if (!res.ok) {
-        setError('Could not save that item.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/${base}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              kind,
+              title,
+              ...(isGovernance ? {} : { category }),
+              fileUrl,
+              fileMimeType,
+              fileSizeBytes,
+              externalUrl: externalUrl || undefined,
+              reviewBy: reviewBy || undefined,
+            }),
+          }),
+        {
+          loading: 'Saving item…',
+          success: 'Item saved',
+          error: 'Could not save that item.',
+        },
+      );
+      if (!result) return;
       setTitle('');
       setFile(null);
       setExternalUrl('');
@@ -170,7 +180,6 @@ export function LibraryUploadForm({
       <Button type="submit" disabled={submitting}>
         {submitting ? 'Saving…' : 'Add'}
       </Button>
-      {error && <p className="w-full text-sm text-destructive">{error}</p>}
     </form>
   );
 }

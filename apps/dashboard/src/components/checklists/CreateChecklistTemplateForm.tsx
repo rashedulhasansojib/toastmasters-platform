@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { submitAction } from '@/lib/toast';
 
 type DraftItem = { key: string; label: string; ownerRole: string; phase: ChecklistPhase };
 
@@ -28,7 +29,6 @@ export function CreateChecklistTemplateForm({ clubUnitId }: { clubUnitId: string
   const [name, setName] = useState('');
   const [appliesTo, setAppliesTo] = useState<ChecklistAppliesTo>('meeting');
   const [items, setItems] = useState<DraftItem[]>([blankItem()]);
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   function updateItem(index: number, patch: Partial<DraftItem>) {
@@ -37,27 +37,31 @@ export function CreateChecklistTemplateForm({ clubUnitId }: { clubUnitId: string
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/checklist-templates`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name,
-          appliesTo,
-          items: items.map((item) => ({
-            key: item.key,
-            label: item.label,
-            ownerRole: item.ownerRole || null,
-            phase: item.phase,
-          })),
-        }),
-      });
-      if (!res.ok) {
-        setError('Could not save that checklist.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/checklist-templates`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name,
+              appliesTo,
+              items: items.map((item) => ({
+                key: item.key,
+                label: item.label,
+                ownerRole: item.ownerRole || null,
+                phase: item.phase,
+              })),
+            }),
+          }),
+        {
+          loading: 'Saving checklist…',
+          success: 'Checklist saved',
+          error: 'Could not save that checklist.',
+        },
+      );
+      if (!result) return;
       setName('');
       setItems([blankItem()]);
       router.refresh();
@@ -174,7 +178,6 @@ export function CreateChecklistTemplateForm({ clubUnitId }: { clubUnitId: string
           {submitting ? 'Saving…' : 'Save checklist'}
         </Button>
       </div>
-      {error && <p className="text-sm text-destructive">{error}</p>}
     </form>
   );
 }

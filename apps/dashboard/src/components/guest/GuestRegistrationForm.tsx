@@ -4,6 +4,7 @@ import { useState, type FormEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { submitAction } from '@/lib/toast';
 
 /** M4 Slice 10: the form behind a `guest_register` capability-token link — no session, no account. */
 export function GuestRegistrationForm({ token }: { token: string }) {
@@ -12,26 +13,29 @@ export function GuestRegistrationForm({ token }: { token: string }) {
   const [phone, setPhone] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/public/capability-tokens/${token}/guest-registration`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fullName,
-          email: email || undefined,
-          phone: phone || undefined,
-        }),
-      });
-      if (!res.ok) {
-        setError('Could not register — this link may have expired.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/public/capability-tokens/${token}/guest-registration`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fullName,
+              email: email || undefined,
+              phone: phone || undefined,
+            }),
+          }),
+        {
+          loading: 'Submitting…',
+          success: 'Registered',
+          error: 'Could not register — this link may have expired.',
+        },
+      );
+      if (!result) return;
       setDone(true);
     } finally {
       setSubmitting(false);
@@ -73,7 +77,6 @@ export function GuestRegistrationForm({ token }: { token: string }) {
       <Button type="submit" disabled={submitting}>
         {submitting ? 'Submitting…' : "I'm interested"}
       </Button>
-      {error && <p className="text-sm text-destructive">{error}</p>}
     </form>
   );
 }

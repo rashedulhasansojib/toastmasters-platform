@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { submitAction, toast } from '@/lib/toast';
 
 /** No area picker yet (scope cut) — the filing Area Director enters their own area's id. */
 export function ContactLogPanel({
@@ -30,35 +31,38 @@ export function ContactLogPanel({
   const [areaUnitId, setAreaUnitId] = useState('');
   const [method, setMethod] = useState<PresidentContactMethod>('call');
   const [dcpDiscussed, setDcpDiscussed] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!areaUnitId || !programYearId) {
-      setError('Missing area or program year.');
+      toast.error('Missing area or program year.');
       return;
     }
-    setError(null);
     setSubmitting(true);
     try {
       const now = new Date();
-      const res = await fetch(`/api/clubs/${clubUnitId}/contact-log`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          areaUnitId,
-          programYearId,
-          month: now.toISOString().slice(0, 7),
-          contactedAt: now.toISOString(),
-          method,
-          dcpDiscussed,
-        }),
-      });
-      if (!res.ok) {
-        setError('Could not record that contact.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/contact-log`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              areaUnitId,
+              programYearId,
+              month: now.toISOString().slice(0, 7),
+              contactedAt: now.toISOString(),
+              method,
+              dcpDiscussed,
+            }),
+          }),
+        {
+          loading: 'Logging contact…',
+          success: 'Contact logged',
+          error: 'Could not record that contact.',
+        },
+      );
+      if (!result) return;
       router.refresh();
     } finally {
       setSubmitting(false);
@@ -103,7 +107,6 @@ export function ContactLogPanel({
         <Button type="submit" disabled={submitting}>
           {submitting ? 'Recording…' : 'Log contact'}
         </Button>
-        {error && <p className="w-full text-sm text-destructive">{error}</p>}
       </form>
       {logs.length === 0 ? (
         <p className="text-sm text-muted-foreground">No contact logged yet.</p>

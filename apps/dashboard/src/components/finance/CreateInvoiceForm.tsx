@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { submitAction, toast } from '@/lib/toast';
 
 export function CreateInvoiceForm({
   clubUnitId,
@@ -26,37 +27,40 @@ export function CreateInvoiceForm({
   const [issuedToName, setIssuedToName] = useState('');
   const [issuedToEmail, setIssuedToEmail] = useState('');
   const [dueOn, setDueOn] = useState('');
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!programYearId) {
-      setError('No active program year for this unit.');
+      toast.error('No active program year for this unit.');
       return;
     }
-    setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/invoices`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          programYearId,
-          duesRecordIds: duesRecordIds
-            .split(',')
-            .map((id) => id.trim())
-            .filter(Boolean),
-          issuedToKind,
-          issuedToName,
-          issuedToEmail: issuedToEmail || undefined,
-          dueOn,
-        }),
-      });
-      if (!res.ok) {
-        setError('Could not create that invoice.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/invoices`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              programYearId,
+              duesRecordIds: duesRecordIds
+                .split(',')
+                .map((id) => id.trim())
+                .filter(Boolean),
+              issuedToKind,
+              issuedToName,
+              issuedToEmail: issuedToEmail || undefined,
+              dueOn,
+            }),
+          }),
+        {
+          loading: 'Creating invoice…',
+          success: 'Invoice created',
+          error: 'Could not create that invoice.',
+        },
+      );
+      if (!result) return;
       setDuesRecordIds('');
       setIssuedToName('');
       setIssuedToEmail('');
@@ -125,7 +129,6 @@ export function CreateInvoiceForm({
       <Button type="submit" disabled={submitting}>
         {submitting ? 'Creating…' : 'Create invoice'}
       </Button>
-      {error && <p className="w-full text-sm text-destructive">{error}</p>}
     </form>
   );
 }

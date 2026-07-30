@@ -7,6 +7,7 @@ import type { MeetingResource } from '@toastmasters/contracts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { submitAction, toast } from '@/lib/toast';
 import { EmptyState, Field } from '../primitives';
 
 /**
@@ -26,34 +27,37 @@ export function ResourcesTab({
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
 
   const base = `/api/clubs/${clubUnitId}/meetings/${meetingId}/resources`;
 
   function add() {
     startTransition(async () => {
-      setError(null);
-      const res = await fetch(base, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: 'Untitled resource' }),
-      });
-      if (!res.ok) {
-        setError('Could not add a resource.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(base, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: 'Untitled resource' }),
+          }),
+        {
+          loading: 'Adding resource…',
+          success: 'Resource added',
+          error: 'Could not add a resource.',
+        },
+      );
+      if (!result) return;
       router.refresh();
     });
   }
 
   function remove(id: string) {
     startTransition(async () => {
-      setError(null);
-      const res = await fetch(`${base}/${id}`, { method: 'DELETE' });
-      if (!res.ok && res.status !== 204) {
-        setError('Could not delete that resource.');
-        return;
-      }
+      const result = await submitAction(() => fetch(`${base}/${id}`, { method: 'DELETE' }), {
+        loading: 'Deleting resource…',
+        success: 'Resource deleted',
+        error: 'Could not delete that resource.',
+      });
+      if (!result) return;
       router.refresh();
     });
   }
@@ -72,12 +76,6 @@ export function ResourcesTab({
           Add
         </Button>
       </div>
-
-      {error && (
-        <p role="alert" className="text-xs text-destructive">
-          {error}
-        </p>
-      )}
 
       {resources.length === 0 ? (
         <EmptyState
@@ -135,7 +133,7 @@ function ResourceCard({
 }) {
   const [title, setTitle] = useState(resource.title);
   const [description, setDescription] = useState(resource.description ?? '');
-  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [state, setState] = useState<'idle' | 'saving' | 'saved'>('idle');
   // Bumped on every keystroke; the effect below debounces off it, so the
   // save always sees the current values without a render-time ref write.
   const [dirtyAt, setDirtyAt] = useState(0);
@@ -157,9 +155,15 @@ function ResourceCard({
             description: description.trim() || null,
           }),
         });
-        setState(res.ok ? 'saved' : 'error');
+        if (res.ok) {
+          setState('saved');
+        } else {
+          setState('idle');
+          toast.error('Could not save that resource.');
+        }
       } catch {
-        setState('error');
+        setState('idle');
+        toast.error('Could not save that resource.');
       }
     }, SAVE_DELAY_MS);
     return () => clearTimeout(timer);
@@ -183,7 +187,6 @@ function ResourceCard({
           {state === 'saved' && (
             <span className="text-xs text-green-600 dark:text-green-500">Saved</span>
           )}
-          {state === 'error' && <span className="text-xs text-destructive">Save failed</span>}
           <Button
             type="button"
             variant="ghost"

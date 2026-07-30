@@ -5,29 +5,33 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { submitAction } from '@/lib/toast';
 
 export function AcceptInvitationForm({ token, email }: { token: string; email: string }) {
   const router = useRouter();
   const [fullName, setFullName] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    setError(null);
     setSubmitting(true);
     try {
-      const response = await fetch(`/api/invitations/${encodeURIComponent(token)}/accept`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fullName, password }),
-      });
-      if (!response.ok) {
-        setError('That invitation link is invalid, expired, or already used.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/invitations/${encodeURIComponent(token)}/accept`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fullName, password }),
+          }),
+        {
+          loading: 'Setting up your account…',
+          success: 'Account created',
+          error: 'That invitation link is invalid, expired, or already used.',
+        },
+      );
+      if (!result) return;
       setDone(true);
       setTimeout(() => router.push('/login'), 1500);
     } finally {
@@ -76,14 +80,6 @@ export function AcceptInvitationForm({ token, email }: { token: string; email: s
           className="h-11 rounded-xl"
         />
       </div>
-      {error && (
-        <p
-          role="alert"
-          className="rounded-lg bg-destructive/10 px-3 py-2.5 text-sm text-destructive"
-        >
-          {error}
-        </p>
-      )}
       <Button
         type="submit"
         disabled={submitting}

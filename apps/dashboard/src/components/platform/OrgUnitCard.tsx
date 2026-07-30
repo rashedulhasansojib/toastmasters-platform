@@ -18,6 +18,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { describeOrgUnitFailure } from '@/lib/org-unit-errors';
+import { submitAction } from '@/lib/toast';
 
 /** "N members" for a club (a leaf — `childCount` is its active member count); "N districts"/"N divisions"/… everywhere else. */
 function countLabel(unit: OrgUnitWithCount): string {
@@ -36,7 +37,6 @@ export function OrgUnitCard({
   const router = useRouter();
   const [renameOpen, setRenameOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   // The region root has no parent and is never deletable — the
   // single-root unique index depends on it existing.
@@ -46,13 +46,20 @@ export function OrgUnitCard({
   async function handleDelete(): Promise<void> {
     if (!confirm(`Delete ${unit.name}? This cannot be undone.`)) return;
     setBusy(true);
-    setError(null);
     try {
-      const response = await fetch(`/api/org-units/${unit.id}`, { method: 'DELETE' });
-      if (!response.ok) {
-        setError(await describeOrgUnitFailure(response));
-        return;
-      }
+      const result = await submitAction(
+        async () => {
+          const response = await fetch(`/api/org-units/${unit.id}`, { method: 'DELETE' });
+          if (!response.ok) throw new Error(await describeOrgUnitFailure(response));
+          return response;
+        },
+        {
+          loading: 'Deleting org unit…',
+          success: 'Org unit deleted',
+          error: `Could not delete ${unit.name}.`,
+        },
+      );
+      if (!result) return;
       router.refresh();
     } finally {
       setBusy(false);
@@ -65,11 +72,6 @@ export function OrgUnitCard({
       <span className="text-sm text-muted-foreground">
         {unit.code} · {countLabel(unit)}
       </span>
-      {error && (
-        <p role="alert" className="text-xs text-destructive">
-          {error}
-        </p>
-      )}
     </CardContent>
   );
 
@@ -143,23 +145,29 @@ function RenameForm({
   const router = useRouter();
   const [name, setName] = useState(unit.name);
   const [timezone, setTimezone] = useState(unit.timezone);
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    setError(null);
     setSubmitting(true);
     try {
-      const response = await fetch(`/api/org-units/${unit.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, timezone }),
-      });
-      if (!response.ok) {
-        setError(await describeOrgUnitFailure(response));
-        return;
-      }
+      const result = await submitAction(
+        async () => {
+          const response = await fetch(`/api/org-units/${unit.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, timezone }),
+          });
+          if (!response.ok) throw new Error(await describeOrgUnitFailure(response));
+          return response;
+        },
+        {
+          loading: 'Saving changes…',
+          success: 'Changes saved',
+          error: `Could not update ${unit.name}.`,
+        },
+      );
+      if (!result) return;
       onDone();
       router.refresh();
     } finally {
@@ -192,7 +200,6 @@ function RenameForm({
       <p className="text-xs text-muted-foreground">
         Code and tier are fixed — the code is part of the unit&apos;s tree path.
       </p>
-      {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <Button
           type="button"

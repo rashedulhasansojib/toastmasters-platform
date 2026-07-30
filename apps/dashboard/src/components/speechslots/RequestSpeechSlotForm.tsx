@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { submitAction } from '@/lib/toast';
 
 export function RequestSpeechSlotForm({
   clubUnitId,
@@ -18,28 +19,31 @@ export function RequestSpeechSlotForm({
   const [pathCode, setPathCode] = useState('');
   const [projectCode, setProjectCode] = useState('');
   const [minutes, setMinutes] = useState('7');
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/speech-slots`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title,
-          pathCode,
-          projectCode,
-          plannedDurationSeconds: Math.max(1, Number(minutes)) * 60,
-        }),
-      });
-      if (!res.ok) {
-        setError('Could not request that slot — check the path/project codes.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/speech-slots`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title,
+              pathCode,
+              projectCode,
+              plannedDurationSeconds: Math.max(1, Number(minutes)) * 60,
+            }),
+          }),
+        {
+          loading: 'Requesting slot…',
+          success: 'Slot requested',
+          error: 'Could not request that slot — check the path/project codes.',
+        },
+      );
+      if (!result) return;
       setTitle('');
       setPathCode('');
       setProjectCode('');
@@ -92,7 +96,6 @@ export function RequestSpeechSlotForm({
       <Button type="submit" disabled={submitting}>
         {submitting ? 'Requesting…' : 'Request slot'}
       </Button>
-      {error && <p className="w-full text-sm text-destructive">{error}</p>}
     </form>
   );
 }

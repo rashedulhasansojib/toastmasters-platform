@@ -8,6 +8,7 @@ import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { submitAction } from '@/lib/toast';
 
 function OptInToggle({ profile }: { profile: SupportProfile | null }) {
   const router = useRouter();
@@ -15,16 +16,26 @@ function OptInToggle({ profile }: { profile: SupportProfile | null }) {
 
   async function toggle() {
     setBusy(true);
+    const turningOn = !(profile?.isDiscoverable ?? false);
     try {
-      await fetch('/api/support-profile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          isDiscoverable: !(profile?.isDiscoverable ?? false),
-          consentVersion: '2026-1',
-          availableRoles: profile?.availableRoles ?? ['general_evaluator'],
-        }),
-      });
+      const result = await submitAction(
+        () =>
+          fetch('/api/support-profile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              isDiscoverable: turningOn,
+              consentVersion: '2026-1',
+              availableRoles: profile?.availableRoles ?? ['general_evaluator'],
+            }),
+          }),
+        {
+          loading: turningOn ? 'Opting in…' : 'Opting out…',
+          success: turningOn ? 'Opted in' : 'Opted out',
+          error: 'Could not update your preference.',
+        },
+      );
+      if (!result) return;
       router.refresh();
     } finally {
       setBusy(false);
@@ -48,27 +59,30 @@ function CreateRequestForm({ clubUnitId }: { clubUnitId: string }) {
   const router = useRouter();
   const [meetingId, setMeetingId] = useState('');
   const [roleKey, setRoleKey] = useState('general_evaluator');
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/support-requests`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          meetingId,
-          roleKey,
-          neededBy: new Date(Date.now() + 7 * 86_400_000).toISOString(),
-        }),
-      });
-      if (!res.ok) {
-        setError('Could not create that request.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/support-requests`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              meetingId,
+              roleKey,
+              neededBy: new Date(Date.now() + 7 * 86_400_000).toISOString(),
+            }),
+          }),
+        {
+          loading: 'Creating request…',
+          success: 'Request created',
+          error: 'Could not create that request.',
+        },
+      );
+      if (!result) return;
       setMeetingId('');
       router.refresh();
     } finally {
@@ -99,7 +113,6 @@ function CreateRequestForm({ clubUnitId }: { clubUnitId: string }) {
       <Button type="submit" disabled={submitting}>
         {submitting ? 'Requesting…' : 'Request cross-club support'}
       </Button>
-      {error && <p className="w-full text-sm text-destructive">{error}</p>}
     </form>
   );
 }
@@ -111,11 +124,20 @@ function RespondAction({ clubUnitId, request }: { clubUnitId: string; request: S
   async function respond(response: 'accepted' | 'declined') {
     setBusy(true);
     try {
-      await fetch(`/api/clubs/${clubUnitId}/support-requests/${request.id}/respond`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ response }),
-      });
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/support-requests/${request.id}/respond`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ response }),
+          }),
+        {
+          loading: response === 'accepted' ? 'Accepting…' : 'Declining…',
+          success: response === 'accepted' ? 'Accepted' : 'Declined',
+          error: 'Could not send your response.',
+        },
+      );
+      if (!result) return;
       router.refresh();
     } finally {
       setBusy(false);

@@ -11,6 +11,7 @@ import type {
 } from '@toastmasters/contracts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { submitAction } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 
 /** One line of the member's path: a catalogue project, plus what they have delivered against it. */
@@ -98,22 +99,22 @@ function ApprovalActions({
   const [busy, setBusy] = useState(false);
   const [denying, setDenying] = useState(false);
   const [reason, setReason] = useState('');
-  const [error, setError] = useState<string | null>(null);
 
   async function approve() {
     setBusy(true);
-    setError(null);
     try {
-      const res = await fetch(
-        `/api/clubs/${clubUnitId}/education/approvals/${approvalId}/approve`,
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/education/approvals/${approvalId}/approve`, {
+            method: 'POST',
+          }),
         {
-          method: 'POST',
+          loading: 'Approving…',
+          success: 'Approved',
+          error: 'Could not approve.',
         },
       );
-      if (!res.ok) {
-        setError('Could not approve.');
-        return;
-      }
+      if (!result) return;
       onDone();
       router.refresh();
     } finally {
@@ -124,17 +125,21 @@ function ApprovalActions({
   async function submitDeny(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
-    setError(null);
     try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/education/approvals/${approvalId}/deny`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: reason.trim() }),
-      });
-      if (!res.ok) {
-        setError('Could not deny.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/education/approvals/${approvalId}/deny`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason: reason.trim() }),
+          }),
+        {
+          loading: 'Denying…',
+          success: 'Denied',
+          error: 'Could not deny.',
+        },
+      );
+      if (!result) return;
       setDenying(false);
       setReason('');
       onDone();
@@ -168,14 +173,12 @@ function ApprovalActions({
             onClick={() => {
               setDenying(false);
               setReason('');
-              setError(null);
             }}
             disabled={busy}
           >
             Cancel
           </Button>
         </div>
-        {error && <p className="text-xs text-destructive">{error}</p>}
       </form>
     );
   }
@@ -194,7 +197,6 @@ function ApprovalActions({
       >
         Deny
       </Button>
-      {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   );
 }

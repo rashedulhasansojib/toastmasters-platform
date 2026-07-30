@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import { submitAction } from '@/lib/toast';
 
 export function SpeechSlotActions({
   clubUnitId,
@@ -15,24 +16,24 @@ export function SpeechSlotActions({
 }) {
   const router = useRouter();
   const [pending, setPending] = useState<'approved' | 'declined' | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   async function decide(status: 'approved' | 'declined') {
     setPending(status);
-    setError(null);
     try {
-      const res = await fetch(
-        `/api/clubs/${clubUnitId}/meetings/${meetingId}/speech-slots/${speechSlotId}`,
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/speech-slots/${speechSlotId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status }),
+          }),
         {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status }),
+          loading: status === 'approved' ? 'Approving slot…' : 'Declining slot…',
+          success: status === 'approved' ? 'Slot approved' : 'Slot declined',
+          error: 'Could not update that request.',
         },
       );
-      if (!res.ok) {
-        setError('Could not update that request.');
-        return;
-      }
+      if (!result) return;
       router.refresh();
     } finally {
       setPending(null);
@@ -52,7 +53,6 @@ export function SpeechSlotActions({
       >
         Decline
       </Button>
-      {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
   );
 }

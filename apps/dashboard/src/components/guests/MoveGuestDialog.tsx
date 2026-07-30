@@ -22,14 +22,12 @@ export function MoveGuestDialog({
   onOpenChange,
   onMove,
   pending,
-  error,
 }: {
   guest: Guest | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onMove: (guestId: string, target: GuestPipelineStatus) => Promise<boolean>;
   pending: boolean;
-  error: string | null;
 }) {
   if (!guest) return null;
 
@@ -88,8 +86,6 @@ export function MoveGuestDialog({
           </span>
         </button>
       </div>
-
-      {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
     </Dialog>
   );
 }

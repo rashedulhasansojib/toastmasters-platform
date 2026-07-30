@@ -8,28 +8,32 @@ import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { submitAction } from '@/lib/toast';
 
 function CreateForm({ clubUnitId }: { clubUnitId: string }) {
   const router = useRouter();
   const [personId, setPersonId] = useState('');
   const [pathCode, setPathCode] = useState('PM');
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/education-records`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ personId, pathCode }),
-      });
-      if (!res.ok) {
-        setError('Could not create that education record.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/education-records`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ personId, pathCode }),
+          }),
+        {
+          loading: 'Creating education record…',
+          success: 'Education record created',
+          error: 'Could not create that education record.',
+        },
+      );
+      if (!result) return;
       setPersonId('');
       router.refresh();
     } finally {
@@ -60,7 +64,6 @@ function CreateForm({ clubUnitId }: { clubUnitId: string }) {
       <Button type="submit" disabled={submitting}>
         {submitting ? 'Creating…' : 'Start education record'}
       </Button>
-      {error && <p className="w-full text-sm text-destructive">{error}</p>}
     </form>
   );
 }
@@ -81,11 +84,19 @@ function LevelActions({
   async function markComplete() {
     setBusy(true);
     try {
-      const res = await fetch(
-        `/api/clubs/${clubUnitId}/education-records/${record.id}/levels/${level}/mark-complete`,
-        { method: 'POST' },
+      const result = await submitAction(
+        () =>
+          fetch(
+            `/api/clubs/${clubUnitId}/education-records/${record.id}/levels/${level}/mark-complete`,
+            { method: 'POST' },
+          ),
+        {
+          loading: 'Marking level complete…',
+          success: 'Level marked complete',
+          error: 'Not all projects for this level are delivered yet.',
+        },
       );
-      if (!res.ok) window.alert('Not all projects for this level are delivered yet.');
+      if (!result) return;
       router.refresh();
     } finally {
       setBusy(false);
@@ -95,12 +106,18 @@ function LevelActions({
   async function confirm() {
     setBusy(true);
     try {
-      await fetch(
-        `/api/clubs/${clubUnitId}/education-records/${record.id}/levels/${level}/confirm`,
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/education-records/${record.id}/levels/${level}/confirm`, {
+            method: 'POST',
+          }),
         {
-          method: 'POST',
+          loading: 'Confirming level…',
+          success: 'Level confirmed',
+          error: 'Could not confirm that level.',
         },
       );
+      if (!result) return;
       router.refresh();
     } finally {
       setBusy(false);

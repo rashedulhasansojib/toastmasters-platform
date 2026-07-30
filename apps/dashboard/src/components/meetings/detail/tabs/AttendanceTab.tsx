@@ -6,6 +6,7 @@ import { CheckCircle2, Circle, Users } from 'lucide-react';
 import type { MeetingAttendanceRosterEntry } from '@toastmasters/contracts';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { toast } from '@/lib/toast';
 import { EmptyState } from '../primitives';
 
 /**
@@ -28,7 +29,6 @@ export function AttendanceTab({
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
   // Reflect the tap immediately; the server round-trip reconciles on refresh.
   const [optimistic, setOptimistic] = useState<Record<string, boolean>>({});
 
@@ -48,14 +48,13 @@ export function AttendanceTab({
       return next;
     });
     startTransition(async () => {
-      setError(null);
       const res = await fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/attendance`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entries }),
       });
       if (!res.ok) {
-        setError('Could not save attendance — try again.');
+        toast.error('Could not save attendance — try again.');
         setOptimistic({});
         return;
       }
@@ -85,12 +84,6 @@ export function AttendanceTab({
           )}
         </div>
       </div>
-
-      {error && (
-        <p role="alert" className="text-xs text-destructive">
-          {error}
-        </p>
-      )}
 
       {roster.length === 0 ? (
         <EmptyState

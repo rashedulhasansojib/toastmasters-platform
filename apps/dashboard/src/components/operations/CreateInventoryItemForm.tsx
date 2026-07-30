@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { submitAction } from '@/lib/toast';
 
 export function CreateInventoryItemForm({ clubUnitId }: { clubUnitId: string }) {
   const router = useRouter();
@@ -21,29 +22,32 @@ export function CreateInventoryItemForm({ clubUnitId }: { clubUnitId: string }) 
   const [unit, setUnit] = useState('unit');
   const [openingQuantity, setOpeningQuantity] = useState('1');
   const [location, setLocation] = useState('');
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/inventory`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name,
-          category,
-          unit,
-          openingQuantity: Number(openingQuantity),
-          location: location || undefined,
-        }),
-      });
-      if (!res.ok) {
-        setError('Could not add that item.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/inventory`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name,
+              category,
+              unit,
+              openingQuantity: Number(openingQuantity),
+              location: location || undefined,
+            }),
+          }),
+        {
+          loading: 'Adding item…',
+          success: 'Item added',
+          error: 'Could not add that item.',
+        },
+      );
+      if (!result) return;
       setName('');
       setLocation('');
       router.refresh();
@@ -97,7 +101,6 @@ export function CreateInventoryItemForm({ clubUnitId }: { clubUnitId: string }) 
       <Button type="submit" disabled={submitting}>
         {submitting ? 'Adding…' : 'Add item'}
       </Button>
-      {error && <p className="w-full text-sm text-destructive">{error}</p>}
     </form>
   );
 }

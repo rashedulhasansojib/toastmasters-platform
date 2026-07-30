@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
+import { submitAction, toast } from '@/lib/toast';
 
 type Mode = 'blank' | 'template';
 
@@ -54,7 +55,6 @@ export function NewMeetingDialog({
   const [meetingNumber, setMeetingNumber] = useState('');
   const [theme, setTheme] = useState('');
   const [creating, setCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const selectedTemplate = templates.find((t) => t.id === templateId) ?? null;
 
@@ -65,7 +65,6 @@ export function NewMeetingDialog({
     setStartTime('18:00');
     setMeetingNumber('');
     setTheme('');
-    setError(null);
     setDismissed(false);
     setManuallyOpen(true);
   }
@@ -79,54 +78,56 @@ export function NewMeetingDialog({
 
   async function create() {
     if (!programYearId) {
-      setError('No active program year for this club — set one before creating a meeting.');
+      toast.error('No active program year for this club — set one before creating a meeting.');
       return;
     }
     if (!date || !startTime) {
-      setError('Pick a date and a start time.');
+      toast.error('Pick a date and a start time.');
       return;
     }
     if (mode === 'template' && !selectedTemplate) {
-      setError('Choose a template, or start blank.');
+      toast.error('Choose a template, or start blank.');
       return;
     }
 
     setCreating(true);
-    setError(null);
     try {
       const scheduledAt = new Date(`${date}T${startTime}:00`).toISOString();
       const number =
         meetingNumber.trim() && Number(meetingNumber) > 0 ? Number(meetingNumber) : undefined;
 
-      const res =
-        mode === 'template' && selectedTemplate
-          ? await fetch(`/api/clubs/${clubUnitId}/meeting-templates/create-meeting`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                templateId: selectedTemplate.id,
-                programYearId,
-                scheduledAt,
-                ...(number ? { meetingNumber: number } : {}),
-                ...(theme.trim() ? { theme: theme.trim() } : {}),
+      const result = await submitAction(
+        () =>
+          mode === 'template' && selectedTemplate
+            ? fetch(`/api/clubs/${clubUnitId}/meeting-templates/create-meeting`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  templateId: selectedTemplate.id,
+                  programYearId,
+                  scheduledAt,
+                  ...(number ? { meetingNumber: number } : {}),
+                  ...(theme.trim() ? { theme: theme.trim() } : {}),
+                }),
+              })
+            : fetch(`/api/clubs/${clubUnitId}/meetings`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  programYearId,
+                  scheduledAt,
+                  ...(number ? { meetingNumber: number } : {}),
+                  ...(theme.trim() ? { theme: theme.trim() } : {}),
+                } satisfies CreateMeetingRequest),
               }),
-            })
-          : await fetch(`/api/clubs/${clubUnitId}/meetings`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                programYearId,
-                scheduledAt,
-                ...(number ? { meetingNumber: number } : {}),
-                ...(theme.trim() ? { theme: theme.trim() } : {}),
-              } satisfies CreateMeetingRequest),
-            });
-
-      if (!res.ok) {
-        setError('Could not create the meeting.');
-        return;
-      }
-      const meeting: Meeting = await res.json();
+        {
+          loading: 'Creating meeting…',
+          success: 'Meeting created',
+          error: 'Could not create the meeting.',
+        },
+      );
+      if (!result) return;
+      const meeting: Meeting = await result.json();
       setOpen(false);
       router.push(`/clubs/${clubUnitId}/meetings/${meeting.id}`);
       router.refresh();
@@ -277,12 +278,6 @@ export function NewMeetingDialog({
                 />
               </div>
             </div>
-
-            {error && (
-              <p role="alert" className="text-sm text-destructive">
-                {error}
-              </p>
-            )}
 
             <div className="flex justify-end gap-2">
               <Button type="button" variant="ghost" onClick={() => setOpen(false)}>

@@ -8,32 +8,36 @@ import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { submitAction, toast } from '@/lib/toast';
 
 function EnrollForm({ clubUnitId, tracks }: { clubUnitId: string; tracks: OnboardingTrack[] }) {
   const router = useRouter();
   const [personId, setPersonId] = useState('');
   const [trackId, setTrackId] = useState(tracks[0]?.id ?? '');
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!trackId) {
-      setError('No track selected.');
+      toast.error('No track selected.');
       return;
     }
-    setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/onboarding-progress`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ personId, trackId }),
-      });
-      if (!res.ok) {
-        setError('Could not enrol that person.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/onboarding-progress`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ personId, trackId }),
+          }),
+        {
+          loading: 'Enrolling…',
+          success: 'Enrolled',
+          error: 'Could not enrol that person.',
+        },
+      );
+      if (!result) return;
       setPersonId('');
       router.refresh();
     } finally {
@@ -76,7 +80,6 @@ function EnrollForm({ clubUnitId, tracks }: { clubUnitId: string; tracks: Onboar
       <Button type="submit" disabled={submitting}>
         {submitting ? 'Enrolling…' : 'Enrol'}
       </Button>
-      {error && <p className="w-full text-sm text-destructive">{error}</p>}
     </form>
   );
 }
@@ -96,10 +99,19 @@ function ProgressStep({
   async function complete() {
     setBusy(true);
     try {
-      await fetch(
-        `/api/clubs/${clubUnitId}/onboarding-progress/${progress.id}/steps/${step.key}/complete`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+      const result = await submitAction(
+        () =>
+          fetch(
+            `/api/clubs/${clubUnitId}/onboarding-progress/${progress.id}/steps/${step.key}/complete`,
+            { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+          ),
+        {
+          loading: 'Marking step done…',
+          success: 'Step marked done',
+          error: 'Could not mark that step done.',
+        },
       );
+      if (!result) return;
       router.refresh();
     } finally {
       setBusy(false);
@@ -129,26 +141,35 @@ function QuickCreateTrackButton({ clubUnitId }: { clubUnitId: string }) {
     if (!name) return;
     setBusy(true);
     try {
-      await fetch(`/api/clubs/${clubUnitId}/onboarding-tracks`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name,
-          audience: 'new_member',
-          steps: [
-            {
-              key: 'meet-officers',
-              order: 1,
-              title: 'Meet the club officers',
-              type: 'meet',
-              body: null,
-              libraryItemId: null,
-              dueWithinDays: 14,
-              isRequired: true,
-            },
-          ],
-        }),
-      });
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/onboarding-tracks`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name,
+              audience: 'new_member',
+              steps: [
+                {
+                  key: 'meet-officers',
+                  order: 1,
+                  title: 'Meet the club officers',
+                  type: 'meet',
+                  body: null,
+                  libraryItemId: null,
+                  dueWithinDays: 14,
+                  isRequired: true,
+                },
+              ],
+            }),
+          }),
+        {
+          loading: 'Creating track…',
+          success: 'Track created',
+          error: 'Could not create that track.',
+        },
+      );
+      if (!result) return;
       router.refresh();
     } finally {
       setBusy(false);

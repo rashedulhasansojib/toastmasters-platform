@@ -7,6 +7,7 @@ import type { MeetingLiveRecord, MeetingRoleAssignment, SpeechSlot } from '@toas
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { submitAction } from '@/lib/toast';
 import { MemberCombobox } from '../MemberCombobox';
 import { useMemberName } from '../MembersContext';
 import { EmptyState, TabSectionHeading } from '../primitives';
@@ -158,7 +159,6 @@ export function TimerReportTab({
   // render is pure and the displayed time only advances on a tick.
   const [now, setNow] = useState<number>(() => Date.now());
   const [adding, setAdding] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const entries = useMemo<Entry[]>(
     () => [...seeded, ...manual].map((entry) => ({ ...entry, ...overrides[entry.id] })),
@@ -271,34 +271,34 @@ export function TimerReportTab({
    * same row rather than creating a duplicate.
    */
   async function recordEntry(entry: Entry) {
-    setError(null);
-    try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/live-records`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          kind: 'timer',
-          clientKey: entry.clientKey,
-          targetLabel: entry.label,
-          payload: {
-            category: flagsFor(entry.category).label,
-            elapsedMs: entry.elapsed * 1000,
-            signal:
-              flagAt(entry.elapsed, entry.category) === 'none'
-                ? null
-                : flagAt(entry.elapsed, entry.category),
-          },
+    const result = await submitAction(
+      () =>
+        fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/live-records`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            kind: 'timer',
+            clientKey: entry.clientKey,
+            targetLabel: entry.label,
+            payload: {
+              category: flagsFor(entry.category).label,
+              elapsedMs: entry.elapsed * 1000,
+              signal:
+                flagAt(entry.elapsed, entry.category) === 'none'
+                  ? null
+                  : flagAt(entry.elapsed, entry.category),
+            },
+          }),
         }),
-      });
-      if (!res.ok) {
-        setError('Could not save that timing — press Stop again to retry.');
-        return;
-      }
-      patch(entry.id, { recorded: true });
-      router.refresh();
-    } catch {
-      setError('Could not save that timing — press Stop again to retry.');
-    }
+      {
+        loading: 'Saving timing…',
+        success: 'Timing saved',
+        error: 'Could not save that timing — press Stop again to retry.',
+      },
+    );
+    if (!result) return;
+    patch(entry.id, { recorded: true });
+    router.refresh();
   }
 
   const selected = entries.find((e) => e.id === activeId) ?? null;
@@ -323,12 +323,6 @@ export function TimerReportTab({
 
   return (
     <div className="flex flex-col gap-5">
-      {error && (
-        <p role="alert" className="text-xs text-destructive">
-          {error}
-        </p>
-      )}
-
       {/* Active timer panel */}
       {selected ? (
         <ActivePanel

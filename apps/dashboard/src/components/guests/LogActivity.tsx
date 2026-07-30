@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { submitAction } from '@/lib/toast';
 import { CHANNELS, CHANNEL_LABEL } from './pipeline';
 
 /**
@@ -69,27 +70,28 @@ function LogContactForm({
   const router = useRouter();
   const [channel, setChannel] = useState<string>('call');
   const [note, setNote] = useState('');
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
     setSubmitting(true);
     try {
-      const response = await fetch(`/api/clubs/${clubUnitId}/guests/${guestId}/communications`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channel, note: note.trim() }),
-      });
-      if (!response.ok) {
-        setError('Could not log that contact.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/guests/${guestId}/communications`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channel, note: note.trim() }),
+          }),
+        {
+          loading: 'Logging contact…',
+          success: 'Contact logged',
+          error: 'Could not log that contact.',
+        },
+      );
+      if (!result) return;
       onDone();
       router.refresh();
-    } catch {
-      setError('Network error — nothing was logged.');
     } finally {
       setSubmitting(false);
     }
@@ -124,8 +126,6 @@ function LogContactForm({
           placeholder="What was said, and what happens next?"
         />
       </div>
-
-      {error && <p className="text-sm text-destructive">{error}</p>}
 
       <Button type="submit" size="lg" className="h-11 lg:h-9" disabled={submitting}>
         {submitting ? 'Saving…' : 'Log contact'}

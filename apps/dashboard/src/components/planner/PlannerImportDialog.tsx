@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { submitAction } from '@/lib/toast';
 import { PLANNER_COLUMNS, formatMeetingDate } from './columns';
 import { TEMPLATE_HEADERS, parsePlannerCsv, type ParseOutcome } from './csv';
 
@@ -58,35 +59,35 @@ function ImportForm({ clubUnitId, onDone }: { clubUnitId: string; onDone: () => 
   const [parsed, setParsed] = useState<ParseOutcome | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [result, setResult] = useState<PlannerImportResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
-    setError(null);
     setResult(null);
     setFileName(file.name);
     setParsed(parsePlannerCsv(await file.text(), meetingTime));
   }
 
   async function upload(rows: PlannerImportRow[]) {
-    setError(null);
     setSubmitting(true);
     try {
-      const response = await fetch(`/api/clubs/${clubUnitId}/planner/import`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rows }),
-      });
-      if (!response.ok) {
-        setError('Import failed — nothing was saved.');
-        return;
-      }
+      const response = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/planner/import`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rows }),
+          }),
+        {
+          loading: 'Importing planner…',
+          success: 'Planner imported',
+          error: 'Import failed — nothing was saved.',
+        },
+      );
+      if (!response) return;
       setResult(plannerImportResultSchema.parse(await response.json()));
       router.refresh();
-    } catch {
-      setError('Network error — nothing was saved.');
     } finally {
       setSubmitting(false);
     }
@@ -207,8 +208,6 @@ function ImportForm({ clubUnitId, onDone }: { clubUnitId: string; onDone: () => 
           )}
         </div>
       )}
-
-      {error && <p className="text-sm text-destructive">{error}</p>}
 
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <Button type="button" variant="outline" className="h-11 lg:h-9" onClick={onDone}>

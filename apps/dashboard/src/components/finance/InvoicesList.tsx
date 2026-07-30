@@ -6,6 +6,7 @@ import type { Invoice } from '@toastmasters/contracts';
 import { Card, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
+import { submitAction } from '@/lib/toast';
 
 function InvoiceActions({ clubUnitId, invoice }: { clubUnitId: string; invoice: Invoice }) {
   const router = useRouter();
@@ -18,11 +19,20 @@ function InvoiceActions({ clubUnitId, invoice }: { clubUnitId: string; invoice: 
     if (!amount) return;
     setSubmitting(true);
     try {
-      await fetch(`/api/clubs/${clubUnitId}/invoices/${invoice.id}/payments`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ledgerEntryId, amount: Number(amount) }),
-      });
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/invoices/${invoice.id}/payments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ledgerEntryId, amount: Number(amount) }),
+          }),
+        {
+          loading: 'Recording payment…',
+          success: 'Payment recorded',
+          error: 'Could not record that payment.',
+        },
+      );
+      if (!result) return;
       router.refresh();
     } finally {
       setSubmitting(false);
@@ -34,11 +44,20 @@ function InvoiceActions({ clubUnitId, invoice }: { clubUnitId: string; invoice: 
     if (!reason) return;
     setSubmitting(true);
     try {
-      await fetch(`/api/clubs/${clubUnitId}/invoices/${invoice.id}/void`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason }),
-      });
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/invoices/${invoice.id}/void`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason }),
+          }),
+        {
+          loading: 'Voiding invoice…',
+          success: 'Invoice voided',
+          error: 'Could not void that invoice.',
+        },
+      );
+      if (!result) return;
       router.refresh();
     } finally {
       setSubmitting(false);
@@ -50,11 +69,20 @@ function InvoiceActions({ clubUnitId, invoice }: { clubUnitId: string; invoice: 
     if (!reason) return;
     setSubmitting(true);
     try {
-      await fetch(`/api/clubs/${clubUnitId}/invoices/${invoice.id}/credit-note`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason }),
-      });
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/invoices/${invoice.id}/credit-note`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason }),
+          }),
+        {
+          loading: 'Issuing credit note…',
+          success: 'Credit note issued',
+          error: 'Could not issue that credit note.',
+        },
+      );
+      if (!result) return;
       router.refresh();
     } finally {
       setSubmitting(false);

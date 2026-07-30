@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { IssueGuestLinkCard } from '@/components/guest/IssueGuestLinkCard';
+import { submitAction, toast } from '@/lib/toast';
 import { Section } from '../primitives';
 
 type Mode = 'idle' | 'pool' | 'manual';
@@ -29,7 +30,6 @@ export function GuestListTab({
   const router = useRouter();
   const [mode, setMode] = useState<Mode>('idle');
   const [isPending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
 
   const [poolSelection, setPoolSelection] = useState<string>('');
   const [fullName, setFullName] = useState('');
@@ -54,20 +54,23 @@ export function GuestListTab({
     setEmail('');
     setPhone('');
     setNotes('');
-    setError(null);
   }
 
   async function submitCreate(payload: Record<string, unknown>) {
-    setError(null);
-    const res = await fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/guests`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      setError('Could not add guest');
-      return;
-    }
+    const result = await submitAction(
+      () =>
+        fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/guests`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }),
+      {
+        loading: 'Adding guest…',
+        success: 'Guest added',
+        error: 'Could not add guest',
+      },
+    );
+    if (!result) return;
     resetForm();
     setMode('idle');
     startTransition(() => router.refresh());
@@ -77,7 +80,7 @@ export function GuestListTab({
     event.preventDefault();
     const p = availableGuests.find((x) => x.id === poolSelection);
     if (!p) {
-      setError('Pick a guest');
+      toast.error('Pick a guest');
       return;
     }
     void submitCreate({
@@ -92,7 +95,7 @@ export function GuestListTab({
     event.preventDefault();
     const name = fullName.trim();
     if (!name) {
-      setError('Name is required');
+      toast.error('Name is required');
       return;
     }
     void submitCreate({
@@ -105,21 +108,39 @@ export function GuestListTab({
 
   function togglePresent(g: MeetingGuest) {
     startTransition(async () => {
-      const res = await fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/guests/${g.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ present: !g.present }),
-      });
-      if (res.ok) router.refresh();
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/guests/${g.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ present: !g.present }),
+          }),
+        {
+          loading: 'Updating guest…',
+          success: g.present ? 'Marked absent' : 'Marked present',
+          error: 'Could not update that guest.',
+        },
+      );
+      if (!result) return;
+      router.refresh();
     });
   }
 
   function remove(g: MeetingGuest) {
     startTransition(async () => {
-      const res = await fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/guests/${g.id}`, {
-        method: 'DELETE',
-      });
-      if (res.ok || res.status === 204) router.refresh();
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/guests/${g.id}`, {
+            method: 'DELETE',
+          }),
+        {
+          loading: 'Removing guest…',
+          success: 'Guest removed',
+          error: 'Could not remove that guest.',
+        },
+      );
+      if (!result) return;
+      router.refresh();
     });
   }
 
@@ -285,8 +306,6 @@ export function GuestListTab({
           </div>
         </form>
       )}
-
-      {error && <p className="text-xs text-destructive">{error}</p>}
 
       {guests.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">

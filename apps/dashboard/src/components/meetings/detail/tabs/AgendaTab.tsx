@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Check, X } from 'lucide-react';
 import type {
@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { AGENDA_ROLE_KEYS, MEETING_ROLE_KEYS } from '@/components/roles/roleKeys';
+import { submitAction, toast } from '@/lib/toast';
 import { MemberCombobox } from '../MemberCombobox';
 import { Field, Section } from '../primitives';
 import { PreparedSpeakers } from './PreparedSpeakers';
@@ -41,7 +42,6 @@ export function AgendaTab({
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
 
   const base = `/api/clubs/${clubUnitId}/meetings/${meeting.id}`;
 
@@ -62,65 +62,72 @@ export function AgendaTab({
    */
   function setRole(roleKey: MeetingRoleKey, personId: string | null) {
     const existing = assignmentFor(roleKey);
+    if (existing && existing.status !== 'proposed') {
+      toast.error(
+        `${ROLE_LABEL.get(roleKey)} is already ${existing.status}. Ask them to decline before reassigning.`,
+      );
+      return;
+    }
     startTransition(async () => {
-      setError(null);
-      if (existing) {
-        if (existing.status !== 'proposed') {
-          setError(
-            `${ROLE_LABEL.get(roleKey)} is already ${existing.status}. Ask them to decline before reassigning.`,
-          );
-          return;
-        }
-        const del = await fetch(`${base}/role-assignments/${existing.id}`, { method: 'DELETE' });
-        if (!del.ok && del.status !== 204) {
-          setError('Could not withdraw the current assignment.');
-          return;
-        }
-      }
-      if (personId) {
-        const res = await fetch(`${base}/role-assignments`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ roleKey, assignee: { kind: 'member', personId } }),
-        });
-        if (!res.ok) {
-          setError('Could not assign that role.');
-          return;
-        }
-      }
+      const result = await submitAction(
+        async () => {
+          if (existing) {
+            const del = await fetch(`${base}/role-assignments/${existing.id}`, {
+              method: 'DELETE',
+            });
+            if (!del.ok && del.status !== 204) {
+              throw new Error('Could not withdraw the current assignment.');
+            }
+          }
+          if (personId) {
+            const res = await fetch(`${base}/role-assignments`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ roleKey, assignee: { kind: 'member', personId } }),
+            });
+            if (!res.ok) {
+              throw new Error('Could not assign that role.');
+            }
+          }
+          return true;
+        },
+        {
+          loading: 'Updating role…',
+          success: 'Role updated',
+          error: 'Could not assign that role.',
+        },
+      );
+      if (!result) return;
       router.refresh();
     });
   }
 
   function setAssignmentStatus(id: string, status: 'confirmed' | 'declined') {
     startTransition(async () => {
-      setError(null);
-      const res = await fetch(`${base}/role-assignments/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(
-          status === 'declined' ? { status, declinedReason: 'Withdrew from the role' } : { status },
-        ),
-      });
-      if (!res.ok) {
-        setError('Could not update that assignment.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`${base}/role-assignments/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(
+              status === 'declined'
+                ? { status, declinedReason: 'Withdrew from the role' }
+                : { status },
+            ),
+          }),
+        {
+          loading: status === 'confirmed' ? 'Confirming…' : 'Declining…',
+          success: status === 'confirmed' ? 'Assignment confirmed' : 'Assignment declined',
+          error: 'Could not update that assignment.',
+        },
+      );
+      if (!result) return;
       router.refresh();
     });
   }
 
   return (
     <div className="flex flex-col gap-4">
-      {error && (
-        <p
-          role="alert"
-          className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-        >
-          {error}
-        </p>
-      )}
-
       {/* ── Meeting details ─────────────────────────────────────────── */}
       <Section title="Meeting Details">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">

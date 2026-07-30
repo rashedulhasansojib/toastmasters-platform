@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { submitAction } from '@/lib/toast';
 
 export function StartChecklistRunButton({
   clubUnitId,
@@ -24,24 +25,27 @@ export function StartChecklistRunButton({
   const router = useRouter();
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   if (templates.length === 0) return null;
 
   async function onStart() {
     if (!templateId) return;
     setStarting(true);
-    setError(null);
     try {
-      const res = await fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/checklist-runs`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ templateId }),
-      });
-      if (!res.ok) {
-        setError('Could not start that checklist.');
-        return;
-      }
+      const result = await submitAction(
+        () =>
+          fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/checklist-runs`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ templateId }),
+          }),
+        {
+          loading: 'Starting checklist…',
+          success: 'Checklist started',
+          error: 'Could not start that checklist.',
+        },
+      );
+      if (!result) return;
       router.refresh();
     } finally {
       setStarting(false);
@@ -65,7 +69,6 @@ export function StartChecklistRunButton({
       <Button type="button" variant="outline" disabled={!templateId || starting} onClick={onStart}>
         {starting ? 'Starting…' : 'Start'}
       </Button>
-      {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
   );
 }

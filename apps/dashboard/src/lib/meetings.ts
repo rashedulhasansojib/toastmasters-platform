@@ -1,4 +1,6 @@
 import {
+  plannerRow,
+  type PlannerRow,
   agendaItem,
   agendaTemplate,
   ballot,
@@ -181,4 +183,11 @@ export async function verifyCapabilityToken(token: string): Promise<CapabilityTo
   });
   if (!response.ok) return { valid: false, meetingId: null, purpose: null };
   return capabilityTokenVerification.parse(await response.json());
+}
+
+/** FR-MTG-5: the planner grid — a projection over meetings + role assignments, never its own store. */
+export async function getPlanner(clubUnitId: string): Promise<PlannerRow[]> {
+  const response = await authedFetch(`/v1/clubs/${clubUnitId}/planner`);
+  if (!response.ok) return [];
+  return plannerRow.array().parse(await response.json());
 }

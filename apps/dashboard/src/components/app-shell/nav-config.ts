@@ -1,6 +1,7 @@
 import {
   BookOpen,
   CalendarDays,
+  CalendarRange,
   Gavel,
   GraduationCap,
   Home,
@@ -137,6 +138,7 @@ export function buildNavSections(activeUnit: ActiveUnit | null): NavSection[] {
           icon: Plus,
         },
       },
+      { href: `${clubBase}/planner`, label: 'Planner', icon: CalendarRange },
       { href: `${clubBase}/guests`, label: 'Guests', icon: UserPlus },
       { href: `${clubBase}/finance`, label: 'Finance', icon: Wallet },
       { href: `${clubBase}/library`, label: 'Library', icon: BookOpen },

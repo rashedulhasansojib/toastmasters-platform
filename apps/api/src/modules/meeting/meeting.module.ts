@@ -28,6 +28,9 @@ import { BallotController } from './ballot.controller';
 import { MeetingLifecycleRepository } from './meeting-lifecycle.repository';
 import { AgendaPrintController } from './agenda-print.controller';
 import { PublicMeetingController } from './public-meeting.controller';
+import { PlannerRepository } from './planner.repository';
+import { PlannerService } from './planner.service';
+import { PlannerController } from './planner.controller';
 import { MeetingGuestRepository } from './meeting-guest.repository';
 import { MeetingGuestController } from './meeting-guest.controller';
 import { MeetingAttendanceRepository } from './meeting-attendance.repository';
@@ -55,6 +58,8 @@ import { PathwayCatalogController } from './pathway-catalog.controller';
     RoleRotationRepository,
     AgendaTemplateRepository,
     BallotRepository,
+    PlannerRepository,
+    PlannerService,
     MeetingGuestRepository,
     MeetingAttendanceRepository,
     MeetingResourceRepository,
@@ -73,6 +78,7 @@ import { PathwayCatalogController } from './pathway-catalog.controller';
     BallotController,
     AgendaPrintController,
     PublicMeetingController,
+    PlannerController,
     MeetingGuestController,
     MeetingAttendanceController,
     MeetingResourceController,

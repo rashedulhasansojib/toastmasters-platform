@@ -219,6 +219,93 @@ export const roleRotationSuggestion = z.object({
 });
 export type RoleRotationSuggestion = z.infer<typeof roleRotationSuggestion>;
 
+/**
+ * The multi-week planner — `FR-MTG-5` / system-design.md §9.2.
+ *
+ * "It is a projection over role assignments, not a separate store." There is
+ * deliberately no Planner table: a row is a `Meeting` and a cell is a
+ * `MeetingRoleAssignment`. The legacy portal kept a parallel sheet of typed
+ * names, which is exactly the thing §9.2 rules out — a name string cannot
+ * distinguish three members called Rahim, and it earns no Pathways credit,
+ * no rotation fairness and no attendance.
+ */
+export const plannerCell = z.object({
+  roleKey: meetingRoleKey,
+  slotIndex: z.number().int().nonnegative().nullable(),
+  /** Null when the slot is unfilled — the grid renders an empty, clickable cell. */
+  assignmentId: z.uuid().nullable(),
+  personId: z.uuid().nullable(),
+  fullName: z.string().nullable(),
+  status: meetingRoleAssignmentStatus.nullable(),
+});
+export type PlannerCell = z.infer<typeof plannerCell>;
+
+export const plannerRow = z.object({
+  meetingId: z.uuid(),
+  scheduledAt: z.iso.datetime(),
+  title: z.string().nullable(),
+  theme: z.string().nullable(),
+  status: meetingStatus,
+  cells: z.array(plannerCell),
+});
+export type PlannerRow = z.infer<typeof plannerRow>;
+
+/**
+ * One spreadsheet row. `names` are raw strings straight off the sheet — the
+ * server resolves them against club members and reports whatever it could not
+ * match, rather than guessing.
+ */
+export const plannerImportCell = z
+  .object({
+    roleKey: meetingRoleKey,
+    slotIndex: z.number().int().nonnegative().optional(),
+    name: z.string().min(1),
+  })
+  .strict();
+export type PlannerImportCell = z.infer<typeof plannerImportCell>;
+
+export const plannerImportRow = z
+  .object({
+    scheduledAt: z.iso.datetime(),
+    theme: z.string().min(1).max(200).optional(),
+    cells: z.array(plannerImportCell),
+  })
+  .strict();
+export type PlannerImportRow = z.infer<typeof plannerImportRow>;
+
+export const plannerImportRequestSchema = z
+  .object({ rows: z.array(plannerImportRow).min(1).max(200) })
+  .strict();
+export type PlannerImportRequest = z.infer<typeof plannerImportRequestSchema>;
+
+/** Why a name did not resolve. Ambiguity is a distinct case from absence — two members with the same name is precisely the failure §9.2 exists to prevent. */
+export const plannerUnresolvedReason = z.enum(['no_match', 'ambiguous']);
+export type PlannerUnresolvedReason = z.infer<typeof plannerUnresolvedReason>;
+
+export const plannerUnresolvedName = z.object({
+  rowIndex: z.number().int().nonnegative(),
+  scheduledAt: z.iso.datetime(),
+  roleKey: meetingRoleKey,
+  slotIndex: z.number().int().nonnegative().nullable(),
+  name: z.string(),
+  reason: plannerUnresolvedReason,
+});
+export type PlannerUnresolvedName = z.infer<typeof plannerUnresolvedName>;
+
+/**
+ * `unresolved` is the "pending list" `FR-MTG-5` requires: the import commits
+ * everything it could resolve and hands back the rest for a human, instead of
+ * either failing the whole sheet or inventing an assignee.
+ */
+export const plannerImportResultSchema = z.object({
+  meetingsCreated: z.number().int().nonnegative(),
+  meetingsMatched: z.number().int().nonnegative(),
+  assignmentsCreated: z.number().int().nonnegative(),
+  assignmentsSkipped: z.number().int().nonnegative(),
+  unresolved: z.array(plannerUnresolvedName),
+});
+export type PlannerImportResult = z.infer<typeof plannerImportResultSchema>;
+
 export const speechSlotStatus = z.enum(['requested', 'approved', 'declined']);
 export type SpeechSlotStatus = z.infer<typeof speechSlotStatus>;
 

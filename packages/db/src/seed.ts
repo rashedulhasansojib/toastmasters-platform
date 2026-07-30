@@ -71,6 +71,17 @@ const RESOURCES: ResourceSeed[] = [
     sensitivity: 'normal',
   },
   {
+    // FR-MTG-5: the multi-week planner is a projection over meeting.role, but
+    // it gets its own resource so a club can hand out season planning without
+    // also handing out day-of role edits — and vice versa.
+    resource: 'meeting.planner',
+    context: 'meeting',
+    label: 'Meeting planner',
+    allowedActions: ['read', 'create'],
+    clubScoped: true,
+    sensitivity: 'normal',
+  },
+  {
     resource: 'meeting.agenda_item',
     context: 'meeting',
     label: 'Agenda item',
@@ -535,6 +546,7 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
     grants: [
       { resource: 'meeting.meeting', action: 'read' },
       { resource: 'meeting.role', action: 'read' },
+      { resource: 'meeting.planner', action: 'read' },
       { resource: 'meeting.agenda_item', action: 'read' },
       { resource: 'meeting.speech_slot', action: 'read' },
       { resource: 'meeting.checklist', action: 'read' },
@@ -600,6 +612,9 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'meeting.role', action: 'create' },
       { resource: 'meeting.role', action: 'read' },
       { resource: 'meeting.role', action: 'update' },
+      // Planning the season ahead is the VPE's job (system-design.md §24).
+      { resource: 'meeting.planner', action: 'read' },
+      { resource: 'meeting.planner', action: 'create' },
       { resource: 'meeting.agenda_item', action: 'create' },
       { resource: 'meeting.agenda_item', action: 'read' },
       { resource: 'meeting.speech_slot', action: 'read' },
@@ -736,6 +751,7 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
     grants: [
       { resource: 'meeting.meeting', action: 'read' },
       { resource: 'meeting.role', action: 'read' },
+      { resource: 'meeting.planner', action: 'read' },
       { resource: 'meeting.agenda_item', action: 'read' },
       { resource: 'meeting.speech_slot', action: 'read' },
       { resource: 'meeting.speech_slot', action: 'create' },

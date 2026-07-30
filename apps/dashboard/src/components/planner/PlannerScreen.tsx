@@ -2,16 +2,24 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import type {
   ClubMemberSummary,
   CreateMeetingRoleAssignmentRequest,
   Guest,
   MeetingRoleKey,
+  MeetingStatus,
   PlannerCell,
   PlannerRow,
 } from '@toastmasters/contracts';
-import { CalendarRangeIcon, CircleAlertIcon, Loader2, Plus, UploadIcon } from 'lucide-react';
+import {
+  CalendarRangeIcon,
+  CircleAlertIcon,
+  ExternalLinkIcon,
+  Loader2,
+  Plus,
+  Trash2Icon,
+  UploadIcon,
+} from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -19,18 +27,33 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PersonPicker, type PickerSelection } from './PersonPicker';
 import { PlannerImportDialog } from './PlannerImportDialog';
-import {
-  PLANNER_COLUMNS,
-  cellFor,
-  cellTone,
-  formatMeetingDate,
-  formatMeetingDateLong,
-} from './columns';
+import { PLANNER_COLUMNS, cellFor, cellTone, formatMeetingDateLong } from './columns';
 
 function todayISO(): string {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** `YYYY-MM-DD` for an `<input type="date">`, in the viewer's local zone. */
+function toDateInputValue(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/**
+ * Rebuild an ISO instant from a `YYYY-MM-DD` picked in the local zone,
+ * preserving the meeting's original time-of-day and offset.
+ * The user is moving the meeting to a different day, not rewriting its time.
+ */
+function replaceDatePart(iso: string, dateInput: string): string {
+  const [y, m, d] = dateInput.split('-').map((n) => Number.parseInt(n, 10));
+  if (!y || !m || !d) return iso;
+  const src = new Date(iso);
+  const next = new Date(src);
+  next.setFullYear(y, m - 1, d);
+  return next.toISOString();
 }
 
 /** Same cell key everywhere — `slotIndex` may legitimately be null (single-holder roles). */
@@ -87,7 +110,11 @@ export function PlannerScreen({
   const [importOpen, setImportOpen] = useState(false);
   const [addRowOpen, setAddRowOpen] = useState(false);
 
-  const unfilled = rows.reduce(
+  // A cancelled meeting is history — not part of the plan any more. The row
+  // still exists in the DB (§ CLAUDE.md's append-only rule); the planner just
+  // hides it from the projection.
+  const activeRows = rows.filter((row) => row.status !== 'cancelled');
+  const unfilled = activeRows.reduce(
     (total, row) =>
       total +
       PLANNER_COLUMNS.filter((c) => !cellFor(row, c.roleKey, c.slotIndex)?.assignmentId).length,
@@ -100,9 +127,9 @@ export function PlannerScreen({
         <div className="min-w-0">
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Planner</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {rows.length === 0
+            {activeRows.length === 0
               ? 'No meetings scheduled in this window'
-              : `${rows.length} meeting${rows.length === 1 ? '' : 's'} · ${unfilled} role${unfilled === 1 ? '' : 's'} unfilled`}
+              : `${activeRows.length} meeting${activeRows.length === 1 ? '' : 's'} · ${unfilled} role${unfilled === 1 ? '' : 's'} unfilled`}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -119,7 +146,7 @@ export function PlannerScreen({
         </div>
       </header>
 
-      {rows.length === 0 ? (
+      {activeRows.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed px-6 py-14 text-center">
           <div className="mb-4 flex size-12 items-center justify-center rounded-full bg-muted">
             <CalendarRangeIcon className="size-5 text-muted-foreground" />
@@ -158,10 +185,16 @@ export function PlannerScreen({
                       {column.short}
                     </th>
                   ))}
+                  <th
+                    scope="col"
+                    className="sticky right-0 z-10 w-20 bg-muted/50 px-3 py-2.5 text-right font-medium whitespace-nowrap"
+                  >
+                    <span className="sr-only">Actions</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
+                {activeRows.map((row) => (
                   <PlannerRowGrid
                     key={row.meetingId}
                     row={row}
@@ -177,7 +210,7 @@ export function PlannerScreen({
           {/* Phones: one card per meeting. A 13-column table behind a
               horizontal scroll is unreadable on a 390px screen. */}
           <div className="flex flex-col gap-3 lg:hidden">
-            {rows.map((row) => (
+            {activeRows.map((row) => (
               <PlannerRowCard
                 key={row.meetingId}
                 row={row}
@@ -203,7 +236,7 @@ export function PlannerScreen({
   );
 }
 
-/** One row in the desktop grid. Cells and theme are editable in place. */
+/** One row in the desktop grid. Date, cells and theme are all editable in place. */
 function PlannerRowGrid({
   row,
   clubUnitId,
@@ -221,12 +254,12 @@ function PlannerRowGrid({
         scope="row"
         className="sticky left-0 z-10 bg-background px-3 py-2.5 text-left font-medium align-top"
       >
-        <Link
-          href={`/clubs/${clubUnitId}/meetings/${row.meetingId}`}
-          className="whitespace-nowrap hover:underline"
-        >
-          {formatMeetingDate(row.scheduledAt)}
-        </Link>
+        <DateInput
+          clubUnitId={clubUnitId}
+          meetingId={row.meetingId}
+          scheduledAt={row.scheduledAt}
+          status={row.status}
+        />
         <ThemeInput clubUnitId={clubUnitId} meetingId={row.meetingId} initial={row.theme} />
       </th>
       {PLANNER_COLUMNS.map((column) => {
@@ -248,6 +281,9 @@ function PlannerRowGrid({
           </td>
         );
       })}
+      <td className="sticky right-0 z-10 bg-background px-3 py-2 align-top text-right">
+        <RowActions clubUnitId={clubUnitId} meetingId={row.meetingId} status={row.status} />
+      </td>
     </tr>
   );
 }
@@ -271,19 +307,27 @@ function PlannerRowCard({
   return (
     <article className="overflow-hidden rounded-xl border bg-card">
       <div className="flex flex-col gap-2 border-b bg-muted/30 px-3.5 py-2.5">
-        <div className="flex items-baseline justify-between gap-3">
-          <Link
-            href={`/clubs/${clubUnitId}/meetings/${row.meetingId}`}
-            className="min-w-0 font-medium hover:underline"
-          >
-            {formatMeetingDateLong(row.scheduledAt)}
-          </Link>
-          {missing > 0 && (
-            <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-              <CircleAlertIcon className="size-3.5" />
-              {missing}
-            </span>
-          )}
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <DateInput
+              clubUnitId={clubUnitId}
+              meetingId={row.meetingId}
+              scheduledAt={row.scheduledAt}
+              status={row.status}
+            />
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {formatMeetingDateLong(row.scheduledAt)}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {missing > 0 && (
+              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                <CircleAlertIcon className="size-3.5" />
+                {missing}
+              </span>
+            )}
+            <RowActions clubUnitId={clubUnitId} meetingId={row.meetingId} status={row.status} />
+          </div>
         </div>
         <ThemeInput clubUnitId={clubUnitId} meetingId={row.meetingId} initial={row.theme} />
       </div>
@@ -463,6 +507,161 @@ function ThemeInput({
         </span>
       )}
     </>
+  );
+}
+
+/**
+ * Blur-to-save date input. Editing preserves the meeting's time-of-day —
+ * the user is rescheduling to a different day, not rewriting the hour.
+ * Disabled once the meeting is `in_progress` or `closed`: at that point the
+ * date is history, not plan (rescheduling would rewrite what actually
+ * happened).
+ */
+function DateInput({
+  clubUnitId,
+  meetingId,
+  scheduledAt,
+  status,
+}: {
+  clubUnitId: string;
+  meetingId: string;
+  scheduledAt: string;
+  status: MeetingStatus;
+}) {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const initial = toDateInputValue(scheduledAt);
+  const [current, setCurrent] = useState(initial);
+
+  const locked = status === 'in_progress' || status === 'closed';
+
+  function commit(nextDate: string) {
+    if (!nextDate || nextDate === initial) {
+      setCurrent(initial);
+      return;
+    }
+    setError(null);
+    const nextIso = replaceDatePart(scheduledAt, nextDate);
+    startTransition(async () => {
+      const res = await fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scheduledAt: nextIso }),
+      });
+      if (!res.ok) {
+        setError('Could not move the meeting.');
+        setCurrent(initial);
+        return;
+      }
+      router.refresh();
+    });
+  }
+
+  return (
+    <>
+      <input
+        type="date"
+        value={current}
+        disabled={locked || pending}
+        onChange={(e) => setCurrent(e.target.value)}
+        onBlur={(e) => commit(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        }}
+        aria-label="Meeting date"
+        className={cn(
+          'h-8 rounded-md border border-transparent bg-transparent px-1.5 text-sm font-medium outline-none',
+          'hover:border-input focus:border-input focus:bg-background',
+          locked && 'cursor-not-allowed opacity-70',
+        )}
+      />
+      {error && (
+        <span role="alert" className="mt-0.5 block text-xs text-destructive">
+          {error}
+        </span>
+      )}
+    </>
+  );
+}
+
+/**
+ * Row actions — open the meeting page (deeper edits: title, venue, agenda),
+ * or cancel the meeting. "Delete" in the DB sense would break §CLAUDE.md's
+ * append-only invariant; `cancel` sets the status to `cancelled` and the
+ * planner filters it out on the next render. History is preserved.
+ */
+function RowActions({
+  clubUnitId,
+  meetingId,
+  status,
+}: {
+  clubUnitId: string;
+  meetingId: string;
+  status: MeetingStatus;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  // A closed meeting is a historical record — a "cancel" after the fact would
+  // rewrite what happened. The API rejects it too; disable here so the UI
+  // is honest about why the button doesn't do anything.
+  const canCancel = status === 'draft' || status === 'published';
+
+  function cancel() {
+    if (!canCancel) return;
+    if (
+      !confirm(
+        'Cancel this meeting? It will be marked as cancelled and hidden from the planner. History and role assignments are preserved.',
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    startTransition(async () => {
+      const res = await fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/cancel`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        setError('Could not cancel.');
+        return;
+      }
+      router.refresh();
+    });
+  }
+
+  return (
+    <div className="flex items-center justify-end gap-1">
+      <a
+        href={`/clubs/${clubUnitId}/meetings/${meetingId}`}
+        aria-label="Open meeting"
+        title="Open meeting"
+        className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      >
+        <ExternalLinkIcon className="size-4" />
+      </a>
+      <button
+        type="button"
+        onClick={cancel}
+        disabled={!canCancel || pending}
+        aria-label="Cancel meeting"
+        title={canCancel ? 'Cancel meeting' : 'Cannot cancel a meeting that has started or closed'}
+        className={cn(
+          'inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors',
+          canCancel
+            ? 'hover:bg-destructive/10 hover:text-destructive'
+            : 'cursor-not-allowed opacity-40',
+        )}
+      >
+        {pending ? <Loader2 className="size-4 animate-spin" /> : <Trash2Icon className="size-4" />}
+      </button>
+      {error && (
+        <span role="alert" className="text-xs text-destructive">
+          {error}
+        </span>
+      )}
+    </div>
   );
 }
 

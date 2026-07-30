@@ -10,6 +10,7 @@ import {
   ShieldCheck,
   Ticket,
   UserPlus,
+  Users,
   Wallet,
   type LucideIcon,
 } from 'lucide-react';
@@ -68,8 +69,18 @@ export function buildNavSections(activeUnit: ActiveUnit | null): NavSection[] {
       items: [
         {
           href: `/platform/${activeUnit.id}/dashboard`,
+          label: 'Dashboard',
+          icon: ShieldCheck,
+        },
+        {
+          href: `/platform/${activeUnit.id}/org-tree`,
           label: 'Org tree',
           icon: Network,
+        },
+        {
+          href: `/platform/${activeUnit.id}/users`,
+          label: 'Users',
+          icon: Users,
         },
       ],
     };

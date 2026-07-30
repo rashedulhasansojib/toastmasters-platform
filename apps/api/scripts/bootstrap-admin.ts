@@ -61,7 +61,7 @@ async function main(): Promise<void> {
     execFileSync(
       'pnpm',
       ['--filter', '@toastmasters/db', 'exec', 'prisma', 'db', 'execute', '--file', sqlPath],
-      { stdio: ['ignore', 'inherit', 'inherit'] },
+      { stdio: ['ignore', 'inherit', 'inherit'], shell: process.platform === 'win32' },
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });

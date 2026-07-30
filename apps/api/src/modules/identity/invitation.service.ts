@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { ForbiddenException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import type { Env } from '@toastmasters/config';
-import type { Invitation } from '@toastmasters/contracts';
+import type { ClubMemberType, Invitation, InvitationWithLink } from '@toastmasters/contracts';
 import { canDelegate } from '../../common/authz/can-delegate';
 import { AccessRepository } from '../access/access.repository';
 import { EMAIL_PORT, type EmailPort } from '../../common/email/email.port';
@@ -43,7 +43,8 @@ export class InvitationService {
     email: string;
     role: string;
     programYearId: string;
-  }): Promise<Invitation> {
+    memberType?: ClubMemberType;
+  }): Promise<InvitationWithLink> {
     await this.rateLimiter.checkAndIncrement(input.actorId);
 
     const [actorGrants, scope] = await Promise.all([
@@ -64,18 +65,84 @@ export class InvitationService {
       tokenHash: hashToken(rawToken),
       orgUnitId: input.orgUnitId,
       role: input.role,
+      memberType: input.memberType,
       programYearId: input.programYearId,
       invitedBy: input.actorId,
       expiresAt: new Date(Date.now() + INVITATION_TTL_MS),
     });
 
+    const inviteUrl = `${this.env.APP_URL}/invitations/${rawToken}/accept`;
     await this.email.send({
       to: input.email,
       subject: 'You have been invited to Toastmasters Portal',
-      text: `Accept your invitation: ${this.env.APP_URL}/invitations/${rawToken}/accept`,
+      text: `Accept your invitation: ${inviteUrl}`,
     });
 
-    return invitation;
+    return { ...invitation, inviteUrl };
+  }
+
+  /**
+   * Users admin's "Resend" action — `:id` is an invitation id, so there is
+   * no `@ResourceScope` on the route this backs (the invitation's own org
+   * unit is what's authorized against, same in-service pattern as
+   * RoleAssignmentService.end()).
+   */
+  async resend(id: string, actorId: string): Promise<InvitationWithLink> {
+    const existing = await this.invitations.findById(id);
+    if (!existing) throw new ForbiddenException('Invitation not found');
+
+    const [actorGrants, scope] = await Promise.all([
+      this.accessRepository.effectiveGrants(actorId),
+      this.accessRepository.pathOf(existing.orgUnitId),
+    ]);
+    if (
+      !canDelegate(actorGrants, { resource: 'identity.role_assignment', action: 'create', scope })
+    ) {
+      throw new ForbiddenException(
+        'Cannot resend an invitation into a role you do not hold the authority to assign',
+      );
+    }
+
+    const rawToken = randomBytes(32).toString('base64url');
+    const invitation = await this.invitations.resend(
+      id,
+      hashToken(rawToken),
+      new Date(Date.now() + INVITATION_TTL_MS),
+    );
+
+    const inviteUrl = `${this.env.APP_URL}/invitations/${rawToken}/accept`;
+    await this.email.send({
+      to: invitation.email,
+      subject: 'You have been invited to Toastmasters Portal',
+      text: `Accept your invitation: ${inviteUrl}`,
+    });
+
+    return { ...invitation, inviteUrl };
+  }
+
+  async revoke(id: string, actorId: string): Promise<Invitation> {
+    const existing = await this.invitations.findById(id);
+    if (!existing) throw new ForbiddenException('Invitation not found');
+
+    const [actorGrants, scope] = await Promise.all([
+      this.accessRepository.effectiveGrants(actorId),
+      this.accessRepository.pathOf(existing.orgUnitId),
+    ]);
+    if (
+      !canDelegate(actorGrants, { resource: 'identity.role_assignment', action: 'create', scope })
+    ) {
+      throw new ForbiddenException(
+        'Cannot revoke an invitation into a role you do not hold the authority to assign',
+      );
+    }
+
+    return this.invitations.revoke(id);
+  }
+
+  /** Users admin's pending-invitations list, anchored at whatever org unit the route authorized against. */
+  async listPending(anchorOrgUnitId: string): Promise<Invitation[]> {
+    const scope = await this.accessRepository.pathOf(anchorOrgUnitId);
+    return this.invitations.findPendingBySubtree(scope);
   }
 
   async accept(

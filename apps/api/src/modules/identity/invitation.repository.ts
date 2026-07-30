@@ -1,6 +1,6 @@
-import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { getPrisma, type PrismaClient } from '@toastmasters/db';
-import type { Invitation } from '@toastmasters/contracts';
+import type { ClubMemberType, Invitation } from '@toastmasters/contracts';
 import { PRISMA_CLIENT } from '../../common/db/prisma-client.token';
 
 type InvitationRow = Awaited<ReturnType<PrismaClient['invitation']['create']>>;
@@ -11,6 +11,7 @@ function toInvitation(row: InvitationRow): Invitation {
     email: row.email,
     orgUnitId: row.orgUnitId,
     role: row.role,
+    memberType: row.memberType,
     programYearId: row.programYearId,
     invitedBy: row.invitedBy,
     status: row.status,
@@ -30,6 +31,7 @@ export class InvitationRepository {
     tokenHash: string;
     orgUnitId: string;
     role: string;
+    memberType?: ClubMemberType;
     programYearId: string;
     invitedBy: string;
     expiresAt: Date;
@@ -40,6 +42,7 @@ export class InvitationRepository {
         tokenHash: input.tokenHash,
         orgUnitId: input.orgUnitId,
         role: input.role,
+        memberType: input.memberType ?? null,
         programYearId: input.programYearId,
         invitedBy: input.invitedBy,
         expiresAt: input.expiresAt,
@@ -51,6 +54,78 @@ export class InvitationRepository {
   async findByTokenHash(tokenHash: string): Promise<Invitation | null> {
     const row = await this.db.invitation.findUnique({ where: { tokenHash } });
     return row ? toInvitation(row) : null;
+  }
+
+  async findById(id: string): Promise<Invitation | null> {
+    const row = await this.db.invitation.findUnique({ where: { id } });
+    return row ? toInvitation(row) : null;
+  }
+
+  /** Users admin's "pending invitations" column — one subtree-scoped query. */
+  async findPendingBySubtree(subtreePath: string): Promise<Invitation[]> {
+    // $queryRaw does not apply Prisma's camelCase field mapping — every
+    // column toInvitation() reads back is aliased explicitly.
+    const rows = await this.db.$queryRaw<
+      Array<{
+        id: string;
+        email: string;
+        orgUnitId: string;
+        role: string;
+        memberType: string | null;
+        programYearId: string;
+        invitedBy: string;
+        status: Invitation['status'];
+        expiresAt: Date;
+        createdAt: Date;
+        acceptedAt: Date | null;
+        acceptedPersonId: string | null;
+      }>
+    >`
+      SELECT i.id, i.email, i.org_unit_id AS "orgUnitId", i.role, i.member_type AS "memberType",
+             i.program_year_id AS "programYearId", i.invited_by AS "invitedBy", i.status,
+             i.expires_at AS "expiresAt", i.created_at AS "createdAt",
+             i.accepted_at AS "acceptedAt", i.accepted_person_id AS "acceptedPersonId"
+      FROM invitation i
+      JOIN org_unit ou ON ou.id = i.org_unit_id
+      WHERE i.status = 'pending'::"InvitationStatus" AND ou.path <@ ${subtreePath}::ltree
+      ORDER BY i.created_at DESC
+    `;
+    return rows.map((row) => ({
+      id: row.id,
+      email: row.email,
+      orgUnitId: row.orgUnitId,
+      role: row.role,
+      memberType: row.memberType as Invitation['memberType'],
+      programYearId: row.programYearId,
+      invitedBy: row.invitedBy,
+      status: row.status,
+      expiresAt: row.expiresAt.toISOString(),
+      createdAt: row.createdAt.toISOString(),
+      acceptedAt: row.acceptedAt?.toISOString() ?? null,
+      acceptedPersonId: row.acceptedPersonId,
+    }));
+  }
+
+  /**
+   * Re-mints the token/expiry on the same row — the previous raw token stops
+   * resolving the instant this commits, since only the current hash is ever
+   * looked up. Only a still-pending invitation can be resent.
+   */
+  async resend(id: string, tokenHash: string, expiresAt: Date): Promise<Invitation> {
+    const existing = await this.db.invitation.findUnique({ where: { id } });
+    if (!existing || existing.status !== 'pending') {
+      throw new ForbiddenException('Only a pending invitation can be resent');
+    }
+    const row = await this.db.invitation.update({
+      where: { id },
+      data: { tokenHash, expiresAt },
+    });
+    return toInvitation(row);
+  }
+
+  async revoke(id: string): Promise<Invitation> {
+    const row = await this.db.invitation.update({ where: { id }, data: { status: 'revoked' } });
+    return toInvitation(row);
   }
 
   /**
@@ -121,6 +196,26 @@ export class InvitationRepository {
           },
         },
       });
+
+      if (invitation.memberType) {
+        const existingMembership = await tx.clubMembership.findFirst({
+          where: { personId: person.id, clubUnitId: invitation.orgUnitId },
+        });
+        if (existingMembership) {
+          await tx.clubMembership.update({
+            where: { id: existingMembership.id },
+            data: { memberType: invitation.memberType, localStatus: 'active', leftAt: null },
+          });
+        } else {
+          await tx.clubMembership.create({
+            data: {
+              personId: person.id,
+              clubUnitId: invitation.orgUnitId,
+              memberType: invitation.memberType,
+            },
+          });
+        }
+      }
 
       await tx.invitation.update({
         where: { id: invitation.id },

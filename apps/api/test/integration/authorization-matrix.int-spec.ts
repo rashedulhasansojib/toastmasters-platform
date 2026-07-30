@@ -70,7 +70,10 @@ describe('Authorisation matrix (generated from role_template × resource_catalog
     { resource: 'education.evaluation', actions: ['read', 'create', 'update'] },
     { resource: 'membership.health_signal', actions: ['read'] },
     { resource: 'platform.audit', actions: ['read'] },
-    { resource: 'identity.invitation', actions: ['create'] },
+    { resource: 'identity.invitation', actions: ['create', 'read', 'update'] },
+    // Users admin: system_admin via broad synthesis, unit_admin/support_readonly
+    // via explicit seeded grants — no club/area/division role template holds it.
+    { resource: 'identity.person', actions: ['read', 'create', 'update'] },
     { resource: 'org.unit', actions: ['create', 'update'] },
     { resource: 'access.unit_policy', actions: ['create'] },
     { resource: 'membership.guest', actions: ['read', 'create', 'update'] },

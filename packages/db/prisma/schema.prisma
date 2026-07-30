@@ -98,6 +98,7 @@ model OrgUnit {
   minutes                Minutes[]
   supportRequests        SupportRequest[]
 
+  @@index([parentId])
   @@map("org_unit")
 }
 
@@ -186,6 +187,10 @@ model Person {
   speechApprovalsApproved   SpeechApproval[]    @relation("SpeechApprovalApprover")
   speechApprovalsDenied     SpeechApproval[]    @relation("SpeechApprovalDenier")
 
+  // Users admin (super-admin People search): search-by-name / search-by-TI-number.
+  // email is already indexed via its own @unique.
+  @@index([fullName])
+  @@index([tiMemberNumber])
   @@map("person")
 }
 
@@ -233,6 +238,7 @@ model ClubMembership {
   lastReconciledAt DateTime?                 @map("last_reconciled_at")
   duesRecords      DuesRecord[]
 
+  @@index([clubUnitId, localStatus])
   @@map("club_membership")
 }
 
@@ -741,6 +747,11 @@ model Invitation {
   orgUnitId        String           @map("org_unit_id") @db.Uuid
   orgUnit          OrgUnit          @relation(fields: [orgUnitId], references: [id])
   role             String
+  /// Users admin follow-up to M2 Slice 1's scoping note: set only when
+  /// `orgUnit.type === 'club'` — accept() upserts an active ClubMembership
+  /// alongside the RoleAssignment when present. Null preserves the original
+  /// invitation shape for non-club-tier invites (district/division/area).
+  memberType       ClubMemberType?  @map("member_type")
   programYearId    String           @map("program_year_id")
   programYear      ProgramYear      @relation(fields: [programYearId], references: [id])
   invitedBy        String           @map("invited_by") @db.Uuid
@@ -752,6 +763,7 @@ model Invitation {
   acceptedPersonId String?          @map("accepted_person_id") @db.Uuid
   acceptedPerson   Person?          @relation("InvitationAcceptedBy", fields: [acceptedPersonId], references: [id])
 
+  @@index([email, status])
   @@map("invitation")
 }
 

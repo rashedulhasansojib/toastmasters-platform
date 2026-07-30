@@ -1,6 +1,14 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { z } from 'zod';
-import type { PlatformConsoleSummary } from '@toastmasters/contracts';
+import {
+  createOrgUnitRootRequestSchema,
+  orgTreeQuerySchema,
+  type CreateOrgUnitRootRequest,
+  type OrgTreeLevel,
+  type OrgTreeQuery,
+  type OrgUnit,
+  type PlatformConsoleSummary,
+} from '@toastmasters/contracts';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { ResourceScope } from '../../common/authz/resource-scope.decorator';
 import { PlatformConsoleService } from './platform-console.service';
@@ -26,5 +34,34 @@ export class PlatformConsoleController {
     @Param('regionUnitId', uuidPipe) regionUnitId: string,
   ): Promise<PlatformConsoleSummary> {
     return this.console.summary(regionUnitId);
+  }
+
+  /**
+   * The org-tree browser: one level at a time (roots, or a unit's direct
+   * children), card-shaped with counts. `regionUnitId` only anchors the
+   * authorization check — the tree itself isn't per-region.
+   */
+  @Get('platform/:regionUnitId/org-tree')
+  @ResourceScope('platform.console', 'read', { source: 'param', key: 'regionUnitId' })
+  async orgTree(
+    @Param('regionUnitId', uuidPipe) _regionUnitId: string,
+    @Query(new ZodValidationPipe(orgTreeQuerySchema)) query: OrgTreeQuery,
+  ): Promise<OrgTreeLevel> {
+    return this.console.browseOrgTree(query.parentId);
+  }
+
+  /**
+   * "Add new Region" at the top of the browser. Gated on `org.unit`/`create`
+   * (already granted to system_admin and unit_admin) rather than
+   * `platform.console` — a root has no parent to check authority against, so
+   * `regionUnitId` stands in for scope resolution the same way it does above.
+   */
+  @Post('platform/:regionUnitId/org-tree/regions')
+  @ResourceScope('org.unit', 'create', { source: 'param', key: 'regionUnitId' })
+  async createRegion(
+    @Param('regionUnitId', uuidPipe) _regionUnitId: string,
+    @Body(new ZodValidationPipe(createOrgUnitRootRequestSchema)) body: CreateOrgUnitRootRequest,
+  ): Promise<OrgUnit> {
+    return this.console.createRegionRoot(body);
   }
 }

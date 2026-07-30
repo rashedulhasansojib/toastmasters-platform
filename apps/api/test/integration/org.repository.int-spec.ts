@@ -56,6 +56,63 @@ describe('OrgUnitRepository (integration)', () => {
     expect(club.depth).toBe(2);
   });
 
+  it('findRootsWithCounts returns the region with a childCount of its direct children', async () => {
+    const roots = await repo.findRootsWithCounts();
+    const region = roots.find((r) => r.path === 'r1');
+    expect(region).toBeDefined();
+    expect(region!.childCount).toBe(1); // district d41, the only child so far
+  });
+
+  it('findChildrenWithCounts counts org-unit children for non-club rows', async () => {
+    const region = await repo.findByPath('r1');
+    const children = await repo.findChildrenWithCounts(region!.id);
+    const district = children.find((c) => c.path === 'r1.d41');
+    expect(district).toBeDefined();
+    expect(district!.childCount).toBe(1); // club c1234
+  });
+
+  it('findChildrenWithCounts counts active memberships for club rows, excluding inactive ones', async () => {
+    const district = await repo.findByPath('r1.d41');
+    const club = await repo.findByPath('r1.d41.c1234');
+    const people = new PersonRepository(db);
+
+    const activeMember = await people.create({
+      email: 'active-member@example.com',
+      fullName: 'Active Member',
+    });
+    const inactiveMember = await people.create({
+      email: 'inactive-member@example.com',
+      fullName: 'Inactive Member',
+    });
+    await db.clubMembership.create({
+      data: {
+        personId: activeMember.id,
+        clubUnitId: club!.id,
+        memberType: 'new',
+        localStatus: 'active',
+      },
+    });
+    await db.clubMembership.create({
+      data: {
+        personId: inactiveMember.id,
+        clubUnitId: club!.id,
+        memberType: 'new',
+        localStatus: 'inactive',
+      },
+    });
+
+    const children = await repo.findChildrenWithCounts(district!.id);
+    const clubRow = children.find((c) => c.id === club!.id);
+    expect(clubRow).toBeDefined();
+    expect(clubRow!.childCount).toBe(1); // only the active membership counts
+  });
+
+  it('findAncestors returns the root-to-parent chain, excluding the node itself', async () => {
+    const club = await repo.findByPath('r1.d41.c1234');
+    const ancestors = await repo.findAncestors(club!.path);
+    expect(ancestors.map((a) => a.path)).toEqual(['r1', 'r1.d41']);
+  });
+
   it('findSubtree returns self and all descendants (prefix match)', async () => {
     const subtree = await repo.findSubtree('r1.d41');
     const paths = subtree.map((n) => n.path).sort();

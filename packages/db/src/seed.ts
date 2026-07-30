@@ -218,11 +218,28 @@ const RESOURCES: ResourceSeed[] = [
     sensitivity: 'normal',
   },
   {
+    // Users admin: list-pending / resend / revoke need read+update on top of
+    // the original create-only shape.
     resource: 'identity.invitation',
     context: 'identity',
     label: 'Invitation',
-    allowedActions: ['create'],
+    allowedActions: ['create', 'read', 'update'],
     clubScoped: false, // can target any org-unit tier, not just clubs
+    sensitivity: 'normal',
+  },
+  {
+    // Users admin (super-admin People search/create/edit). Not `restricted` —
+    // profile fields (name/email/phone/TI#/status) are the same exposure
+    // class as `membership.guest`, not a ledger amount or an evaluation.
+    // Granted only to the platform tier (system_admin via the broad
+    // non-restricted synthesis, plus explicit unit_admin/support_readonly
+    // grants below) — no club/area/division/district role template ever
+    // holds it, so oversight and club roles get the ordinary default-deny.
+    resource: 'identity.person',
+    context: 'identity',
+    label: 'Person',
+    allowedActions: ['read', 'create', 'update'],
+    clubScoped: false,
     sensitivity: 'normal',
   },
   {
@@ -894,6 +911,31 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
       { resource: 'meeting.meeting', action: 'read' },
     ],
   },
+  {
+    // Users admin follow-up: system-design.md §6.3 names district_director
+    // alongside area_director/division_director as a district-tier role, but
+    // no district-tier role template existed until this slice — the Users
+    // page's role picker needs every tier's "director" option, not just
+    // area/division. Grants mirror division_director's row exactly (one tier
+    // up from area, one down from the platform tier).
+    role: 'district_director',
+    tier: 'district',
+    unitTypes: ['district'],
+    scopeRule: 'self_subtree',
+    isSingleton: true,
+    label: 'District Director',
+    grants: [
+      { resource: 'quality.area_visit_report', action: 'read' },
+      { resource: 'quality.president_contact_log', action: 'read' },
+      { resource: 'quality.dcp_projection', action: 'read' },
+      { resource: 'quality.health_snapshot', action: 'read' },
+      { resource: 'governance.club_success_plan', action: 'read' },
+      { resource: 'quality.ticket', action: 'read' },
+      { resource: 'quality.ticket', action: 'create' },
+      { resource: 'quality.ticket', action: 'update' },
+      { resource: 'meeting.meeting', action: 'read' },
+    ],
+  },
   // Platform roles: tier 'platform', not bound to a unit type. Zero grants —
   // see the Slice 3 plan's note on why these are deferred to Slices 4/6.
   {
@@ -916,7 +958,14 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
     label: 'Unit Administrator',
     grants: [
       { resource: 'identity.invitation', action: 'create' },
+      { resource: 'identity.invitation', action: 'read' },
+      { resource: 'identity.invitation', action: 'update' },
       { resource: 'identity.role_assignment', action: 'create' },
+      // Users admin (system-design.md §7.7: "Person search across units …
+      // unit_admin = within subtree").
+      { resource: 'identity.person', action: 'read' },
+      { resource: 'identity.person', action: 'create' },
+      { resource: 'identity.person', action: 'update' },
       { resource: 'org.unit', action: 'create' },
       { resource: 'org.unit', action: 'update' },
       { resource: 'access.unit_policy', action: 'create' },
@@ -929,7 +978,11 @@ const ROLE_TEMPLATES: RoleTemplateSeed[] = [
     scopeRule: 'self_subtree',
     isSingleton: false,
     label: 'Support (read-only)',
-    grants: [],
+    grants: [
+      // system-design.md §7.7: "support_readonly = R (audited)".
+      { resource: 'identity.person', action: 'read' },
+      { resource: 'identity.invitation', action: 'read' },
+    ],
   },
 ];
 

@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { getPrisma, type PrismaClient } from '@toastmasters/db';
-import type { OrgUnit, OrgUnitType } from '@toastmasters/contracts';
+import type { OrgUnit, OrgUnitType, OrgUnitWithCount } from '@toastmasters/contracts';
 import { PRISMA_CLIENT } from '../../common/db/prisma-client.token';
 
 // Raw rows come back with snake_case columns and ltree path as text.
@@ -232,6 +232,81 @@ export class OrgUnitRepository {
       ORDER BY path
     `;
     return rows.map(toOrgUnit);
+  }
+
+  /**
+   * Top-level org units (`parent_id IS NULL`) — the org-tree browser's root
+   * level. Always ≤1 today (`org_unit_single_region_root`), but not assumed
+   * to be exactly one: an empty tree renders as an empty card grid.
+   */
+  async findRootsWithCounts(): Promise<OrgUnitWithCount[]> {
+    const rows = await this.db.$queryRaw<OrgUnitRow[]>`
+      SELECT id, type, parent_id, path::text AS path, depth, name, code, status, timezone
+      FROM org_unit WHERE parent_id IS NULL ORDER BY path
+    `;
+    return this.attachCounts(rows.map(toOrgUnit));
+  }
+
+  /** Direct children of `parentId`, for one level of the org-tree browser. */
+  async findChildrenWithCounts(parentId: string): Promise<OrgUnitWithCount[]> {
+    const rows = await this.db.$queryRaw<OrgUnitRow[]>`
+      SELECT id, type, parent_id, path::text AS path, depth, name, code, status, timezone
+      FROM org_unit WHERE parent_id = ${parentId}::uuid ORDER BY path
+    `;
+    return this.attachCounts(rows.map(toOrgUnit));
+  }
+
+  /**
+   * Ancestor chain, root-to-parent, excluding `path` itself — the org-tree
+   * browser's breadcrumb (the caller appends the parent's own row last).
+   */
+  async findAncestors(path: string): Promise<OrgUnit[]> {
+    const rows = await this.db.$queryRaw<OrgUnitRow[]>`
+      SELECT id, type, parent_id, path::text AS path, depth, name, code, status, timezone
+      FROM org_unit WHERE path @> ${path}::ltree AND path != ${path}::ltree
+      ORDER BY path
+    `;
+    return rows.map(toOrgUnit);
+  }
+
+  /**
+   * Attaches `childCount` to each unit: the count of its own org-unit
+   * children, except `club` rows — a leaf in the org tree — which get the
+   * active member count instead (rbac-design's club-level, not per-member,
+   * exposure). Two grouped queries total regardless of how many units are
+   * passed in, not one per unit.
+   */
+  private async attachCounts(units: OrgUnit[]): Promise<OrgUnitWithCount[]> {
+    const clubIds = units.filter((u) => u.type === 'club').map((u) => u.id);
+    const otherIds = units.filter((u) => u.type !== 'club').map((u) => u.id);
+
+    const [childCountRows, memberCountRows] = await Promise.all([
+      otherIds.length
+        ? this.db.$queryRaw<Array<{ parent_id: string; n: bigint }>>`
+            SELECT parent_id, count(*) AS n FROM org_unit
+            WHERE parent_id = ANY(${otherIds}::uuid[]) GROUP BY parent_id
+          `
+        : Promise.resolve([]),
+      clubIds.length
+        ? this.db.$queryRaw<Array<{ club_unit_id: string; n: bigint }>>`
+            SELECT club_unit_id, count(*) AS n FROM club_membership
+            WHERE club_unit_id = ANY(${clubIds}::uuid[])
+              AND local_status = 'active'::"ClubMembershipLocalStatus"
+            GROUP BY club_unit_id
+          `
+        : Promise.resolve([]),
+    ]);
+
+    const childCountByParent = new Map(childCountRows.map((r) => [r.parent_id, Number(r.n)]));
+    const memberCountByClub = new Map(memberCountRows.map((r) => [r.club_unit_id, Number(r.n)]));
+
+    return units.map((u) => ({
+      ...u,
+      childCount:
+        u.type === 'club'
+          ? (memberCountByClub.get(u.id) ?? 0)
+          : (childCountByParent.get(u.id) ?? 0),
+    }));
   }
 
   /**

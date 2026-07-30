@@ -1,6 +1,4 @@
 import { getPlatformConsole } from '@/lib/platform';
-import { Card, CardContent } from '@/components/ui/card';
-import { OrgTreeManager } from '@/components/platform/OrgTreeManager';
 
 /**
  * The super-admin console. Reachable only by holders of
@@ -27,7 +25,7 @@ export default async function PlatformDashboardPage({
     );
   }
 
-  const { region, tree, counts, activePeopleCount, programYearId } = summary;
+  const { region, counts, activePeopleCount, programYearId } = summary;
 
   return (
     <main className="page flex flex-col gap-6">
@@ -40,7 +38,7 @@ export default async function PlatformDashboardPage({
       </div>
 
       <section className="flex flex-col gap-3">
-        <h2>Org tree</h2>
+        <h2>Overview</h2>
         <div className="flex flex-wrap gap-6">
           <Stat label="Districts" value={counts.district} />
           <Stat label="Divisions" value={counts.division} />
@@ -48,15 +46,6 @@ export default async function PlatformDashboardPage({
           <Stat label="Clubs" value={counts.club} />
           <Stat label="Active people" value={activePeopleCount} />
         </div>
-
-        <Card>
-          <CardContent>
-            {/* `tree` arrives ordered by ltree path, which is already a
-                pre-order walk — indenting by depth is enough to render the
-                hierarchy without building a nested structure. */}
-            <OrgTreeManager region={region} tree={tree} />
-          </CardContent>
-        </Card>
       </section>
     </main>
   );

@@ -227,4 +227,85 @@ describe('Platform admin console HTTP surface (integration)', () => {
 
     await app.close();
   });
+
+  it('org-tree browses roots and children, 403s a region-scoped unit_admin, and 409s a second region', async () => {
+    const orgUnits = new OrgUnitRepository();
+    const people = new PersonRepository();
+    const access = new AccessRepository();
+    const grantAdmin = new GrantAdminRepository(undefined, access);
+
+    // Only one region root ever exists (org_unit_single_region_root).
+    const region = await orgUnits.findByPath('r1');
+    if (!region) throw new Error('Expected the region root created by the prior test');
+    const district = await orgUnits.findByPath('r1.d41');
+    if (!district) throw new Error('Expected district d41 created by an earlier test');
+
+    const sysAdmin = await people.create({
+      email: 'orgtree-sysadmin@example.com',
+      fullName: 'Org Tree Sys Admin',
+    });
+    await grantAdmin.grantPlatformRole({
+      personId: sysAdmin.id,
+      role: 'system_admin',
+      orgUnitId: null,
+      grantedBy: sysAdmin.id,
+    });
+
+    const unitAdmin = await people.create({
+      email: 'orgtree-unitadmin@example.com',
+      fullName: 'Org Tree Unit Admin',
+    });
+    await grantAdmin.grantPlatformRole({
+      personId: unitAdmin.id,
+      role: 'unit_admin',
+      orgUnitId: region.id,
+      grantedBy: sysAdmin.id,
+    });
+
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const app: INestApplication = moduleRef.createNestApplication();
+    app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
+    await app.init();
+
+    const jwtFor = (personId: string) =>
+      new SignJWT({ roles: [], scopes: [] })
+        .setProtectedHeader({ alg: 'HS256' })
+        .setSubject(personId)
+        .setExpirationTime('5m')
+        .sign(new TextEncoder().encode(secret));
+
+    const roots = await request(app.getHttpServer())
+      .get(`/v1/platform/${region.id}/org-tree`)
+      .set('Authorization', `Bearer ${await jwtFor(sysAdmin.id)}`)
+      .expect(200);
+    expect(roots.body.ancestors).toEqual([]);
+    const regionCard = roots.body.children.find((c: { id: string }) => c.id === region.id);
+    expect(regionCard).toBeDefined();
+
+    const children = await request(app.getHttpServer())
+      .get(`/v1/platform/${region.id}/org-tree?parentId=${region.id}`)
+      .set('Authorization', `Bearer ${await jwtFor(sysAdmin.id)}`)
+      .expect(200);
+    expect(children.body.ancestors.map((a: { id: string }) => a.id)).toEqual([region.id]);
+    expect(children.body.children.map((c: { id: string }) => c.id)).toContain(district.id);
+
+    // Gated on `platform.console`, not `org.unit` — a unit_admin holds
+    // org.unit create/update at this same scope but no platform.console grant
+    // at all, so this is a default-deny, proving the route wasn't opened up
+    // to every org.unit holder.
+    await request(app.getHttpServer())
+      .get(`/v1/platform/${region.id}/org-tree`)
+      .set('Authorization', `Bearer ${await jwtFor(unitAdmin.id)}`)
+      .expect(403);
+
+    // A second region root 409s — org_unit_single_region_root is a hard
+    // partial unique index, not just an application-level check.
+    await request(app.getHttpServer())
+      .post(`/v1/platform/${region.id}/org-tree/regions`)
+      .set('Authorization', `Bearer ${await jwtFor(sysAdmin.id)}`)
+      .send({ name: 'Region 2', code: 'r2', timezone: 'UTC' })
+      .expect(409);
+
+    await app.close();
+  });
 });

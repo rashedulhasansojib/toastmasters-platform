@@ -1,6 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { getPrisma, type PrismaClient } from '@toastmasters/db';
-import type { RoleAssignment, RoleAssignmentEndedReason } from '@toastmasters/contracts';
+import type {
+  ClubMemberType,
+  RoleAssignment,
+  RoleAssignmentEndedReason,
+} from '@toastmasters/contracts';
 import { PRISMA_CLIENT } from '../../common/db/prisma-client.token';
 
 type RoleAssignmentRow = Awaited<ReturnType<PrismaClient['roleAssignment']['create']>>;
@@ -26,7 +30,15 @@ function toRoleAssignment(row: RoleAssignmentRow): RoleAssignment {
 export class RoleAssignmentRepository {
   constructor(@Inject(PRISMA_CLIENT) private readonly db: PrismaClient = getPrisma()) {}
 
-  /** Always creates status: 'active' — M1 has no pending-approval workflow. */
+  /**
+   * Always creates status: 'active' — M1 has no pending-approval workflow.
+   * `memberType` is optional and, when present, also upserts an active
+   * ClubMembership for the same (person, orgUnit) pair in the same
+   * transaction — the Users admin page's "assign role + ensure membership"
+   * behavior, so a person assigned into a club immediately counts toward
+   * that club's member total (the same ClubMembership rows the org-tree
+   * browser's counts already read).
+   */
   async assign(input: {
     personId: string;
     orgUnitId: string;
@@ -35,6 +47,7 @@ export class RoleAssignmentRepository {
     termStart: Date;
     termEnd: Date;
     appointedBy: string;
+    memberType?: ClubMemberType;
   }): Promise<RoleAssignment> {
     const row = await this.db.$transaction(async (tx) => {
       const created = await tx.roleAssignment.create({
@@ -50,6 +63,27 @@ export class RoleAssignmentRepository {
           trainedAt: [],
         },
       });
+
+      if (input.memberType) {
+        const existing = await tx.clubMembership.findFirst({
+          where: { personId: input.personId, clubUnitId: input.orgUnitId },
+        });
+        if (existing) {
+          await tx.clubMembership.update({
+            where: { id: existing.id },
+            data: { memberType: input.memberType, localStatus: 'active', leftAt: null },
+          });
+        } else {
+          await tx.clubMembership.create({
+            data: {
+              personId: input.personId,
+              clubUnitId: input.orgUnitId,
+              memberType: input.memberType,
+            },
+          });
+        }
+      }
+
       // rbac-design.md §5: role assignment created/ended bumps permission_version.
       await tx.person.update({
         where: { id: input.personId },

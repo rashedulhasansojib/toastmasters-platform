@@ -10,6 +10,7 @@ function invitation(overrides: Partial<Invitation> = {}): Invitation {
     email: 'newcomer@example.com',
     orgUnitId: 'club-1',
     role: 'club_president',
+    memberType: null,
     programYearId: '2026-2027',
     invitedBy: 'inviter-1',
     status: 'pending',

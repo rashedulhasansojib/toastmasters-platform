@@ -1,6 +1,6 @@
 {
-  "name": "Toastmasters Platform",
-  "short_name": "Toastmasters",
+  "name": "Toastie",
+  "short_name": "Toastie",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

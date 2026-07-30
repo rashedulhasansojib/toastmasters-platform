@@ -60,3 +60,40 @@ export const orgUnitDeleteBlocker = z.object({
   count: z.number().int().positive(),
 });
 export type OrgUnitDeleteBlocker = z.infer<typeof orgUnitDeleteBlocker>;
+
+/**
+ * The org-tree browser's card shape (platform console). `childCount` means two
+ * different things depending on `type`: for every tier except `club` it's the
+ * count of direct org-unit children (how many districts inside this region,
+ * how many clubs inside this area, …); for `club` — a leaf with no org-unit
+ * children — it's the active member count instead. One field, not a union,
+ * so the client doesn't need to branch on shape, only on label.
+ */
+export const orgUnitWithCount = orgUnit.extend({
+  childCount: z.number().int().nonnegative(),
+});
+export type OrgUnitWithCount = z.infer<typeof orgUnitWithCount>;
+
+/**
+ * One level of the drill-down browser. `ancestors` is root-to-parent
+ * *inclusive* of the parent itself — exactly the breadcrumb trail — and empty
+ * at the root level (no parent yet, `children` are the top-level regions).
+ */
+export const orgTreeLevelSchema = z.object({
+  ancestors: z.array(orgUnit),
+  children: z.array(orgUnitWithCount),
+});
+export type OrgTreeLevel = z.infer<typeof orgTreeLevelSchema>;
+
+export const orgTreeQuerySchema = z.object({ parentId: z.uuid().optional() }).strict();
+export type OrgTreeQuery = z.infer<typeof orgTreeQuerySchema>;
+
+/** "Add new Region" at the top of the browser. Always `type: 'region'` — see `org_unit_single_region_root`. */
+export const createOrgUnitRootRequestSchema = z
+  .object({
+    name: z.string().min(1),
+    code: z.string().min(1),
+    timezone: z.string().min(1),
+  })
+  .strict();
+export type CreateOrgUnitRootRequest = z.infer<typeof createOrgUnitRootRequestSchema>;

@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
 import { z } from 'zod';
 import {
   createInvitationRequestSchema,
@@ -6,6 +6,7 @@ import {
   type CreateInvitationRequest,
   type AcceptInvitationRequest,
   type Invitation,
+  type InvitationWithLink,
 } from '@toastmasters/contracts';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { ResourceScope } from '../../common/authz/resource-scope.decorator';
@@ -27,8 +28,34 @@ export class InvitationController {
     @Param('orgUnitId', uuidPipe) orgUnitId: string,
     @CurrentUser() principal: Principal,
     @Body(new ZodValidationPipe(createInvitationRequestSchema)) body: CreateInvitationRequest,
-  ): Promise<Invitation> {
+  ): Promise<InvitationWithLink> {
     return this.invitations.create({ actorId: principal.userId, orgUnitId, ...body });
+  }
+
+  /** Users admin's pending-invitations column, for the subtree rooted at `orgUnitId`. */
+  @Get('org-units/:orgUnitId/invitations')
+  @ResourceScope('identity.invitation', 'read', { source: 'param', key: 'orgUnitId' })
+  async listPending(@Param('orgUnitId', uuidPipe) orgUnitId: string): Promise<Invitation[]> {
+    return this.invitations.listPending(orgUnitId);
+  }
+
+  /** `:id` is an invitation id — authorized in-service against the invitation's own org unit, not via @ResourceScope. */
+  @Post('invitations/:id/resend')
+  @HttpCode(200)
+  async resend(
+    @Param('id', uuidPipe) id: string,
+    @CurrentUser() principal: Principal,
+  ): Promise<InvitationWithLink> {
+    return this.invitations.resend(id, principal.userId);
+  }
+
+  @Post('invitations/:id/revoke')
+  @HttpCode(200)
+  async revoke(
+    @Param('id', uuidPipe) id: string,
+    @CurrentUser() principal: Principal,
+  ): Promise<Invitation> {
+    return this.invitations.revoke(id, principal.userId);
   }
 
   @Public()

@@ -10,8 +10,9 @@ export const guestPipelineStatus = z.enum([
   'new',
   'contacted',
   'interested',
-  'not_interested',
+  'joined_meeting',
   'joined',
+  'not_interested',
 ]);
 export type GuestPipelineStatus = z.infer<typeof guestPipelineStatus>;
 
@@ -56,7 +57,9 @@ export type CreateGuestRequest = z.infer<typeof createGuestRequestSchema>;
  */
 export const updateGuestRequestSchema = z
   .object({
-    pipelineStatus: z.enum(['contacted', 'interested', 'not_interested']).optional(),
+    pipelineStatus: z
+      .enum(['contacted', 'interested', 'joined_meeting', 'not_interested'])
+      .optional(),
     email: z.email().optional(),
     phone: z.string().min(1).optional(),
     whatsapp: z.string().min(1).optional(),

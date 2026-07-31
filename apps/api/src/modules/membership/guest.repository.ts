@@ -78,7 +78,7 @@ export class GuestRepository {
   async update(
     id: string,
     patch: {
-      pipelineStatus?: 'contacted' | 'interested' | 'not_interested';
+      pipelineStatus?: 'contacted' | 'interested' | 'joined_meeting' | 'not_interested';
       email?: string;
       phone?: string;
       whatsapp?: string;

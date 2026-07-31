@@ -1038,8 +1038,9 @@ enum GuestPipelineStatus {
   new
   contacted
   interested
-  not_interested
+  joined_meeting
   joined
+  not_interested
 
   @@map("guest_pipeline_status")
 }

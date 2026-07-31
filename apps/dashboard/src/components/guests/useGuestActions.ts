@@ -10,7 +10,7 @@ import { isMovableStatus } from './pipeline';
 /**
  * Every pipeline write in one place, because the rules are not symmetric:
  *
- * - `contacted` / `interested` / `not_interested` are a PATCH.
+ * - `contacted` / `interested` / `joined_meeting` / `not_interested` are a PATCH.
  * - `joined` is **not** patchable — it is set only by the conversion handler,
  *   so a move to that column becomes `POST …/convert`.
  * - `new` is the create-time default and is unreachable afterwards.

@@ -277,6 +277,23 @@ const RESOURCES: ResourceSeed[] = [
     sensitivity: 'normal',
   },
   {
+    // Granting/revoking a platform_role_assignment row (system_admin,
+    // unit_admin, support_readonly). `sensitive`, not `restricted` — the four
+    // named restricted resources stay a short, deliberate list (CLAUDE.md
+    // §5), and this is gated tightly enough by being absent from every
+    // role_template's grant list: no template lists it, so it reaches only
+    // system_admin, via the broad non-restricted synthesis in
+    // access.repository.ts — same shape as `platform.console`/`org.unit:delete`.
+    // `read` is not listed here: platform roles are already visible on
+    // `PersonDetail.platformRoles`, gated by `identity.person:read`.
+    resource: 'access.platform_role',
+    context: 'access',
+    label: 'Platform role assignment',
+    allowedActions: ['create', 'delete'],
+    clubScoped: false,
+    sensitivity: 'sensitive',
+  },
+  {
     // M4 Slice 1: system-design.md §11.1. PII but not `restricted` — the four
     // named restricted resources (finance.ledger, education.evaluation,
     // membership.health_signal, platform.audit) are a deliberately short

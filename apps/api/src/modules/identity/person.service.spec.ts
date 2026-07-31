@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import type { InvitationWithLink, OrgUnit, Person, PersonDetail } from '@toastmasters/contracts';
 import { PersonService } from './person.service';
 
@@ -98,14 +98,72 @@ function makeService(
   const passwords = {
     hash: vi.fn().mockResolvedValue('$argon2id$hash'),
   };
+  const roleTemplates = {
+    findByRole: vi.fn().mockResolvedValue({
+      role: 'system_admin',
+      tier: 'platform',
+      unitTypes: [],
+      isSingleton: false,
+      label: 'System Administrator',
+    }),
+  };
+  const grantAdmin = {
+    grantPlatformRole: vi.fn().mockResolvedValue({
+      id: 'platform-role-assignment-1',
+      personId: 'person-1',
+      role: 'system_admin',
+      orgUnitId: null,
+      grantedBy: 'actor-1',
+      grantedAt: new Date(),
+      expiresAt: null,
+    }),
+    revokePlatformRole: vi.fn().mockResolvedValue(undefined),
+  };
+  // A grant covering every scope this test file uses, so canDelegate() (a
+  // real, unmocked import) passes by default — tests that need to see it
+  // fail override effectiveGrants to return [].
+  const accessRepository = {
+    effectiveGrants: vi.fn().mockResolvedValue([
+      {
+        role: 'system_admin',
+        scope: 'r1',
+        resource: 'access.platform_role',
+        action: 'create',
+        condition: 'any',
+        effect: 'allow',
+      },
+      {
+        role: 'system_admin',
+        scope: 'r1',
+        resource: 'access.platform_role',
+        action: 'delete',
+        condition: 'any',
+        effect: 'allow',
+      },
+    ]),
+    pathOf: vi.fn().mockResolvedValue('r1'),
+    regionRootPath: vi.fn().mockResolvedValue('r1'),
+  };
 
   const service = new PersonService(
     people as never,
     orgUnits as never,
     invitations as never,
     passwords as never,
+    roleTemplates as never,
+    grantAdmin as never,
+    accessRepository as never,
   );
-  return { service, people, orgUnits, invitations, passwords };
+  return {
+    service,
+    people,
+    orgUnits,
+    invitations,
+    passwords,
+    roleTemplates,
+    grantAdmin,
+    accessRepository,
+  };
 }
 
 describe('PersonService.search', () => {
@@ -245,5 +303,121 @@ describe('PersonService.createWithOptionalInvite', () => {
       expect.objectContaining({ actorId: 'actor-1', orgUnitId: 'club-1', role: 'club_president' }),
     );
     expect(result.invitation?.inviteUrl).toContain('/accept');
+  });
+});
+
+describe('PersonService.grantPlatformRole', () => {
+  it('grants system_admin with no org unit and returns the badge', async () => {
+    const { service, grantAdmin } = makeService();
+    const badge = await service.grantPlatformRole('person-1', { role: 'system_admin' }, 'actor-1');
+    expect(grantAdmin.grantPlatformRole).toHaveBeenCalledWith(
+      expect.objectContaining({ personId: 'person-1', role: 'system_admin', orgUnitId: null }),
+    );
+    expect(badge.role).toBe('system_admin');
+  });
+
+  it('rejects an unknown or non-platform-tier role', async () => {
+    const { service, roleTemplates } = makeService();
+    roleTemplates.findByRole.mockResolvedValueOnce(null);
+    await expect(
+      service.grantPlatformRole('person-1', { role: 'not_a_role' }, 'actor-1'),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('rejects system_admin scoped to an org unit', async () => {
+    const { service } = makeService();
+    await expect(
+      service.grantPlatformRole(
+        'person-1',
+        { role: 'system_admin', orgUnitId: 'club-1' },
+        'actor-1',
+      ),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('rejects a subtree-scoped platform role with no org unit', async () => {
+    const { service, roleTemplates } = makeService();
+    roleTemplates.findByRole.mockResolvedValueOnce({
+      role: 'unit_admin',
+      tier: 'platform',
+      unitTypes: [],
+      isSingleton: false,
+      label: 'Unit Administrator',
+    });
+    await expect(
+      service.grantPlatformRole('person-1', { role: 'unit_admin' }, 'actor-1'),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('404s when the target person does not exist', async () => {
+    const { service } = makeService({ personById: null });
+    await expect(
+      service.grantPlatformRole('missing', { role: 'system_admin' }, 'actor-1'),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  it('403s when the actor does not hold access.platform_role:create at this scope', async () => {
+    const { service, accessRepository } = makeService();
+    accessRepository.effectiveGrants.mockResolvedValueOnce([]);
+    await expect(
+      service.grantPlatformRole('person-1', { role: 'system_admin' }, 'actor-1'),
+    ).rejects.toThrow(ForbiddenException);
+  });
+});
+
+describe('PersonService.revokePlatformRole', () => {
+  it('delegates to GrantAdminRepository once the badge is found on the person', async () => {
+    const { service, grantAdmin } = makeService({
+      detailResult: detail({
+        platformRoles: [
+          {
+            platformRoleAssignmentId: 'platform-role-assignment-1',
+            role: 'system_admin',
+            orgUnitId: null,
+            orgUnitName: null,
+          },
+        ],
+      }),
+    });
+    await service.revokePlatformRole('person-1', 'platform-role-assignment-1', 'actor-1');
+    expect(grantAdmin.revokePlatformRole).toHaveBeenCalledWith(
+      'platform-role-assignment-1',
+      'actor-1',
+    );
+  });
+
+  it('404s when the target person does not exist', async () => {
+    const { service, grantAdmin } = makeService({ detailResult: null });
+    await expect(
+      service.revokePlatformRole('missing', 'platform-role-assignment-1', 'actor-1'),
+    ).rejects.toThrow(NotFoundException);
+    expect(grantAdmin.revokePlatformRole).not.toHaveBeenCalled();
+  });
+
+  it("404s when the assignment id does not belong to this person's platform roles", async () => {
+    const { service, grantAdmin } = makeService({ detailResult: detail({ platformRoles: [] }) });
+    await expect(
+      service.revokePlatformRole('person-1', 'someone-elses-assignment', 'actor-1'),
+    ).rejects.toThrow(NotFoundException);
+    expect(grantAdmin.revokePlatformRole).not.toHaveBeenCalled();
+  });
+
+  it('403s when the actor does not hold access.platform_role:delete at this scope', async () => {
+    const { service, accessRepository } = makeService({
+      detailResult: detail({
+        platformRoles: [
+          {
+            platformRoleAssignmentId: 'platform-role-assignment-1',
+            role: 'system_admin',
+            orgUnitId: null,
+            orgUnitName: null,
+          },
+        ],
+      }),
+    });
+    accessRepository.effectiveGrants.mockResolvedValueOnce([]);
+    await expect(
+      service.revokePlatformRole('person-1', 'platform-role-assignment-1', 'actor-1'),
+    ).rejects.toThrow(ForbiddenException);
   });
 });

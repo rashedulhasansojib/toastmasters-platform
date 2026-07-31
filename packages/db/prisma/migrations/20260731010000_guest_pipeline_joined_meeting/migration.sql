@@ -1,0 +1,11 @@
+-- Add `joined_meeting` to guest_pipeline_status: a guest who has attended a
+-- meeting but not yet converted to a member. Positioned right before `joined`
+-- so `\dT+ guest_pipeline_status` reads in the same order as the kanban
+-- columns; the UI's column order itself comes from the contract's zod enum,
+-- not this physical ordering.
+--
+-- Plain top-level statement, not wrapped in a DO block or explicit
+-- transaction: ALTER TYPE ... ADD VALUE cannot safely be combined with using
+-- the new value in the same transaction, and PL/pgSQL blocks don't get the
+-- implicit commit a bare statement does.
+ALTER TYPE "guest_pipeline_status" ADD VALUE 'joined_meeting' BEFORE 'joined';

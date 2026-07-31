@@ -2,14 +2,17 @@ import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query } fr
 import { z } from 'zod';
 import {
   createPersonRequestSchema,
+  grantPlatformRoleRequestSchema,
   personSearchQuerySchema,
   setPersonPasswordRequestSchema,
   updatePersonRequestSchema,
   type CreatePersonRequest,
+  type GrantPlatformRoleRequest,
   type InvitationWithLink,
   type OrgUnitAncestorsResponse,
   type Person,
   type PersonDetail,
+  type PersonPlatformRoleBadge,
   type PersonSearchQuery,
   type PersonSearchResponse,
   type SetPersonPasswordRequest,
@@ -130,5 +133,32 @@ export class PersonController {
     @Param('orgUnitId', uuidPipe) orgUnitId: string,
   ): Promise<OrgUnitAncestorsResponse> {
     return this.people.getAncestors(orgUnitId);
+  }
+
+  /**
+   * Users admin: grant a platform role (system_admin / unit_admin /
+   * support_readonly). No `@ResourceScope` — the URL is anchored on the
+   * target person, not an org unit; PersonService.grantPlatformRole delegates
+   * the real authority check to GrantAdminRepository's canDelegate guard
+   * against the role's actual scope (rbac-design.md §7.4).
+   */
+  @Post('people/:personId/platform-roles')
+  async grantPlatformRole(
+    @Param('personId', uuidPipe) personId: string,
+    @CurrentUser() principal: Principal,
+    @Body(new ZodValidationPipe(grantPlatformRoleRequestSchema)) body: GrantPlatformRoleRequest,
+  ): Promise<PersonPlatformRoleBadge> {
+    return this.people.grantPlatformRole(personId, body, principal.userId);
+  }
+
+  /** Users admin: revoke a platform role. See grantPlatformRole()'s note on why there's no `@ResourceScope`. */
+  @Delete('people/:personId/platform-roles/:platformRoleAssignmentId')
+  @HttpCode(204)
+  async revokePlatformRole(
+    @Param('personId', uuidPipe) personId: string,
+    @Param('platformRoleAssignmentId', uuidPipe) platformRoleAssignmentId: string,
+    @CurrentUser() principal: Principal,
+  ): Promise<void> {
+    await this.people.revokePlatformRole(personId, platformRoleAssignmentId, principal.userId);
   }
 }

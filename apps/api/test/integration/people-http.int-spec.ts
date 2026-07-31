@@ -3,7 +3,7 @@ import { Test } from '@nestjs/testing';
 import { INestApplication, VersioningType } from '@nestjs/common';
 import request from 'supertest';
 import { SignJWT } from 'jose';
-import { seedAccessVocabulary } from '@toastmasters/db';
+import { getPrisma, seedAccessVocabulary } from '@toastmasters/db';
 import { startTestDb } from '../support/test-db';
 import { startTestRedis } from '../support/test-redis';
 import { AppModule } from '../../src/app.module';
@@ -225,6 +225,131 @@ describe('Users admin HTTP surface (integration)', () => {
       .get(`/v1/org-units/${clubA.id}/people`)
       .set('Authorization', `Bearer ${await jwtFor(clubOfficer.id)}`)
       .expect(403);
+
+    await app.close();
+  });
+
+  /**
+   * The gap this slice closes: granting/revoking a platform role
+   * (system_admin / unit_admin / support_readonly) had no HTTP surface at
+   * all. The load-bearing assertion is the 403 — an ordinary club officer
+   * (or even a district-scoped unit_admin, which holds no
+   * access.platform_role grant) must not be able to mint themselves or
+   * anyone else a platform role.
+   */
+  it('a system_admin grants and revokes a platform role over HTTP; anyone else gets 403', async () => {
+    const orgUnits = new OrgUnitRepository();
+    const people = new PersonRepository();
+    const access = new AccessRepository();
+    const grantAdmin = new GrantAdminRepository(undefined, access);
+
+    // `org_unit_single_region_root` allows exactly one 'region' row per
+    // deployment (CLAUDE.md §2 decision 6) — reuse it if an earlier test in
+    // this file already created one, rather than assuming test order.
+    const region =
+      (await getPrisma().orgUnit.findFirst({ where: { type: 'region' } })) ??
+      (await orgUnits.createRoot({
+        type: 'region',
+        code: 'r1',
+        name: 'Region 1',
+        timezone: 'Asia/Dhaka',
+      }));
+    const district = await orgUnits.createChild({
+      parentId: region.id,
+      type: 'district',
+      code: 'd2',
+      name: 'District 2',
+      timezone: 'Asia/Dhaka',
+    });
+
+    const sysAdmin = await people.create({
+      email: 'sysadmin-grant@example.com',
+      fullName: 'Sys Admin',
+    });
+    await grantAdmin.grantPlatformRole({
+      personId: sysAdmin.id,
+      role: 'system_admin',
+      orgUnitId: null,
+      grantedBy: sysAdmin.id,
+    });
+    const unitAdmin = await people.create({
+      email: 'unitadmin-grant@example.com',
+      fullName: 'Unit Admin',
+    });
+    await grantAdmin.grantPlatformRole({
+      personId: unitAdmin.id,
+      role: 'unit_admin',
+      orgUnitId: district.id,
+      grantedBy: sysAdmin.id,
+    });
+    const newcomer = await people.create({
+      email: 'newcomer-grant@example.com',
+      fullName: 'Newcomer',
+    });
+
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const app: INestApplication = moduleRef.createNestApplication();
+    app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
+    await app.init();
+
+    const jwtFor = (personId: string) =>
+      new SignJWT({ roles: [], scopes: [] })
+        .setProtectedHeader({ alg: 'HS256' })
+        .setSubject(personId)
+        .setExpirationTime('5m')
+        .sign(new TextEncoder().encode(secret));
+
+    // A unit_admin — a real platform role, but not system_admin — cannot
+    // grant a platform role: access.platform_role isn't in its seeded grant
+    // list, only system_admin's broad non-restricted synthesis holds it.
+    await request(app.getHttpServer())
+      .post(`/v1/people/${newcomer.id}/platform-roles`)
+      .set('Authorization', `Bearer ${await jwtFor(unitAdmin.id)}`)
+      .send({ role: 'system_admin' })
+      .expect(403);
+
+    // system_admin grants system_admin to someone else.
+    const grantResponse = await request(app.getHttpServer())
+      .post(`/v1/people/${newcomer.id}/platform-roles`)
+      .set('Authorization', `Bearer ${await jwtFor(sysAdmin.id)}`)
+      .send({ role: 'system_admin' })
+      .expect(201);
+    expect(grantResponse.body).toMatchObject({ role: 'system_admin', orgUnitId: null });
+
+    const detail = await request(app.getHttpServer())
+      .get(`/v1/people/${newcomer.id}?anchorOrgUnitId=${region.id}`)
+      .set('Authorization', `Bearer ${await jwtFor(sysAdmin.id)}`)
+      .expect(200);
+    expect(detail.body.platformRoles).toContainEqual(
+      expect.objectContaining({ role: 'system_admin' }),
+    );
+
+    // system_admin is global — scoping it to an org unit is a 400, not a
+    // silently-ignored field.
+    await request(app.getHttpServer())
+      .post(`/v1/people/${newcomer.id}/platform-roles`)
+      .set('Authorization', `Bearer ${await jwtFor(sysAdmin.id)}`)
+      .send({ role: 'system_admin', orgUnitId: district.id })
+      .expect(400);
+
+    // The same unauthorized unit_admin cannot revoke it either.
+    const platformRoleAssignmentId = grantResponse.body.platformRoleAssignmentId;
+    await request(app.getHttpServer())
+      .delete(`/v1/people/${newcomer.id}/platform-roles/${platformRoleAssignmentId}`)
+      .set('Authorization', `Bearer ${await jwtFor(unitAdmin.id)}`)
+      .expect(403);
+
+    // system_admin revokes it.
+    await request(app.getHttpServer())
+      .delete(`/v1/people/${newcomer.id}/platform-roles/${platformRoleAssignmentId}`)
+      .set('Authorization', `Bearer ${await jwtFor(sysAdmin.id)}`)
+      .expect(204);
+
+    const detailAfterRevoke = await request(app.getHttpServer())
+      .get(`/v1/people/${newcomer.id}?anchorOrgUnitId=${region.id}`)
+      .set('Authorization', `Bearer ${await jwtFor(sysAdmin.id)}`)
+      .expect(200);
+    expect(detailAfterRevoke.body.platformRoles).toEqual([]);
 
     await app.close();
   });

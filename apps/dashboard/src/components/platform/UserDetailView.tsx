@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, KeyRound, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { ArrowLeft, KeyRound, Plus, RotateCcw, ShieldPlus, Trash2, X } from 'lucide-react';
 import type {
   ClubMemberType,
   OrgUnit,
@@ -55,6 +55,7 @@ export function UserDetailView({
 }) {
   const router = useRouter();
   const [assignOpen, setAssignOpen] = useState(false);
+  const [grantPlatformOpen, setGrantPlatformOpen] = useState(false);
 
   if (detail.deletedAt) {
     return (
@@ -97,39 +98,44 @@ export function UserDetailView({
       )}
 
       <Card>
-        <CardHeader className="flex-row items-center justify-between">
+        <CardHeader className="flex-row items-center justify-between gap-2">
           <CardTitle>Roles</CardTitle>
-          <Button size="sm" onClick={() => setAssignOpen(true)}>
-            <Plus /> Assign new role
-          </Button>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={() => setGrantPlatformOpen(true)}>
+              <ShieldPlus /> Grant platform role
+            </Button>
+            <Button size="sm" onClick={() => setAssignOpen(true)}>
+              <Plus /> Assign new role
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
-          {detail.roleAssignments.length === 0 ? (
+          {detail.roleAssignments.length === 0 && detail.platformRoles.length === 0 ? (
             <p className="text-sm text-muted-foreground">No roles assigned yet.</p>
           ) : (
-            detail.roleAssignments.map((r) => (
-              <RoleRow
-                key={r.roleAssignmentId}
-                roleAssignmentId={r.roleAssignmentId}
-                role={r.role}
-                orgUnitName={r.orgUnitName}
-                status={r.status}
-                onChanged={() => router.refresh()}
-              />
-            ))
+            <>
+              {detail.roleAssignments.map((r) => (
+                <RoleRow
+                  key={r.roleAssignmentId}
+                  roleAssignmentId={r.roleAssignmentId}
+                  role={r.role}
+                  orgUnitName={r.orgUnitName}
+                  status={r.status}
+                  onChanged={() => router.refresh()}
+                />
+              ))}
+              {detail.platformRoles.map((p) => (
+                <PlatformRoleRow
+                  key={p.platformRoleAssignmentId}
+                  personId={detail.id}
+                  platformRoleAssignmentId={p.platformRoleAssignmentId}
+                  role={p.role}
+                  orgUnitName={p.orgUnitName}
+                  onChanged={() => router.refresh()}
+                />
+              ))}
+            </>
           )}
-          {detail.platformRoles.map((p) => (
-            <div
-              key={p.platformRoleAssignmentId}
-              className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm"
-            >
-              <span>
-                <span className="font-medium">{p.role}</span>
-                <span className="text-muted-foreground"> · {p.orgUnitName ?? 'platform-wide'}</span>
-              </span>
-              <Badge variant="secondary">platform</Badge>
-            </div>
-          ))}
         </CardContent>
       </Card>
 
@@ -180,6 +186,25 @@ export function UserDetailView({
               router.refresh();
             }}
             onCancel={() => setAssignOpen(false)}
+          />
+        )}
+      </Dialog>
+
+      <Dialog
+        open={grantPlatformOpen}
+        onOpenChange={setGrantPlatformOpen}
+        title="Grant a platform role"
+      >
+        {grantPlatformOpen && (
+          <GrantPlatformRoleForm
+            regionUnitId={regionUnitId}
+            personId={detail.id}
+            roleTemplates={roleTemplates}
+            onDone={() => {
+              setGrantPlatformOpen(false);
+              router.refresh();
+            }}
+            onCancel={() => setGrantPlatformOpen(false)}
           />
         )}
       </Dialog>
@@ -681,6 +706,66 @@ function RoleRow({
   );
 }
 
+/**
+ * A platform role (system_admin / unit_admin / support_readonly) row —
+ * separate from RoleRow because it revokes via a different endpoint (a hard
+ * delete, not the end-with-a-reason flow role_assignment uses) and has no
+ * status badge, since platform_role_assignment has no lifecycle beyond
+ * existing or not.
+ */
+function PlatformRoleRow({
+  personId,
+  platformRoleAssignmentId,
+  role,
+  orgUnitName,
+  onChanged,
+}: {
+  personId: string;
+  platformRoleAssignmentId: string;
+  role: string;
+  orgUnitName: string | null;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  async function revoke(): Promise<void> {
+    if (!confirm(`Revoke the ${role} platform role from this user?`)) return;
+    setBusy(true);
+    try {
+      const result = await submitAction(
+        () =>
+          fetch(`/api/people/${personId}/platform-roles/${platformRoleAssignmentId}`, {
+            method: 'DELETE',
+          }),
+        {
+          loading: 'Revoking platform role…',
+          success: 'Platform role revoked',
+          error: 'Could not revoke that platform role.',
+        },
+      );
+      if (!result) return;
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm">
+      <span>
+        <span className="font-medium">{role}</span>
+        <span className="text-muted-foreground"> · {orgUnitName ?? 'platform-wide'}</span>
+      </span>
+      <div className="flex items-center gap-2">
+        <Badge variant="secondary">platform</Badge>
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => void revoke()}>
+          <X /> Revoke
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function AssignRoleForm({
   regionUnitId,
   personId,
@@ -839,6 +924,126 @@ function AssignRoleForm({
         </Button>
         <Button type="submit" size="lg" className="h-11 lg:h-9" disabled={submitting}>
           {submitting ? 'Assigning…' : 'Assign role'}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * Grants a platform role (system_admin / unit_admin / support_readonly) —
+ * separate from AssignRoleForm because a platform role isn't tied to a
+ * program-year term or an officer's club: system_admin is global (no org
+ * unit picker at all), the other two are subtree-scoped but termless.
+ */
+function GrantPlatformRoleForm({
+  regionUnitId,
+  personId,
+  roleTemplates,
+  onDone,
+  onCancel,
+}: {
+  regionUnitId: string;
+  personId: string;
+  roleTemplates: RoleTemplateSummary[];
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const platformRoles = roleTemplates.filter((t) => t.tier === 'platform');
+  const [role, setRole] = useState('');
+  const [selectedUnit, setSelectedUnit] = useState<OrgUnit | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const selectedTemplate = platformRoles.find((t) => t.role === role);
+  const needsOrgUnit = role !== '' && role !== 'system_admin';
+
+  async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+
+    if (!role) {
+      toast.error('Choose a platform role.');
+      return;
+    }
+    if (needsOrgUnit && !selectedUnit) {
+      toast.error(`${selectedTemplate?.label ?? role} requires an org unit.`);
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const result = await submitAction(
+        () =>
+          fetch(`/api/people/${personId}/platform-roles`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              role,
+              orgUnitId: needsOrgUnit ? selectedUnit!.id : null,
+            }),
+          }),
+        {
+          loading: 'Granting platform role…',
+          success: 'Platform role granted',
+          error: 'Could not grant that platform role.',
+        },
+      );
+      if (!result) return;
+      onDone();
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="grant-platform-role">Role</Label>
+        <Select
+          items={Object.fromEntries(platformRoles.map((t) => [t.role, t.label]))}
+          value={role || undefined}
+          onValueChange={(v) => setRole(v ?? '')}
+        >
+          <SelectTrigger className="w-full" id="grant-platform-role">
+            <SelectValue placeholder="Select a platform role" />
+          </SelectTrigger>
+          <SelectContent>
+            {platformRoles.map((t) => (
+              <SelectItem key={t.role} value={t.role}>
+                {t.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {role === 'system_admin' && (
+          <p className="text-xs text-muted-foreground">
+            Global — reaches every club, area, division, and district.
+          </p>
+        )}
+      </div>
+
+      {needsOrgUnit && (
+        <div className="flex flex-col gap-1.5">
+          <Label>Org unit</Label>
+          <OrgUnitFieldsPicker regionUnitId={regionUnitId} onChange={setSelectedUnit} />
+          <p className="text-xs text-muted-foreground">
+            {selectedTemplate?.label ?? 'This role'} applies to the picked unit and everything
+            beneath it.
+          </p>
+        </div>
+      )}
+
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <Button
+          type="button"
+          variant="outline"
+          size="lg"
+          className="h-11 lg:h-9"
+          onClick={onCancel}
+        >
+          Cancel
+        </Button>
+        <Button type="submit" size="lg" className="h-11 lg:h-9" disabled={submitting}>
+          {submitting ? 'Granting…' : 'Grant role'}
         </Button>
       </div>
     </form>

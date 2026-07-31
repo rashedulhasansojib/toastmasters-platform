@@ -13,8 +13,9 @@ export const STATUS_LABEL: Record<GuestPipelineStatus, string> = {
   new: 'New',
   contacted: 'Contacted',
   interested: 'Interested',
-  not_interested: 'Not interested',
-  joined: 'Joined',
+  joined_meeting: 'Joined Meeting(s)',
+  joined: 'Joined Club',
+  not_interested: 'Not Interested',
 };
 
 /**
@@ -22,7 +23,12 @@ export const STATUS_LABEL: Record<GuestPipelineStatus, string> = {
  * create-time default and `joined` is set exclusively by the conversion
  * handler — PATCHing either is a 400. The UI must never offer them as a move.
  */
-export const MOVABLE_STATUSES = ['contacted', 'interested', 'not_interested'] as const;
+export const MOVABLE_STATUSES = [
+  'contacted',
+  'interested',
+  'joined_meeting',
+  'not_interested',
+] as const;
 export type MovableStatus = (typeof MOVABLE_STATUSES)[number];
 
 export function isMovableStatus(status: GuestPipelineStatus): status is MovableStatus {
@@ -34,16 +40,18 @@ export const STATUS_ACCENT: Record<GuestPipelineStatus, string> = {
   new: 'bg-slate-400',
   contacted: 'bg-blue-500',
   interested: 'bg-amber-500',
-  not_interested: 'bg-rose-500',
+  joined_meeting: 'bg-violet-500',
   joined: 'bg-emerald-500',
+  not_interested: 'bg-rose-500',
 };
 
 export const STATUS_CHIP: Record<GuestPipelineStatus, string> = {
   new: 'border-slate-500/30 bg-slate-500/10 text-slate-700 dark:text-slate-300',
   contacted: 'border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300',
   interested: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300',
-  not_interested: 'border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300',
+  joined_meeting: 'border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300',
   joined: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+  not_interested: 'border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300',
 };
 
 export const CHANNEL_LABEL: Record<GuestCommunicationChannel, string> = {

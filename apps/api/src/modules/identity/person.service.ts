@@ -1,17 +1,28 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type {
   CreatePersonRequest,
+  GrantPlatformRoleRequest,
   InvitationWithLink,
   OrgUnitAncestorsResponse,
   Person,
   PersonDetail,
+  PersonPlatformRoleBadge,
   PersonSearchResponse,
   UpdatePersonRequest,
 } from '@toastmasters/contracts';
 import { PasswordService } from '../../common/auth/password.service';
+import { canDelegate } from '../../common/authz/can-delegate';
+import { AccessRepository } from '../access/access.repository';
+import { GrantAdminRepository } from '../access/grant-admin.repository';
 import { OrgUnitRepository } from '../org/org.repository';
 import { InvitationService } from './invitation.service';
 import { PersonRepository } from './person.repository';
+import { RoleTemplateRepository } from './role-template.repository';
 
 /**
  * Users admin (super-admin People page). `anchorOrgUnitId` is the org unit
@@ -26,6 +37,9 @@ export class PersonService {
     private readonly orgUnits: OrgUnitRepository,
     private readonly invitations: InvitationService,
     private readonly passwords: PasswordService,
+    private readonly roleTemplates: RoleTemplateRepository,
+    private readonly grantAdmin: GrantAdminRepository,
+    private readonly accessRepository: AccessRepository,
   ) {}
 
   async search(input: {
@@ -182,5 +196,107 @@ export class PersonService {
     if (!unit) throw new NotFoundException('Org unit not found');
     const ancestors = await this.orgUnits.findAncestors(unit.path);
     return { unit, ancestors };
+  }
+
+  /**
+   * Users admin: granting a platform role (system_admin / unit_admin /
+   * support_readonly). No `@ResourceScope` on the backing route — same
+   * reasoning as `RoleAssignmentService.end()`: the URL is anchored on the
+   * target person, not an org unit. The canDelegate check runs here, against
+   * the role's real scope, rather than in GrantAdminRepository — that
+   * repository method is also the trusted primitive bootstrap-admin.ts and
+   * every integration test's fixture setup use to self-grant the very first
+   * system_admin, before any system_admin exists to authorize it.
+   */
+  async grantPlatformRole(
+    personId: string,
+    input: GrantPlatformRoleRequest,
+    actorId: string,
+  ): Promise<PersonPlatformRoleBadge> {
+    const person = await this.people.findById(personId);
+    if (!person) throw new NotFoundException('Person not found');
+
+    const template = await this.roleTemplates.findByRole(input.role);
+    if (!template || template.tier !== 'platform') {
+      throw new BadRequestException(`Unknown platform role "${input.role}"`);
+    }
+    if (input.role === 'system_admin') {
+      if (input.orgUnitId) {
+        throw new BadRequestException(
+          'system_admin is a global role and cannot be scoped to an org unit',
+        );
+      }
+    } else if (!input.orgUnitId) {
+      throw new BadRequestException(`${template.label} requires an org unit`);
+    }
+
+    let orgUnitName: string | null = null;
+    if (input.orgUnitId) {
+      const orgUnit = await this.orgUnits.findById(input.orgUnitId);
+      if (!orgUnit) throw new NotFoundException('Org unit not found');
+      orgUnitName = orgUnit.name;
+    }
+
+    const [actorGrants, scope] = await Promise.all([
+      this.accessRepository.effectiveGrants(actorId),
+      input.orgUnitId
+        ? this.accessRepository.pathOf(input.orgUnitId)
+        : this.accessRepository.regionRootPath(),
+    ]);
+    if (!canDelegate(actorGrants, { resource: 'access.platform_role', action: 'create', scope })) {
+      throw new ForbiddenException(
+        'Cannot grant a platform role you do not hold the authority over',
+      );
+    }
+
+    const created = await this.grantAdmin.grantPlatformRole({
+      personId,
+      role: input.role,
+      orgUnitId: input.orgUnitId ?? null,
+      grantedBy: actorId,
+      expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+    });
+
+    return {
+      platformRoleAssignmentId: created.id,
+      role: created.role,
+      orgUnitId: created.orgUnitId,
+      orgUnitName,
+    };
+  }
+
+  /**
+   * Users admin: revoking a platform role. See grantPlatformRole()'s note on
+   * why there's no `@ResourceScope`. Looks the badge up off
+   * `PersonRepository.findDetail()` rather than a new repository method —
+   * that already joins `platform_role_assignment` for the detail page, and
+   * doubles as the "does this id actually belong to this person" check
+   * (mismatch reads as 404, same as every other people-admin route).
+   */
+  async revokePlatformRole(
+    personId: string,
+    platformRoleAssignmentId: string,
+    actorId: string,
+  ): Promise<void> {
+    const detail = await this.people.findDetail(personId);
+    if (!detail) throw new NotFoundException('Person not found');
+    const badge = detail.platformRoles.find(
+      (p) => p.platformRoleAssignmentId === platformRoleAssignmentId,
+    );
+    if (!badge) throw new NotFoundException('Platform role assignment not found');
+
+    const [actorGrants, scope] = await Promise.all([
+      this.accessRepository.effectiveGrants(actorId),
+      badge.orgUnitId
+        ? this.accessRepository.pathOf(badge.orgUnitId)
+        : this.accessRepository.regionRootPath(),
+    ]);
+    if (!canDelegate(actorGrants, { resource: 'access.platform_role', action: 'delete', scope })) {
+      throw new ForbiddenException(
+        'Cannot revoke a platform role you do not hold the authority over',
+      );
+    }
+
+    await this.grantAdmin.revokePlatformRole(platformRoleAssignmentId, actorId);
   }
 }

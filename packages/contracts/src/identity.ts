@@ -373,6 +373,21 @@ export const personPlatformRoleBadge = z.object({
 });
 export type PersonPlatformRoleBadge = z.infer<typeof personPlatformRoleBadge>;
 
+/**
+ * Users admin: granting a platform role (system_admin, unit_admin,
+ * support_readonly). `orgUnitId` is required for a subtree-scoped platform
+ * role and forbidden for `system_admin`, which is global — enforced in
+ * PersonService, not here, since it depends on which role was picked.
+ */
+export const grantPlatformRoleRequestSchema = z
+  .object({
+    role: z.string().min(1),
+    orgUnitId: z.uuid().nullable().optional(),
+    expiresAt: z.iso.datetime().nullable().optional(),
+  })
+  .strict();
+export type GrantPlatformRoleRequest = z.infer<typeof grantPlatformRoleRequestSchema>;
+
 export const personPendingInvitationSummary = z.object({
   id: z.uuid(),
   orgUnitId: z.uuid(),

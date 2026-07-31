@@ -188,6 +188,15 @@ export class GrantAdminRepository {
     return toUnitPolicyGrant(row);
   }
 
+  /**
+   * A trusted primitive, deliberately with no canDelegate check — same as
+   * RoleAssignmentRepository.assign(): the real-world authority check
+   * (rbac-design.md §7.4) lives in PersonService.grantPlatformRole(), the
+   * only HTTP-reachable caller. This method also has to stay callable with
+   * no prior system_admin in existence (bootstrap-admin.ts's job, and every
+   * integration test's fixture setup self-grants system_admin this way) —
+   * a canDelegate check here would make that structurally impossible.
+   */
   async grantPlatformRole(input: {
     personId: string;
     role: string;
@@ -225,7 +234,9 @@ export class GrantAdminRepository {
    * rbac-design.md §7.2/§7.4: cannot remove the last unit_admin for a unit —
    * platform_role_assignment has no status/history field (unlike
    * role_assignment), so "revoke" is a hard delete here; that's acceptable
-   * given how rare platform-role changes are meant to be (§6 table).
+   * given how rare platform-role changes are meant to be (§6 table). Same
+   * trusted-primitive shape as grantPlatformRole() above — no canDelegate
+   * check here; PersonService.revokePlatformRole() is the enforced boundary.
    */
   async revokePlatformRole(id: string, actorId: string): Promise<void> {
     const target = await this.db.platformRoleAssignment.findUnique({ where: { id } });

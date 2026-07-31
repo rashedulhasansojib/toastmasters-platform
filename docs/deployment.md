@@ -1,178 +1,115 @@
 # Deployment runbook
 
-Production is a **single self-hosted server** running the three apps under **pm2**, with
-**Postgres on Neon** and **managed Redis**. Deploys are automated: merge to `main`, CI goes
-green, GitHub Actions SSHes in and rolls the release.
+Production is a **single self-hosted server running containers**, with **Postgres on Neon** and
+Redis as a container alongside the apps. Deploys are automated: merge to `main`, the quality gate
+goes green, GitHub Actions builds an image, and the server cuts over blue-green.
 
-| Piece                   | Where                                                              |
-| ----------------------- | ------------------------------------------------------------------ |
-| Pipeline                | `.github/workflows/ci.yml` (gate) → `.github/workflows/deploy.yml` |
-| What runs on the server | `infra/deploy/deploy.sh`                                           |
-| Process definitions     | `infra/deploy/ecosystem.config.cjs`                                |
-| Production config       | `<repo>/.env` on the server — **never in git**                     |
+| Piece                   | Where                                                         |
+| ----------------------- | ------------------------------------------------------------- |
+| Gate                    | `.github/workflows/quality.yml` (called by CI **and** Deploy) |
+| Pipeline                | `.github/workflows/deploy.yml`                                |
+| Image                   | `Dockerfile` + `infra/docker-entrypoint.sh`                   |
+| What runs on the server | `infra/deploy/deploy.sh`                                      |
+| Stack definition        | `infra/docker-compose.prod.yml`                               |
+| TLS / routing           | `infra/Caddyfile` + `infra/active.conf`                       |
+| Production config       | `<DEPLOY_PATH>/.env` — rendered by CI, **never in git**       |
 
 ```
-push to main ──▶ CI (lint · typecheck · test · build · gitleaks)
+push to main ──▶ quality (lint · typecheck · test · integration · build)
                     │ green only
                     ▼
-                 Deploy ──ssh──▶ git reset --hard <sha>
-                                 pnpm install --frozen-lockfile
-                                 pnpm build
-                                 pnpm db:deploy        (prisma migrate deploy)
-                                 pm2 startOrReload --update-env
-                                 curl /health          (fails the run if dead)
+                 build image ──▶ ghcr.io/<owner>/<repo>:<sha>
+                    │
+                    ▼
+                 deploy ──ssh──▶ pull image
+                                 prisma migrate deploy   (one-shot, DIRECT_URL)
+                                 start the idle color
+                                 health-gate api + dashboard
+                                 flip active.conf + caddy reload
+                                 recreate the worker
 ```
 
-A red CI never reaches the server. Only one deploy runs at a time, and an in-flight deploy is
-never cancelled by a newer push — the newer one queues.
+**A red gate produces no image, and an image is the only deployable thing.** Only one deploy runs
+at a time, and an in-flight deploy is never cancelled by a newer push.
 
 ---
 
-## 1. One-time server setup
+## 1. How the blue-green model works
 
-Assumes Ubuntu/Debian and a non-root deploy user (`deploy` below). Everything runs as that
-user; nothing here needs root after the packages are installed.
+Two full sets of app containers exist: `api-blue`/`dashboard-blue` and `api-green`/`dashboard-green`.
+One set serves traffic; the other is the warm rollback target. Each deploy starts the **idle** set,
+proves it healthy, then flips.
 
-### 1.1 Toolchain
+Caddy has exactly **one upstream: the dashboard**. The API is never published. Every browser request
+already terminates at a Next.js route handler under `app/api/**`, which proxies to the API
+server-side — so there is no public route to NestJS, and no CORS involved in normal traffic.
+
+Colors are **paired**: `dashboard-blue` runs with `API_INTERNAL_URL=http://api-blue:4000`. Because
+the dashboard is the only public upstream, flipping the single line in `active.conf` moves the whole
+pair at once. There is no window in which a new dashboard talks to an old API.
+
+`active.conf` is deploy **state**, not configuration. CI seeds it only when absent; `deploy.sh`
+rewrites it in place at each cutover. It is rewritten with `>` and never `mv`, because it is
+bind-mounted into the Caddy container and replacing the file would swap the inode out from under
+the mount.
+
+**The server holds no git checkout.** The image carries the built code. `DEPLOY_PATH` contains only
+`docker-compose.prod.yml`, `Caddyfile`, `active.conf`, `deploy.sh` and `.env`.
+
+---
+
+## 2. One-time server setup
+
+Assumes Ubuntu/Debian and a non-root deploy user (`deploy` below).
+
+### 2.1 Docker
 
 ```bash
-# Node 22 (matches .nvmrc and engines.node >=22.12.0)
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt-get install -y nodejs git curl
-
-# pnpm 11.17.0 comes from the repo's packageManager field
-sudo corepack enable pnpm
-
-# pm2, and have it come back after a reboot
-sudo npm install -g pm2
-pm2 startup            # prints a sudo command — run it
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker deploy       # log out and back in for this to take effect
+docker compose version               # confirm the v2 plugin is present
 ```
 
-`next build` is the memory-hungry step. On a 1–2 GB box give it swap and a heap cap, or the
-build gets OOM-killed mid-deploy:
+Nothing else is needed — no Node, no pnpm, no pm2. The build happens in CI.
+
+### 2.2 Free ports 80 and 443
+
+Caddy binds both and provisions TLS automatically. **If the box currently runs nginx or Apache,
+stop and disable it first**, or Caddy will fail to bind and crash-loop:
+
+```bash
+sudo systemctl disable --now nginx    # or apache2
+```
+
+Point the `DOMAIN` DNS A/AAAA record at this server _before_ the first deploy — Caddy's first
+certificate order happens on startup, and ACME needs the name to resolve here.
+
+### 2.3 Deploy directory
+
+```bash
+sudo mkdir -p /srv/toastmasters-platform && sudo chown deploy:deploy /srv/toastmasters-platform
+```
+
+That is the whole setup. CI populates the directory on first deploy.
+
+### 2.4 Memory
+
+The apps have `mem_limit` ceilings and V8 heap caps so a runaway process is killed alone rather
+than triggering a host-wide OOM. On a 2 GB box add swap for headroom:
 
 ```bash
 sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
 echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-# and in the server's .env:  NODE_OPTIONS=--max-old-space-size=1536
 ```
 
-### 1.2 Clone the repo
-
-The server pulls from GitHub, so it needs read access. Add a **read-only deploy key**
-(Repo ▸ Settings ▸ Deploy keys) — this is a _different_ key from the one Actions uses to SSH in.
-
-```bash
-sudo mkdir -p /srv && sudo chown deploy:deploy /srv
-ssh-keygen -t ed25519 -C 'toastmasters-server-readonly' -f ~/.ssh/github_deploy -N ''
-cat ~/.ssh/github_deploy.pub          # paste into GitHub as a read-only deploy key
-
-cat >> ~/.ssh/config <<'EOF'
-Host github.com
-  IdentityFile ~/.ssh/github_deploy
-  IdentitiesOnly yes
-EOF
-
-git clone git@github.com:rashedulhasansojib/toastmasters-platform.git /srv/toastmasters-platform
-```
-
-### 1.3 Production `.env`
-
-`infra/deploy/deploy.sh` **sources** this file, so it must be plain `KEY=value` shell syntax:
-no inline `#` comments after a value, and quote anything containing spaces.
-
-```bash
-cd /srv/toastmasters-platform
-cp .env.example .env
-chmod 600 .env
-$EDITOR .env
-```
-
-What must change from the example:
-
-| Variable              | Production value                                                    |
-| --------------------- | ------------------------------------------------------------------- |
-| `NODE_ENV`            | `production`                                                        |
-| `APP_URL`             | `https://your-domain` — the dashboard's public origin               |
-| `DATABASE_URL`        | Neon **pooled** endpoint (`-pooler` in the host)                    |
-| `DIRECT_URL`          | Neon **direct/unpooled** endpoint — migrations use this             |
-| `REDIS_URL`           | Managed Redis, `rediss://…` (TLS)                                   |
-| `SESSION_JWT_SECRET`  | `openssl rand -base64 48`                                           |
-| `CORS_ORIGINS`        | `https://your-domain` (the dashboard origin, comma-separated list)  |
-| `S3_*`                | Real S3-compatible bucket + credentials                             |
-| `EMAIL_FROM`          | A real sending address                                              |
-| `NEXT_PUBLIC_API_URL` | `https://your-domain/api` — **baked into the client at build time** |
-
-Optional, deploy-only knobs (read by `ecosystem.config.cjs`, not by the app's Zod config):
-
-| Variable         | Default | Effect                                                            |
-| ---------------- | ------- | ----------------------------------------------------------------- |
-| `API_INSTANCES`  | `1`     | `2`+ puts the API in pm2 cluster mode → **zero-downtime reloads** |
-| `DASHBOARD_PORT` | `3000`  | Port `next start` binds                                           |
-| `API_PORT`       | `4000`  | Already app config; the health check reads it too                 |
-
-Mixing up the pooled and direct Neon URLs is the classic failure here: the app hits the
-connection ceiling, or `prisma migrate deploy` fails against the pooler (CLAUDE.md §3).
-
-### 1.4 Reverse proxy + TLS
-
-pm2 binds the apps to localhost ports; nginx terminates TLS and puts both behind one origin
-(which is what keeps the session cookie first-party). `/api` is stripped before the API sees it,
-so `NEXT_PUBLIC_API_URL=https://your-domain/api` lines up with the `/v1` routes.
-
-```nginx
-server {
-  listen 443 ssl http2;
-  server_name your-domain;
-
-  # certbot fills in ssl_certificate / ssl_certificate_key
-
-  client_max_body_size 20M;
-
-  location /api/ {
-    proxy_pass http://127.0.0.1:4000/;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-  }
-
-  location / {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection 'upgrade';
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-Proto $scheme;
-  }
-}
-```
-
-```bash
-sudo apt-get install -y nginx certbot python3-certbot-nginx
-sudo certbot --nginx -d your-domain
-```
-
-Only 22/80/443 need to be open. Ports 3000/4000 stay on loopback.
-
-### 1.5 First deploy, by hand
-
-Prove the server can do it before handing the keys to CI:
-
-```bash
-cd /srv/toastmasters-platform
-./infra/deploy/deploy.sh                 # install → build → migrate → pm2 → health
-RUN_SEED=true ./infra/deploy/deploy.sh   # first time only: seed the reference vocabularies
-pnpm --filter @toastmasters/api bootstrap:admin   # create the first system_admin
-```
+Unlike the pm2 deploy this replaced, `next build` no longer runs on the server, so the build-OOM
+failure mode is gone.
 
 ---
 
-## 2. Wiring up GitHub Actions
+## 3. GitHub configuration
 
-Actions needs its own SSH key to reach the server (separate from the read-only GitHub deploy
-key in §1.2):
+### 3.1 SSH access
 
 ```bash
 # on your laptop
@@ -182,43 +119,69 @@ ssh-keyscan -p 22 your-server            # output goes into DEPLOY_SSH_KNOWN_HOS
 cat ~/.ssh/tm_actions                    # private key → DEPLOY_SSH_KEY
 ```
 
-Repo ▸ Settings ▸ Secrets and variables ▸ Actions ▸ **New repository secret**:
+Host-key checking is **strict**. `DEPLOY_SSH_KNOWN_HOSTS` is not optional; the workflow fails fast
+with a readable error rather than trusting whatever answers on that address.
+
+### 3.2 Secrets
+
+Repo ▸ Settings ▸ Secrets and variables ▸ Actions.
 
 | Secret                   | Value                                        | Required |
 | ------------------------ | -------------------------------------------- | -------- |
-| `DEPLOY_SSH_KEY`         | The **private** key from `~/.ssh/tm_actions` | yes      |
-| `DEPLOY_SSH_KNOWN_HOSTS` | `ssh-keyscan` output for the server          | yes      |
+| `DEPLOY_SSH_KEY`         | Private key from `~/.ssh/tm_actions`         | yes      |
+| `DEPLOY_SSH_KNOWN_HOSTS` | `ssh-keyscan` output                         | yes      |
 | `DEPLOY_HOST`            | Server hostname or IP                        | yes      |
 | `DEPLOY_USER`            | `deploy`                                     | yes      |
 | `DEPLOY_PATH`            | `/srv/toastmasters-platform`                 | yes      |
 | `DEPLOY_PORT`            | SSH port, if not 22                          | no       |
+| `DOMAIN`                 | Public hostname Caddy serves                 | yes      |
+| `APP_URL`                | `https://your-domain`                        | yes      |
+| `DATABASE_URL`           | Neon **pooled** endpoint (`-pooler` in host) | yes      |
+| `DIRECT_URL`             | Neon **direct/unpooled** endpoint            | yes      |
+| `SESSION_JWT_SECRET`     | `openssl rand -base64 48`                    | yes      |
+| `S3_ENDPOINT`            | S3-compatible endpoint URL                   | yes      |
+| `S3_BUCKET`              | Bucket name                                  | yes      |
+| `S3_ACCESS_KEY_ID`       | Access key                                   | yes      |
+| `S3_SECRET_ACCESS_KEY`   | Secret key                                   | yes      |
+| `S3_REGION`              | Defaults to `us-east-1`                      | no       |
+| `CORS_ORIGINS`           | Defaults to `APP_URL`                        | no       |
+| `EMAIL_FROM`             | A real sending address                       | no       |
 
-Host-key checking is **strict** — `DEPLOY_SSH_KNOWN_HOSTS` is not optional, and the workflow
-fails fast with a readable error rather than trusting whatever answers on that IP.
+The **S3 group is required** even though `packages/config` marks those fields `.optional()`:
+`S3StorageAdapter` is constructed eagerly at startup and throws unless all four are present, so the
+API will not boot without them. (The schema is misleading here and is worth tightening — see
+`docs/superpowers/specs/2026-07-31-container-deploy-design.md` §11.)
 
-Optional: create a **`production` environment** (Settings ▸ Environments) to add a required
-reviewer or restrict which branches can deploy. The workflow already targets it, so protection
-rules apply the moment the environment exists.
+Mixing up the pooled and direct Neon URLs is the classic failure: the app hits the connection
+ceiling, or `prisma migrate deploy` fails against the pooler (CLAUDE.md §3).
 
-### Locking down the deploy user
+`REDIS_URL` is **not** a secret — it is the internal `redis://redis:6379`, written by the workflow.
 
-The Actions key can run any command as `deploy`. Two cheap hardening steps:
+Optionally create a **`production` environment** (Settings ▸ Environments) for a required reviewer
+or branch restriction. The deploy job already targets it, so rules apply as soon as it exists.
 
-- Restrict the key in `~/.ssh/authorized_keys` — e.g. `from="140.82.0.0/16,143.55.64.0/20"` for
-  GitHub's ranges (they change; check `https://api.github.com/meta`), or run a self-hosted
-  runner and drop public SSH entirely.
-- Keep `deploy` out of `sudo`. Nothing in `deploy.sh` needs root.
+### 3.3 How `.env` is produced
+
+CI renders it from the secrets above on **every deploy**, pipes it over SSH under `umask 077`, and
+moves it into place atomically. Consequences worth knowing:
+
+- **GitHub is the source of truth.** A hand-edit on the server is overwritten by the next deploy.
+- **A new variable needs both a secret and a workflow edit** — it will not appear by itself.
+- The file is **not shell syntax**. Compose parses it and does not strip quotes, so nothing in it is
+  quoted: `EMAIL_FROM=Name <a@b>`, never `EMAIL_FROM="Name <a@b>"`.
+- Optional values are **omitted when empty** rather than written blank, because
+  `packages/config` validates them as URLs and emails and an empty string fails that.
 
 ---
 
-## 3. Everyday operations
+## 4. Everyday operations
 
 ### Deploying
 
-Merge to `main`. That's it — CI runs, and Deploy picks up the same commit if CI is green.
+Merge to `main`. The gate runs, an image is built and tagged with the commit SHA, and the server
+cuts over.
 
-Manual run: **Actions ▸ Deploy ▸ Run workflow**, with an optional `ref` (SHA, tag or branch) and
-a `seed` checkbox (leave it off; see below).
+Manual: **Actions ▸ Deploy ▸ Run workflow**, with an optional `ref` and a `seed` checkbox.
 
 ### Rollback
 
@@ -228,79 +191,79 @@ Deploy the previous good commit — same workflow, `ref` = that SHA:
 Actions ▸ Deploy ▸ Run workflow ▸ ref: <previous-sha>
 ```
 
-Or on the server:
+Because images are tagged by SHA, **a rollback does not rebuild**: the workflow detects the image
+already in GHCR and skips straight to the cutover.
+
+On the server, without GitHub:
 
 ```bash
 cd /srv/toastmasters-platform
-git log --oneline -10
-git checkout --detach <previous-sha> && ./infra/deploy/deploy.sh
+IMAGE_TAG=<previous-sha> ./deploy.sh
 ```
 
 **Migrations do not roll back.** `prisma migrate deploy` only rolls forward, so a code rollback
-across a schema change lands old code on a new schema. Keep migrations backward-compatible
-(add columns nullable, drop them a release later) and that stays safe. Recovering from a bad
-migration means a Neon branch/PITR restore plus a forward fix, not a `git revert`.
+across a schema change lands old code on a new schema. Keep migrations backward-compatible (add
+columns nullable, drop them a release later) and that stays safe. This discipline is also what makes
+the worker cutover safe — the worker is recreated after the flip, so for a few seconds old worker
+code runs against the new schema. Recovering from a bad migration means a Neon branch/PITR restore
+plus a forward fix, not a `git revert`.
 
 ### Why seeding is off by default
 
 Reference vocabularies (resources, actions, role templates, Pathways paths, DCP goals) are
-**editable in production without a deploy** (CLAUDE.md §10.6). A reseed re-upserts the shipped
-values and would overwrite those edits, so it only runs when you ask — `seed: true` on a manual
-run, or `RUN_SEED=true ./infra/deploy/deploy.sh` on the server. Do ask for it after a release
-that adds new seeded vocabulary.
+**editable in production without a deploy** (CLAUDE.md §10.6). A reseed re-upserts the shipped values
+and would overwrite those edits, so it only runs when you ask — `seed: true` on a manual run, or
+`RUN_SEED=true ./deploy.sh` on the server. Do ask for it after a release that adds new vocabulary.
 
 ### Logs and status
 
 ```bash
-pm2 list
-pm2 logs tm-api --lines 100        # tm-api · tm-worker · tm-dashboard
-pm2 monit
-pm2 describe tm-api
-```
-
-Logs are Pino JSON in `~/.pm2/logs/`. Pipe through `pnpm exec pino-pretty` to read them, and set
-up `pm2 install pm2-logrotate` so they don't eat the disk.
-
-### Restarting without deploying
-
-After hand-editing `.env`, the env has to be re-exported for pm2 to see it:
-
-```bash
 cd /srv/toastmasters-platform
-set -a; source .env; set +a
-pm2 reload infra/deploy/ecosystem.config.cjs --update-env && pm2 save
+docker compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml logs -f --tail 100 api-blue
+docker compose -f docker-compose.prod.yml logs -f worker
+cat active.conf            # which color is live
 ```
 
-A plain `pm2 restart tm-api` keeps the **old** environment. `--update-env` is the whole point.
+Logs are Pino JSON. Pipe through `pnpm exec pino-pretty` locally, or `docker compose logs ... | jq`.
+Docker's `local` driver rotates by default; nothing extra is needed.
+
+### Changing config without a code change
+
+Update the secret in GitHub, then run **Actions ▸ Deploy ▸ Run workflow**. The `.env` is re-rendered
+and the containers are recreated with the new values. Editing `.env` on the server works until the
+next deploy overwrites it — treat that as a debugging tool, not a fix.
 
 ---
 
-## 4. Troubleshooting
+## 5. Troubleshooting
 
-| Symptom                                                         | Cause / fix                                                                                                                 |
-| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Deploy fails at `Host key verification failed`                  | `DEPLOY_SSH_KNOWN_HOSTS` is stale (server rebuilt / new IP). Re-run `ssh-keyscan` and update the secret.                    |
-| `Permission denied (publickey)`                                 | The Actions **public** key isn't in `deploy@server:~/.ssh/authorized_keys`.                                                 |
-| `.env is missing`                                               | §1.3 wasn't done, or `DEPLOY_PATH` points at the wrong directory.                                                           |
-| `pnpm: not found` over SSH                                      | Non-interactive SSH gets a minimal PATH. `sudo corepack enable pnpm` installs to `/usr/bin`, which is on it.                |
-| `prisma migrate deploy` hangs or errors on a prepared statement | `DIRECT_URL` is pointing at the Neon **pooler**. Use the unpooled endpoint.                                                 |
-| Health check fails after a green build                          | `pm2 logs --lines 60`. Usually a missing/invalid env var — `parseEnv()` fails fast and names it.                            |
-| Dashboard calls `localhost:4000` in the browser                 | `NEXT_PUBLIC_API_URL` was wrong **at build time**. Fix `.env`, redeploy (it's baked into the bundle).                       |
-| Brief 404s on JS chunks during a deploy                         | `next build` rewrites `.next` under the running server; the reload right after clears it. A hard refresh fixes a stuck tab. |
-| Build killed with no error                                      | OOM. Add swap and `NODE_OPTIONS=--max-old-space-size=1536` (§1.1).                                                          |
-| CI green but no deploy ran                                      | Deploy only triggers on CI runs for `main`. Check Actions ▸ Deploy for a skipped run, or dispatch it manually.              |
+| Symptom                                                      | Cause / fix                                                                                                                                                                                                                                 |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Host key verification failed`                               | `DEPLOY_SSH_KNOWN_HOSTS` is stale (server rebuilt / new IP). Re-run `ssh-keyscan` and update the secret.                                                                                                                                    |
+| `Permission denied (publickey)`                              | The Actions **public** key isn't in `deploy@server:~/.ssh/authorized_keys`.                                                                                                                                                                 |
+| `<var> is not set` at the render step                        | A required secret is missing. The error names it.                                                                                                                                                                                           |
+| Health check fails but the app logs look fine                | **Check Caddy first.** The probe runs _inside_ the Caddy container, so a crash-looping Caddy reports as "api failed its health check". `docker compose logs caddy`.                                                                         |
+| Caddy crash-loops on `unrecognized directive`                | A Caddyfile edit used a directive Caddy 2 doesn't have at that level. Validate before deploying: `docker run --rm -e DOMAIN=x -v $PWD/infra/Caddyfile:/etc/caddy/Caddyfile:ro caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile`. |
+| Caddy can't bind :80/:443                                    | nginx/apache still running (§2.2), or another container holds the port.                                                                                                                                                                     |
+| TLS certificate never issues                                 | DNS for `DOMAIN` doesn't resolve to this host, or 80/443 aren't reachable from the internet. ACME needs both.                                                                                                                               |
+| API exits at boot with a DI stack trace about object storage | The `S3_*` secrets are missing — they are required (§3.2).                                                                                                                                                                                  |
+| API exits with `Invalid environment configuration`           | `parseEnv()` fail-fast; it lists exactly which variables. This happens in the _target_ color, so the old one keeps serving.                                                                                                                 |
+| `prisma migrate deploy` errors on a prepared statement       | `DIRECT_URL` is pointing at the Neon **pooler**. Use the unpooled endpoint.                                                                                                                                                                 |
+| Deploy says "NOT flipping" and exits non-zero                | Working as intended — the new color failed its gate and the old one is still live. The failing service's last 60 log lines are in the run output.                                                                                           |
+| Disk filling up                                              | `deploy.sh` prunes images older than 7 days. To reclaim now: `docker image prune -af`.                                                                                                                                                      |
 
 ---
 
-## 5. Not built yet
+## 6. Not built yet
 
 Called out honestly rather than implied:
 
 - **No automated database backups.** Neon has PITR on paid plans — confirm the retention window
   matches what a volunteer district can live with. This is the biggest remaining gap.
-- **No staging environment.** Migrations meet production on their first run. `pnpm test:int`
-  (Testcontainers) is the only pre-prod exercise a migration currently gets.
-- **No uptime monitoring or alerting.** `/health` is a liveness probe with nothing watching it —
-  point any external monitor at `https://your-domain/api/health`.
-- **Deploys are in-place, not atomic.** The build happens in the live tree (see the chunk-404 row
-  above). A release-directory + symlink swap would fix it if that becomes annoying.
+- **No staging environment.** Migrations meet production on their first real run; `pnpm test:int`
+  (Testcontainers) is the only rehearsal a migration gets.
+- **No uptime monitoring or alerting.** Point an external monitor at `https://your-domain/`.
+- **Redis is not backed up.** It holds BullMQ queues and the permission cache — both rebuildable, so
+  this is a deliberate choice rather than an oversight. In-flight jobs would be lost if the volume
+  were destroyed.

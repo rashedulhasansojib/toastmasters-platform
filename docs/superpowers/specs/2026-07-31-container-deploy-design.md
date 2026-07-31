@@ -15,12 +15,12 @@ The pm2 path (`infra/deploy/deploy.sh` + `ecosystem.config.cjs`) builds **on the
 server, in the live tree**. Four consequences, all documented as known problems
 in the runbook it replaces:
 
-| Problem | Where it's admitted today |
-| --- | --- |
-| `next build` OOMs on a small box mid-deploy | `docs/deployment.md` §1.1, §4 |
-| Brief 404s on JS chunks — `.next` is rewritten under the running server | §4 |
-| Deploys are in-place, not atomic; no warm rollback target | §5 |
-| Rollback re-runs the whole install/build on the server | §3 |
+| Problem                                                                 | Where it's admitted today     |
+| ----------------------------------------------------------------------- | ----------------------------- |
+| `next build` OOMs on a small box mid-deploy                             | `docs/deployment.md` §1.1, §4 |
+| Brief 404s on JS chunks — `.next` is rewritten under the running server | §4                            |
+| Deploys are in-place, not atomic; no warm rollback target               | §5                            |
+| Rollback re-runs the whole install/build on the server                  | §3                            |
 
 Building the artifact once in CI and shipping an immutable image addresses all
 four: the server never compiles, the old color keeps serving until the new one
@@ -56,8 +56,8 @@ question that a future reader will otherwise reopen.
 
 `clickup-sync` is one Node app, one image, one HTTP port, with bundled Postgres
 and Redis. This platform is three apps against an external database. The
-blue-green *mechanism* — image tag, warm second color, health gate, atomic
-proxy flip — ports directly. The *topology* is redesigned below.
+blue-green _mechanism_ — image tag, warm second color, health gate, atomic
+proxy flip — ports directly. The _topology_ is redesigned below.
 
 ## 4. Image — one image, four roles
 
@@ -68,7 +68,7 @@ A single multi-stage `Dockerfile` at the repo root.
   `pnpm build`. Turbo builds `packages/*` before `apps/*`, which includes
   `prisma generate`.
 - **runner** — keeps the **full `node_modules`** on purpose: `prisma migrate
-  deploy` and the `tsx` seed are devDependencies, and `prisma.config.ts` is
+deploy` and the `tsx` seed are devDependencies, and `prisma.config.ts` is
   loaded by the Prisma CLI. Same reasoning as the reference project.
 
 No build-time `DATABASE_URL` is needed, unlike the reference. `prisma generate`
@@ -77,12 +77,12 @@ never connects, and `prisma.config.ts` already tolerates an undefined
 
 `infra/docker-entrypoint.sh` execs on `ROLE`:
 
-| `ROLE` | Command |
-| --- | --- |
-| `api` | `node apps/api/dist/main.js` |
-| `worker` | `node apps/worker/dist/main.js` |
+| `ROLE`      | Command                                                 |
+| ----------- | ------------------------------------------------------- |
+| `api`       | `node apps/api/dist/main.js`                            |
+| `worker`    | `node apps/worker/dist/main.js`                         |
 | `dashboard` | `next start -p ${DASHBOARD_PORT:-3000}` via its own bin |
-| `migrate` | `pnpm db:deploy` |
+| `migrate`   | `pnpm db:deploy`                                        |
 
 Deliberately **not** `pnpm start` for any of them: those scripts wrap
 `dotenv -e ../../.env`, which does not exist inside a container and would fail.
@@ -109,7 +109,7 @@ a Next.js route handler under `app/api/**`, which proxies server-side via
 `authedFetch`. The browser never calls NestJS directly.
 
 This also fixes a latent bug. The nginx config in the runbook being replaced
-routed `/api/ → 127.0.0.1:4000`, but `/api/session/login` is a *Next.js* route
+routed `/api/ → 127.0.0.1:4000`, but `/api/session/login` is a _Next.js_ route
 handler — under that config login was proxied to NestJS `/session/login` and
 would 404. Giving Caddy a single upstream removes the class of conflict, and
 makes `CORS_ORIGINS` moot for browser traffic.
@@ -165,7 +165,7 @@ quotes. The rendered file therefore contains no quoting, and this is documented.
 
 **`parseEnv()` becomes a deploy safety net.** The API and worker fail fast on a
 missing or too-short `SESSION_JWT_SECRET`, `DATABASE_URL`, `DIRECT_URL` or
-`REDIS_URL`. That failure now happens in the *target* color, so the health gate
+`REDIS_URL`. That failure now happens in the _target_ color, so the health gate
 catches an incomplete `.env` **before** the flip. Under pm2 the same mistake took
 down the live process.
 
@@ -197,14 +197,21 @@ migrations were already shared across a rolling pm2 reload.
 
 ## 8. CI
 
-- **`.github/workflows/quality.yml`** — new, `workflow_call`. Install,
-  `db:generate`, lint, typecheck, `test:cov`, build. One definition, two callers.
+- **`.github/workflows/quality.yml`** — new, `workflow_call`. Two jobs:
+  `build-test` (install, `db:generate`, lint, typecheck, `test:cov`, build) and
+  `integration` (`pnpm test:int`). One definition, two callers.
 - **`ci.yml`** — calls `quality.yml`; keeps `commitlint` and `gitleaks`.
-- **`deploy.yml`** — `quality` + `integration` (real Postgres and Redis service
-  containers, `pnpm test:int`) → `build-and-push` (GHCR, buildx, `type=gha`
-  cache, tagged `latest` and `${{ github.sha }}`) → `deploy` (scp the compose
-  file / Caddyfile / deploy script, seed `active.conf` only if absent, render
-  `.env` atomically, run `deploy.sh`).
+- **`deploy.yml`** — `target` (resolve ref → SHA → image name) → `quality` →
+  `build-and-push` (GHCR, buildx, `type=gha` cache, tagged `latest` and the
+  resolved SHA) → `deploy` (scp the compose file / Caddyfile / deploy script,
+  seed `active.conf` only if absent, render `.env` atomically, run `deploy.sh`).
+
+The integration job needs **no `services:` block**: the suite starts its own
+Postgres and Redis through Testcontainers (`apps/api/test/support/test-db.ts`
+and `test-redis.ts`), so it owns container lifecycle and schema state itself.
+Because it lives in `quality.yml`, pull requests get the authorisation matrix
+too — 39 `*.int-spec.ts` files, the suite CLAUDE.md §7 calls the most valuable
+in the project.
 
 `workflow_dispatch` keeps its `ref` and `seed` inputs. Seeding stays off by
 default for the reason already documented: reference vocabularies are editable in
@@ -239,7 +246,38 @@ New, because CI now renders `.env`: `DOMAIN`, `DATABASE_URL`, `DIRECT_URL`,
 `SESSION_JWT_SECRET`, `APP_URL`, `CORS_ORIGINS`, `EMAIL_FROM`, and the `S3_*`
 group. `REDIS_URL` is not a secret — it is the internal `redis://redis:6379`.
 
-## 11. Out of scope
+## 11. What the first real run found
+
+The stack was exercised end-to-end before merge: the image pushed to a local
+registry, `deploy.sh` run unmodified against a local Postgres and MinIO, with
+`DOMAIN=localhost` so Caddy issues an internal certificate instead of calling
+ACME. Four things only showed up by running it.
+
+1. **`S3_*` are required, not optional.** `packages/config` marks them
+   `.optional()` (a stale "Optional until M5" comment), but `S3StorageAdapter` is
+   constructed eagerly at DI time and throws unless all four are set. The API
+   cannot boot without them. The deploy workflow therefore treats them as
+   required secrets. **The schema is still misleading** and should be tightened
+   separately — today a missing bucket produces a Nest DI stack trace instead of
+   `parseEnv()`'s readable list.
+2. **`timeouts` is not a Caddy 2 site directive.** It had been added
+   speculatively and crash-looped Caddy. Removed — Caddy's defaults are already
+   permissive. `caddy validate` is now the cheap check before any Caddyfile
+   change.
+3. **A crash-looping proxy silently breaks the health gate**, because the probe
+   runs _inside_ the Caddy container. The gate correctly refused to flip, but the
+   reported reason was "api failed its health check" when the API was in fact
+   healthy. Worth remembering when reading a failed deploy.
+4. **Prisma warns about missing libssl** on `bookworm-slim` and guesses
+   `openssl-1.1.x`. `openssl` is now installed in the runner stage.
+
+Verified working: migrations applied (49), health gate passes, blue→green and
+green→blue flips both alternate correctly, HTTP→HTTPS redirects (308), security
+headers present, the dashboard renders, `POST /api/session/login` reaches NestJS
+and returns a problem+json 401 from `/v1/auth/login` — and `/health` returns 404
+through Caddy, confirming the API is not publicly exposed.
+
+## 12. Out of scope
 
 - **Automated database backups.** Still the largest gap; Neon PITR remains the
   answer. Unchanged by this work, and called out so it isn't mistaken for solved.

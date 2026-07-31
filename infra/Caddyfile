@@ -1,0 +1,27 @@
+# Caddy reverse proxy with automatic HTTPS (Let's Encrypt). DOMAIN is injected
+# from .env by infra/docker-compose.prod.yml.
+#
+# There is exactly ONE upstream: the Next.js dashboard. The NestJS API is not
+# published and is not routed here — every browser request already terminates at
+# a Next.js route handler under app/api/**, which proxies to the API
+# server-side. Routing /api/* here would in fact break the app: /api/session/login
+# is a *dashboard* route, not an API route.
+#
+# Blue-green: the upstream is not hardcoded. It lives in active.conf, mounted at
+# /etc/caddy/active.conf, holding a single line:
+#     reverse_proxy dashboard-blue:3000      (or dashboard-green:3000)
+# infra/deploy/deploy.sh rewrites that file in place and runs `caddy reload`, so
+# in-flight requests drain and no connection is dropped.
+{$DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		# Caddy terminates TLS; don't advertise the upstream.
+		-Server
+	}
+
+	import /etc/caddy/active.conf
+}

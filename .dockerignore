@@ -1,0 +1,46 @@
+# Keep the build context small and the image reproducible. Anything listed here
+# is either reinstalled, rebuilt, or must never reach an image layer.
+
+# Reinstalled by pnpm inside the image
+node_modules
+**/node_modules
+.pnpm-store
+
+# Rebuilt by `pnpm build`
+dist
+**/dist
+.next
+**/.next
+out
+**/out
+.turbo
+**/.turbo
+*.tsbuildinfo
+packages/db/src/generated
+
+# Secrets — never in a layer. .env.example is documentation and is kept.
+.env
+.env.*
+!.env.example
+
+# Test output and local tooling
+coverage
+**/coverage
+playwright-report
+test-results
+*.log
+logs
+
+# VCS and editor noise
+.git
+.gitignore
+.github
+.husky
+.DS_Store
+.idea
+.vscode
+
+# Docs don't affect the build
+docs
+*.md
+!README.md

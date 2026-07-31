@@ -1,0 +1,154 @@
+# Production stack for a single host — blue-green.
+#
+# Topology:
+#   caddy                          TLS + reverse proxy. The ONLY published
+#                                  service (80/443). Flips color by rewriting
+#                                  active.conf and reloading.
+#   dashboard-blue / -green        Next.js. The only upstream Caddy knows about.
+#   api-blue / -green              NestJS. Internal only — never published. The
+#                                  browser reaches it exclusively through the
+#                                  dashboard's own /api/* route handlers.
+#   worker                         BullMQ processors + scheduled jobs. A
+#                                  singleton by design (one scheduler for the
+#                                  1-July rollover, snapshots, digests), so it
+#                                  is recreated in place rather than coloured.
+#   migrate                        one-shot `prisma migrate deploy` (profile
+#                                  `tools`); run explicitly before cutover,
+#                                  never on `up`.
+#   redis                          BullMQ queues + the permission cache.
+#
+# Postgres is NOT here: it is Neon (CLAUDE.md §3). DATABASE_URL is the pooled
+# endpoint for the apps; DIRECT_URL is the unpooled endpoint and is used only by
+# the migrate service. Mixing those up is the classic failure — the app hits the
+# connection ceiling, or the migration fails against the pooler.
+#
+# Colors are PAIRED: dashboard-<color> talks to api-<color>. Since the dashboard
+# is the only public upstream, flipping the one line in active.conf moves the
+# whole pair atomically — there is no window where a new dashboard calls an old
+# API.
+#
+# Variables come from ./.env, rendered by CI from GitHub secrets on every deploy
+# (see .github/workflows/deploy.yml). Compose reads that same file for
+# ${DOMAIN} and ${IMAGE_TAG} interpolation.
+
+x-app: &app-common
+  # Full repository path including the registry host, e.g.
+  # ghcr.io/rashedulhasansojib/toastmasters-platform. Written into .env by CI.
+  # Keeping the registry host in the variable (rather than hardcoding ghcr.io)
+  # is what lets this same file be exercised against a local registry.
+  image: ${IMAGE_REPO:?set IMAGE_REPO in .env}:${IMAGE_TAG:-latest}
+  restart: unless-stopped
+  env_file: .env
+  depends_on:
+    redis:
+      condition: service_healthy
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    mem_limit: 320m
+    # noeviction: BullMQ job keys must NEVER be evicted — that silently corrupts
+    # queues. Redis refuses writes instead if it ever reaches the ceiling.
+    command:
+      [
+        'redis-server',
+        '--appendonly',
+        'yes',
+        '--maxmemory',
+        '256mb',
+        '--maxmemory-policy',
+        'noeviction',
+      ]
+    expose:
+      - '6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api-blue:
+    <<: *app-common
+    mem_limit: 512m
+    environment:
+      ROLE: api
+      NODE_OPTIONS: --max-old-space-size=384
+    expose:
+      - '4000'
+
+  api-green:
+    <<: *app-common
+    mem_limit: 512m
+    environment:
+      ROLE: api
+      NODE_OPTIONS: --max-old-space-size=384
+    expose:
+      - '4000'
+
+  dashboard-blue:
+    <<: *app-common
+    mem_limit: 512m
+    environment:
+      ROLE: dashboard
+      # Paired with its own color. Server-side only — see apps/dashboard/src/lib/api.ts.
+      API_INTERNAL_URL: http://api-blue:4000
+      NODE_OPTIONS: --max-old-space-size=384
+    expose:
+      - '3000'
+    depends_on:
+      redis:
+        condition: service_healthy
+      api-blue:
+        condition: service_started
+
+  dashboard-green:
+    <<: *app-common
+    mem_limit: 512m
+    environment:
+      ROLE: dashboard
+      API_INTERNAL_URL: http://api-green:4000
+      NODE_OPTIONS: --max-old-space-size=384
+    expose:
+      - '3000'
+    depends_on:
+      redis:
+        condition: service_healthy
+      api-green:
+        condition: service_started
+
+  worker:
+    <<: *app-common
+    mem_limit: 512m
+    environment:
+      ROLE: worker
+      NODE_OPTIONS: --max-old-space-size=384
+
+  migrate:
+    <<: *app-common
+    restart: 'no'
+    profiles: ['tools']
+    environment:
+      ROLE: migrate
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    mem_limit: 96m
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./active.conf:/etc/caddy/active.conf:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  redis_data:
+  caddy_data:
+  caddy_config:

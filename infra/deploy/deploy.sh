@@ -1,97 +1,113 @@
 #!/usr/bin/env bash
 #
-# Production deploy — runs ON the server, from the repo root.
+# Blue-green deploy for the single-host stack. Runs ON the server, invoked over
+# SSH by .github/workflows/deploy.yml (or by hand from the deploy directory).
 #
-# The caller (.github/workflows/deploy.yml, or you by hand) has already moved
-# the working tree to the commit being deployed; this script takes it from
-# there: install, build, migrate, reload pm2, prove it's alive.
+#   1. pull the image at IMAGE_TAG      6. health-gate BOTH target services
+#   2. bring up redis + caddy           7. flip active.conf + graceful reload
+#   3. one-shot migration               8. recreate the worker in place
+#   4. work out the live color          9. optional seed, then prune
+#   5. start the target color
+#
+# If either target service fails its health check, traffic is NOT flipped and
+# this exits non-zero — the previous color keeps serving.
+#
+# Unlike the pm2 deploy this replaces, the server holds no git checkout: the
+# image carries the built code. This directory needs only docker-compose.prod.yml,
+# Caddyfile, active.conf, deploy.sh and .env.
 #
 # By hand:
-#   cd /srv/toastmasters-platform && ./infra/deploy/deploy.sh
+#   cd /srv/toastmasters-platform && IMAGE_TAG=<sha> ./deploy.sh
 #
-# Env knobs:
-#   RUN_SEED=true   also run `pnpm db:seed` (reference vocabularies). Off by
-#                   default: the catalogues are editable in production without a
-#                   deploy, and a reseed would overwrite those edits.
+# Env:
+#   IMAGE_TAG   required — the image tag to deploy (CI passes the commit SHA)
+#   RUN_SEED    optional — `true` also runs the reference-vocabulary seed
 #
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "$ROOT"
-
+: "${IMAGE_TAG:?IMAGE_TAG is required (the image tag to deploy)}"
 RUN_SEED="${RUN_SEED:-false}"
+
+# Resolve to this script's own directory so it works regardless of caller cwd.
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+export IMAGE_TAG
+COMPOSE="docker compose -f docker-compose.prod.yml"
 
 log() { printf '\n▸ %s\n' "$*"; }
 fail() { printf '\n✖ %s\n' "$*" >&2; exit 1; }
 
-if [[ ! -f .env ]]; then
-  fail "$ROOT/.env is missing. Production config lives there and is never in git — see docs/deployment.md."
-fi
+[[ -f .env ]] || fail '.env is missing. CI renders it from GitHub secrets — see docs/deployment.md.'
+[[ -f active.conf ]] || fail 'active.conf is missing. CI seeds it on first deploy — see docs/deployment.md.'
 
-# Export the server's production config so that:
-#   • `next build` bakes NEXT_PUBLIC_* into the client bundle,
-#   • `prisma migrate deploy` sees DIRECT_URL (the unpooled endpoint),
-#   • `pm2 reload --update-env` hands the same values to every process.
-log 'Loading .env'
-set -a
-# shellcheck disable=SC1091
-source ./.env
-set +a
+log "Deploying image tag: $IMAGE_TAG"
+$COMPOSE pull api-blue api-green dashboard-blue dashboard-green worker
 
-export NODE_ENV=production
-export CI=1
-export HUSKY=0 # no git hooks on the server
-export NEXT_TELEMETRY_DISABLED=1
-export TURBO_TELEMETRY_DISABLED=1
+log 'Ensuring redis + caddy are up'
+$COMPOSE up -d redis caddy
 
-command -v pnpm >/dev/null 2>&1 || fail 'pnpm not on PATH. Enable it with `corepack enable pnpm` — see docs/deployment.md.'
-command -v pm2 >/dev/null 2>&1 || fail 'pm2 not on PATH. `npm i -g pm2` — see docs/deployment.md.'
-
-log "Deploying $(git rev-parse --short HEAD) — $(git log -1 --pretty=%s)"
-
-log 'Installing dependencies'
-pnpm install --frozen-lockfile
-
-# Build before touching the database: a compile failure then costs nothing.
-# `pnpm build` is turbo, so packages/* (including `prisma generate`) build first.
-log 'Building api, worker, dashboard'
-pnpm build
-
+# Both colors share one Neon database, so migrations run exactly once, here —
+# never from an app's startup path. Connects via DIRECT_URL (unpooled).
 log 'Applying database migrations'
-pnpm db:deploy
+$COMPOSE --profile tools run --rm migrate
 
 if [[ "$RUN_SEED" == 'true' ]]; then
   log 'Seeding reference vocabularies'
-  pnpm db:seed
+  $COMPOSE --profile tools run --rm -e ROLE=seed migrate
 fi
 
-log 'Reloading pm2 processes'
-pm2 startOrReload infra/deploy/ecosystem.config.cjs --update-env
-# Persist the process list + env so a server reboot brings everything back.
-pm2 save
+# The live color is whatever Caddy is currently importing. Default to blue so a
+# hand-mangled active.conf can't wedge the deploy.
+CURRENT="$(grep -oE 'dashboard-(blue|green)' active.conf | head -1 | sed 's/dashboard-//' || true)"
+CURRENT="${CURRENT:-blue}"
+if [[ "$CURRENT" == 'blue' ]]; then TARGET='green'; else TARGET='blue'; fi
+log "Live color: $CURRENT  ->  deploying to: $TARGET"
 
-log 'Waiting for health'
-api_url="http://127.0.0.1:${API_PORT:-4000}/health"
-dashboard_url="http://127.0.0.1:${DASHBOARD_PORT:-3000}/"
+log "Starting api-$TARGET and dashboard-$TARGET"
+$COMPOSE up -d --force-recreate "api-$TARGET" "dashboard-$TARGET"
 
-wait_for() {
+# Probe from INSIDE the caddy container: the app services are not published to
+# the host, so they are only reachable on the compose network. `compose exec`
+# (service name), not `docker exec` — the real container is <project>-caddy-1.
+probe() {
   local name="$1" url="$2" attempt
-  for attempt in $(seq 1 20); do
-    if curl -fsS --max-time 5 -o /dev/null "$url"; then
-      printf '  ✔ %s (%s)\n' "$name" "$url"
+  for attempt in $(seq 1 45); do
+    if $COMPOSE exec -T caddy wget -q --spider --timeout=5 "$url" >/dev/null 2>&1; then
+      printf '    ✔ %s healthy after %s attempt(s)\n' "$name" "$attempt"
       return 0
     fi
     sleep 2
   done
-  printf '\n--- pm2 status ---\n' >&2
-  pm2 list >&2 || true
-  printf '\n--- last 60 log lines ---\n' >&2
-  pm2 logs --nostream --lines 60 >&2 || true
-  fail "$name did not become healthy at $url after 40s. Nothing was rolled back — the previous commit is $(git rev-parse --short 'HEAD@{1}' 2>/dev/null || echo 'in `git reflog`'); see docs/deployment.md#rollback."
+  printf '\n--- %s logs ---\n' "$name" >&2
+  $COMPOSE logs --tail 60 "$name" >&2 || true
+  return 1
 }
 
-wait_for 'api' "$api_url"
-wait_for 'dashboard' "$dashboard_url"
+log "Health-gating the $TARGET color"
+# The API first, then the dashboard. The dashboard's own home page fetches the
+# API server-side, so a green dashboard probe also proves the color is correctly
+# paired — a dashboard talking to a dead API fails here rather than after cutover.
+probe "api-$TARGET" "http://api-$TARGET:4000/health" \
+  || fail "api-$TARGET failed its health check. NOT flipping; $CURRENT is still live."
+probe "dashboard-$TARGET" "http://dashboard-$TARGET:3000/" \
+  || fail "dashboard-$TARGET failed its health check. NOT flipping; $CURRENT is still live."
 
-log 'Deployed'
-pm2 list
+log "Flipping traffic to dashboard-$TARGET"
+# Rewritten IN PLACE, never `mv`: active.conf is bind-mounted into the caddy
+# container and replacing it would swap the inode out from under the mount.
+printf 'reverse_proxy dashboard-%s:3000\n' "$TARGET" > active.conf
+$COMPOSE exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+
+# Recreated after the flip, and deliberately not coloured: BullMQ repeatable and
+# scheduled jobs (the 1-July rollover, snapshots, digests) need exactly one
+# scheduler, so two live workers would double-run them. For the few seconds this
+# takes, old worker code runs against the new schema — which is safe precisely
+# because migrations are kept backward-compatible (see docs/deployment.md).
+log 'Recreating the worker (singleton)'
+$COMPOSE up -d --force-recreate worker
+
+log 'Pruning images older than 7 days'
+docker image prune -af --filter 'until=168h' || true
+
+log "Deploy complete. Live color: $TARGET"
+$COMPOSE ps

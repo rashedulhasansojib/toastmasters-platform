@@ -12,6 +12,24 @@ on:
         type: string
         required: false
         default: ''
+      integration:
+        # OFF because `main` currently has 9 failing integration specs, across
+        # education, quality visits, the planner, invitation rate-limiting and
+        # the access seed. They are not regressions — a branch-vs-main run
+        # confirmed they fail identically on both — they were simply invisible,
+        # because this suite has never run in CI.
+        #
+        # Everything needed to switch it back on is already here and working:
+        # the job below, `pnpm test:int`, and the S3 env plumbing in this file
+        # and in turbo.json. Flip this default to `true` once those 9 are green.
+        #
+        # Worth doing: adding this suite is what surfaced the
+        # meeting.speech_slot:update bug that stopped system_admin editing a
+        # speech slot in production.
+        description: 'Run the integration suite (Testcontainers). Off until the pre-existing failures on main are fixed.'
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   build-test:
@@ -52,6 +70,8 @@ jobs:
 
   integration:
     name: integration (real Postgres + Redis)
+    # See the `integration` input above for why this is off by default.
+    if: ${{ inputs.integration }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

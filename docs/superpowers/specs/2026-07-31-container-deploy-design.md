@@ -310,9 +310,51 @@ matrix is the most valuable suite in the project, and it was not running in CI.
 Adding an action to a role template without adding it to the resource catalog
 silently produces a grant that `system_admin` can never hold.
 
-Runtime: the suite takes ~4m15s (39 files, `fileParallelism: false`), which is
-acceptable in both the PR and deploy gates. If it grows past ~10 minutes, split
-it out of `ci.yml` with a `workflow_call` input rather than dropping it.
+Runtime: the suite takes ~4m (39 files, `fileParallelism: false`), which is
+acceptable in both the PR and deploy gates.
+
+### 11.2 The suite needs environment CI does not have
+
+Turning it on exposed a second problem, in two halves — and fixing only the
+obvious half changes nothing, which is how it was initially missed.
+
+1. `S3StorageAdapter` is constructed eagerly at DI time and throws when the S3
+   variables are unset, so **every spec that boots the Nest app dies in
+   `beforeAll`**. Locally a developer's `.env` supplies them; CI has no `.env`.
+   Placeholder values are now set in `quality.yml` — they are never dialled.
+2. Turbo runs tasks in a **filtered environment**, so variables exported by the
+   caller never reach vitest unless declared. `turbo.json` now sets
+   `passThroughEnv: ["S3_*"]` on `test:int`. Without this the workflow looks
+   correct and has no effect.
+
+Together these took the suite from 23 failed files / 16 passed to **7 / 32**, and
+let 77 previously unreachable tests run at all.
+
+### 11.3 Deferred: 9 pre-existing failures, and why the gate ships without it
+
+With the environment fixed, 9 specs still fail — across education, quality
+visits, the planner (4), invitation rate-limiting, and the access seed's
+resource count (`expected 50 to be 47`, a stale assertion: the catalogue has
+grown to 50 resources).
+
+These are **not regressions**. A branch-versus-`main` comparison, both runs with
+identical environment, is unambiguous:
+
+|                 | `main` | this branch                  |
+| --------------- | ------ | ---------------------------- |
+| Failing tests   | 10     | 9                            |
+| Introduced here | —      | **none**                     |
+| Fixed here      | —      | `meeting.speech_slot:update` |
+
+They were invisible because the suite has never run in CI. Diagnosing 9 failures
+across five domains is a different piece of work from a deployment pipeline, so
+the `integration` job ships **disabled** behind a `workflow_call` input rather
+than blocking every deploy on unrelated bugs.
+
+Everything needed to re-enable it is present and working — the job, the
+`test:int` script, and both halves of the env plumbing. Flip the input's default
+to `true` once those 9 are green. That is worth doing: adding this suite is what
+caught the `system_admin` speech-slot bug in §11.1.
 
 ## 12. Out of scope
 

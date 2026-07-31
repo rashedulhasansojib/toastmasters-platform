@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+// Server-side only — see lib/api.ts for why this is not NEXT_PUBLIC_.
+const API_BASE = process.env.API_INTERNAL_URL ?? 'http://localhost:4000';
 
 /**
  * Server-to-server call to the real API — no browser, no CORS involved. The

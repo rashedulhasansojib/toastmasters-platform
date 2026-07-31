@@ -6,7 +6,8 @@ import {
 } from '@toastmasters/contracts';
 import { sessionCookieHeader } from './session-proxy';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+// Server-side only — see lib/api.ts for why this is not NEXT_PUBLIC_.
+const API_BASE = process.env.API_INTERNAL_URL ?? 'http://localhost:4000';
 
 /** Server-only: no session cookie, or an expired/invalid one, both resolve to null — never throw for the ordinary logged-out case. */
 export async function getSession(): Promise<SessionResponse | null> {

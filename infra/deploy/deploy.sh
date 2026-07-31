@@ -37,7 +37,17 @@ COMPOSE="docker compose -f docker-compose.prod.yml"
 log() { printf '\n▸ %s\n' "$*"; }
 fail() { printf '\n✖ %s\n' "$*" >&2; exit 1; }
 
-[[ -f .env ]] || fail '.env is missing. CI renders it from GitHub secrets — see docs/deployment.md.'
+# Checked first, and separately from .env: in git this script lives at
+# infra/deploy/, but it runs from DEPLOY_PATH where everything sits flat. Running
+# it straight out of a clone is the likely mistake, and without this it would
+# surface as a confusing ".env is missing" instead of "wrong directory".
+[[ -f docker-compose.prod.yml ]] || fail \
+  "docker-compose.prod.yml is not in $(pwd).
+   Run this from DEPLOY_PATH on the server (where deploy.sh, the compose file,
+   Caddyfile, active.conf and .env sit flat together) — not from a repo checkout.
+   See docs/deployment.md."
+
+[[ -f .env ]] || fail '.env is missing. CI renders it from GitHub secrets on every deploy — see docs/deployment.md.'
 [[ -f active.conf ]] || fail 'active.conf is missing. CI seeds it on first deploy — see docs/deployment.md.'
 
 log "Deploying image tag: $IMAGE_TAG"

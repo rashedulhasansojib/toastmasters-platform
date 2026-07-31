@@ -56,6 +56,12 @@ the mount.
 **The server holds no git checkout.** The image carries the built code. `DEPLOY_PATH` contains only
 `docker-compose.prod.yml`, `Caddyfile`, `active.conf`, `deploy.sh` and `.env`.
 
+**On the very first deploy there is no warm rollback target.** CI seeds `active.conf` to blue, so the
+first deploy targets green and blue never starts — you get a rollback target from the _second_ deploy
+onward. Caddy starting with an upstream that does not exist yet is fine: it resolves upstream names
+lazily at request time, so it comes up healthy and simply 502s until the flip. (Verified, because the
+health probe runs inside Caddy and would be useless if Caddy refused to start.)
+
 ---
 
 ## 2. One-time server setup

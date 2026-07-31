@@ -3,11 +3,7 @@
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Plus } from 'lucide-react';
-import type {
-  ClubMemberType,
-  OrgUnitWithCount,
-  RoleTemplateSummary,
-} from '@toastmasters/contracts';
+import type { ClubMemberType, OrgUnit, RoleTemplateSummary } from '@toastmasters/contracts';
 
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
@@ -21,7 +17,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { submitAction, toast } from '@/lib/toast';
-import { OrgUnitCascadePicker } from './OrgUnitCascadePicker';
+import { OrgUnitFieldsPicker } from './OrgUnitFieldsPicker';
 
 const MEMBER_TYPES: ClubMemberType[] = [
   'new',
@@ -82,7 +78,7 @@ function AddUserForm({
   const [phone, setPhone] = useState('');
   const [tiMemberNumber, setTiMemberNumber] = useState('');
   const [assignNow, setAssignNow] = useState(false);
-  const [selectedUnit, setSelectedUnit] = useState<OrgUnitWithCount | null>(null);
+  const [selectedUnit, setSelectedUnit] = useState<OrgUnit | null>(null);
   const [role, setRole] = useState('');
   const [memberType, setMemberType] = useState<ClubMemberType | ''>('');
   const [submitting, setSubmitting] = useState(false);
@@ -234,7 +230,7 @@ function AddUserForm({
 
       {assignNow && (
         <div className="flex flex-col gap-3 rounded-md border border-border p-3">
-          <OrgUnitCascadePicker regionUnitId={regionUnitId} onChange={setSelectedUnit} />
+          <OrgUnitFieldsPicker regionUnitId={regionUnitId} onChange={setSelectedUnit} />
 
           {selectedUnit && (
             <div className="flex flex-col gap-1.5">

@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { ArrowLeft, KeyRound, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import type {
   ClubMemberType,
-  OrgUnitWithCount,
+  OrgUnit,
   PersonDetail,
   ProgramYear,
   RoleAssignmentEndedReason,
@@ -27,7 +27,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { submitAction, toast } from '@/lib/toast';
-import { OrgUnitCascadePicker } from './OrgUnitCascadePicker';
+import { OrgUnitFieldsPicker } from './OrgUnitFieldsPicker';
 
 const MEMBER_TYPES: ClubMemberType[] = [
   'new',
@@ -698,7 +698,7 @@ function AssignRoleForm({
   onDone: () => void;
   onCancel: () => void;
 }) {
-  const [selectedUnit, setSelectedUnit] = useState<OrgUnitWithCount | null>(null);
+  const [selectedUnit, setSelectedUnit] = useState<OrgUnit | null>(null);
   const [role, setRole] = useState('');
   const [memberType, setMemberType] = useState<ClubMemberType | ''>('');
   const [termStart, setTermStart] = useState(programYear?.startsOn ?? '');
@@ -752,7 +752,7 @@ function AssignRoleForm({
 
   return (
     <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
-      <OrgUnitCascadePicker regionUnitId={regionUnitId} onChange={setSelectedUnit} />
+      <OrgUnitFieldsPicker regionUnitId={regionUnitId} onChange={setSelectedUnit} />
 
       {selectedUnit && (
         <div className="flex flex-col gap-1.5">

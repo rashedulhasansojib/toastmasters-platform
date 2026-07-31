@@ -93,7 +93,12 @@ const RESOURCES: ResourceSeed[] = [
     resource: 'meeting.speech_slot',
     context: 'meeting',
     label: 'Speech slot',
-    allowedActions: ['read', 'create', 'approve'],
+    // `update` is load-bearing beyond club_vpe's template grant below:
+    // system_admin holds no seeded grants at all, so its access is synthesised
+    // from this list (access.repository.ts systemAdminGrants). Omitting an
+    // action here makes it unreachable for system_admin no matter what the
+    // role templates say.
+    allowedActions: ['read', 'create', 'update', 'approve'],
     clubScoped: true,
     sensitivity: 'normal',
   },

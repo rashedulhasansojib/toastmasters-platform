@@ -1,6 +1,6 @@
 # Containerised blue-green deployment
 
-**Date:** 2026-07-31 · **Owner:** platform · **Status:** approved, not yet implemented
+**Date:** 2026-07-31 · **Owner:** platform · **Status:** implemented on the `deployment` branch; not yet run against the real server
 
 Replaces the in-place pm2 deploy with a CI-built container image and a blue-green
 cutover on a single host. The mechanism is ported from the `clickup-sync`
@@ -63,10 +63,17 @@ proxy flip — ports directly. The _topology_ is redesigned below.
 
 A single multi-stage `Dockerfile` at the repo root.
 
-- **build** — `node:22-alpine`, corepack-pinned pnpm, manifests copied first so
-  `pnpm install --frozen-lockfile` caches until dependencies change, then
-  `pnpm build`. Turbo builds `packages/*` before `apps/*`, which includes
+- **build** — `node:22-bookworm-slim`, corepack-pinned pnpm, manifests copied
+  first so `pnpm install --frozen-lockfile` caches until dependencies change,
+  then `pnpm build`. Turbo builds `packages/*` before `apps/*`, which includes
   `prisma generate`.
+
+Debian slim rather than the reference project's Alpine: `argon2` and `sharp` are
+native and publish glibc prebuilds, so musl would compile them from source —
+slow, and contrary to the `allowBuilds` policy in `pnpm-workspace.yaml`, which
+assumes prebuilt binaries. `openssl` is installed in the runner so Prisma's
+schema engine stops warning that it cannot detect libssl.
+
 - **runner** — keeps the **full `node_modules`** on purpose: `prisma migrate
 deploy` and the `tsx` seed are devDependencies, and `prisma.config.ts` is
   loaded by the Prisma CLI. Same reasoning as the reference project.
@@ -83,6 +90,7 @@ never connects, and `prisma.config.ts` already tolerates an undefined
 | `worker`    | `node apps/worker/dist/main.js`                         |
 | `dashboard` | `next start -p ${DASHBOARD_PORT:-3000}` via its own bin |
 | `migrate`   | `pnpm db:deploy`                                        |
+| `seed`      | `pnpm db:seed` — off by default, opt-in per deploy      |
 
 Deliberately **not** `pnpm start` for any of them: those scripts wrap
 `dotenv -e ../../.env`, which does not exist inside a container and would fail.

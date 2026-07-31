@@ -285,6 +285,35 @@ headers present, the dashboard renders, `POST /api/session/login` reaches NestJS
 and returns a problem+json 401 from `/v1/auth/login` — and `/health` returns 404
 through Caddy, confirming the API is not publicly exposed.
 
+### 11.1 Adding the integration suite to the gate exposed a production bug
+
+Putting `pnpm test:int` in `quality.yml` immediately turned the gate red on a
+failure that predates this work: `system_admin · meeting.speech_slot:update`.
+
+`resource_catalog` listed `meeting.speech_slot` as allowing `read`, `create` and
+`approve` — not `update` — while commit `0dbd506` granted `club_vpe`
+`meeting.speech_slot:update` and pointed the PATCH/DELETE routes at it. Domain
+roles read `role_template_grant` rows directly, so `club_vpe` worked. But
+`system_admin` holds **no** seeded grants; its resolution is synthesised from
+`resource_catalog.allowed_actions` across every non-restricted resource
+(`access.repository.ts`, `systemAdminGrants`). With `update` missing from that
+list the grant was never produced, so **`system_admin` could not edit or remove a
+speech slot in production**.
+
+Fixed in the seed, plus a data migration — a seed change alone would not reach
+production, because seeding is deliberately off by default on deploy so that
+operator edits to reference data survive (CLAUDE.md §10.6). Same reasoning and
+shape as the earlier `membership.prospect` → `membership.guest` rename.
+
+The general lesson is the one CLAUDE.md §7 already states: the authorisation
+matrix is the most valuable suite in the project, and it was not running in CI.
+Adding an action to a role template without adding it to the resource catalog
+silently produces a grant that `system_admin` can never hold.
+
+Runtime: the suite takes ~4m15s (39 files, `fileParallelism: false`), which is
+acceptable in both the PR and deploy gates. If it grows past ~10 minutes, split
+it out of `ci.yml` with a `workflow_call` input rather than dropping it.
+
 ## 12. Out of scope
 
 - **Automated database backups.** Still the largest gap; Neon PITR remains the

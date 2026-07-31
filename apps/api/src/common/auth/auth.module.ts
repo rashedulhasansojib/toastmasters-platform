@@ -7,6 +7,7 @@ import { PersonRepository } from '../../modules/identity/person.repository';
 import { PRISMA_CLIENT } from '../db/prisma-client.token';
 import { PasswordService } from './password.service';
 import { SessionService } from './session.service';
+import { SignupRateLimiter } from './signup-rate-limiter.service';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 
@@ -27,6 +28,7 @@ import { AuthController } from './auth.controller';
     { provide: PRISMA_CLIENT, useFactory: () => getPrisma() },
     PasswordService,
     SessionService,
+    SignupRateLimiter,
     AuthService,
     PersonRepository,
   ],

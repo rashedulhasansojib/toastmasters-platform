@@ -54,7 +54,7 @@ export function AppShell({
     <div className="min-h-screen lg:grid lg:grid-cols-[16rem_1fr]">
       <aside className="hidden border-r border-sidebar-border lg:block">
         <div className="sticky top-0 h-screen">
-          <Sidebar session={session} />
+          <Sidebar session={session} units={units} />
         </div>
       </aside>
 
@@ -73,7 +73,7 @@ export function AppShell({
         )}
         aria-hidden={!open}
       >
-        <Sidebar session={session} onNavigate={close} />
+        <Sidebar session={session} units={units} onNavigate={close} />
       </aside>
 
       {/* On `lg` the content column owns its own scroll, so the top bar stays

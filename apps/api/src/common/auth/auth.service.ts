@@ -80,6 +80,38 @@ export class AuthService {
   }
 
   /**
+   * The public sandbox-signup endpoint (platform dashboard QR/link). Creates
+   * a Person with no ClubMembership/RoleAssignment — `defaultActiveUnit`
+   * would resolve the same null this hardcodes, since there is nothing to
+   * find, so the session issued here is a completely ordinary one. The
+   * sandbox module (not this service) is what recognises "no unit at all"
+   * and serves the sandboxed dashboard.
+   */
+  async register(input: {
+    email: string;
+    fullName: string;
+    password: string;
+  }): Promise<{ token: string; session: SessionResponse }> {
+    const person = await this.people.create({
+      email: input.email,
+      fullName: input.fullName,
+      registrationSource: 'demo_signup',
+    });
+    const passwordHash = await this.passwords.hash(input.password);
+    await this.people.setCredentials(person.id, passwordHash);
+
+    const currentYear = await this.programYears.findCurrent();
+    const claims: SessionClaims = {
+      sub: person.id,
+      activeUnitId: null,
+      programYearId: currentYear?.id ?? null,
+      v: person.permissionVersion,
+    };
+    const token = await this.session.issue(claims);
+    return { token, session: toSessionResponse(person, claims, null) };
+  }
+
+  /**
    * The unit the dashboard opens on, so nobody has to pick one by hand: the
    * primary club membership, else any club they are still a member of, else
    * the first club they hold a role at (an officer or admin appointed

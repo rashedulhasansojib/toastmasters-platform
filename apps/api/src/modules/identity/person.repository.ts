@@ -49,6 +49,7 @@ export class PersonRepository {
     fullName: string;
     phone?: string | null;
     tiMemberNumber?: string | null;
+    registrationSource?: 'demo_signup';
   }): Promise<Person> {
     try {
       const row = await this.db.person.create({
@@ -57,6 +58,7 @@ export class PersonRepository {
           fullName: input.fullName,
           phone: input.phone ?? null,
           tiMemberNumber: input.tiMemberNumber ?? null,
+          registrationSource: input.registrationSource ?? null,
         },
       });
       return toPerson(row);
@@ -66,6 +68,11 @@ export class PersonRepository {
       }
       throw err;
     }
+  }
+
+  /** Platform dashboard's sandbox-signup stat card — count only, never the rows themselves. */
+  async countByRegistrationSource(source: 'demo_signup'): Promise<number> {
+    return this.db.person.count({ where: { registrationSource: source, deletedAt: null } });
   }
 
   async findById(id: string): Promise<Person | null> {

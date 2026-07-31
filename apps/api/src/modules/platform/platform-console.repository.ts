@@ -15,6 +15,12 @@ export class PlatformConsoleRepository {
     return this.db.person.count({ where: { status: 'active' } });
   }
 
+  async countDemoSignups(): Promise<number> {
+    return this.db.person.count({
+      where: { registrationSource: 'demo_signup', deletedAt: null },
+    });
+  }
+
   async currentProgramYearId(): Promise<string | null> {
     const year = await this.db.programYear.findFirst({
       where: { status: 'current' },

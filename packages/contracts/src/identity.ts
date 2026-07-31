@@ -227,6 +227,21 @@ export const loginRequestSchema = z
   .strict();
 export type LoginRequest = z.infer<typeof loginRequestSchema>;
 
+/**
+ * The public sandbox-signup link (platform dashboard QR/link). Creates a
+ * Person with no ClubMembership/RoleAssignment — `activeUnitId` resolves to
+ * null exactly like AuthService.defaultActiveUnit already does for anyone
+ * with no club, so the session this issues is a completely ordinary one.
+ */
+export const registerRequestSchema = z
+  .object({
+    fullName: z.string().min(1),
+    email: z.email(),
+    password: z.string().min(8),
+  })
+  .strict();
+export type RegisterRequest = z.infer<typeof registerRequestSchema>;
+
 export const switchUnitRequestSchema = z
   .object({
     orgUnitId: z.uuid(),

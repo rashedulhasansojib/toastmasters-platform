@@ -2,8 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { X } from 'lucide-react';
-import type { SessionResponse } from '@toastmasters/contracts';
+import { Lock, X } from 'lucide-react';
+import type { SessionResponse, SwitchableUnit } from '@toastmasters/contracts';
 import { cn } from '@/lib/utils';
 import { LogoutButton } from './LogoutButton';
 import { buildNavSections } from './nav-config';
@@ -15,13 +15,15 @@ function isActive(pathname: string, href: string): boolean {
 
 export function Sidebar({
   session,
+  units,
   onNavigate,
 }: {
   session: SessionResponse;
+  units: SwitchableUnit[];
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
-  const sections = buildNavSections(session.activeUnit);
+  const sections = buildNavSections(session.activeUnit, units.length > 0);
 
   return (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
@@ -52,6 +54,21 @@ export function Sidebar({
                 const active = isActive(pathname, item.href);
                 const Icon = item.icon;
                 const ActionIcon = item.action?.icon;
+                if (item.disabled) {
+                  return (
+                    <li key={item.label} className="flex items-center gap-1">
+                      <span
+                        aria-disabled="true"
+                        title="Not available in the sandbox"
+                        className="flex flex-1 cursor-not-allowed items-center gap-2 rounded-md px-2 py-2 text-sm text-sidebar-foreground/40"
+                      >
+                        <Icon className="size-4 shrink-0" aria-hidden />
+                        <span className="truncate">{item.label}</span>
+                        <Lock className="ml-auto size-3.5 shrink-0" aria-hidden />
+                      </span>
+                    </li>
+                  );
+                }
                 return (
                   <li key={item.href} className="flex items-center gap-1">
                     <Link

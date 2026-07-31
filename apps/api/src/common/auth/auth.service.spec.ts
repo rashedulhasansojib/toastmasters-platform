@@ -72,6 +72,12 @@ function makeService(overrides: {
   const people = {
     findCredentialsByEmail: vi.fn().mockResolvedValue(overrides.credentials ?? null),
     findById: vi.fn().mockResolvedValue('person' in overrides ? overrides.person : person()),
+    create: vi
+      .fn()
+      .mockImplementation((input: Record<string, unknown>) =>
+        Promise.resolve(person({ ...input, id: 'new-person-1' } as Partial<Person>)),
+      ),
+    setCredentials: vi.fn().mockResolvedValue(undefined),
   };
   const clubMemberships = {
     findByPerson: vi.fn().mockResolvedValue(overrides.memberships ?? []),
@@ -85,6 +91,7 @@ function makeService(overrides: {
   };
   const passwords = {
     verify: vi.fn().mockResolvedValue(overrides.verifies ?? true),
+    hash: vi.fn().mockResolvedValue('hashed-password'),
   };
   const session = {
     issue: vi.fn().mockImplementation(async (claims) => `token-for-${JSON.stringify(claims)}`),
@@ -327,5 +334,29 @@ describe('AuthService.switchableUnits', () => {
     const { service } = makeService({ roleUnitIds: [], platformUnitIds: [] });
     const principal = { userId: 'person-1', roles: [], scopes: [] };
     expect(await service.switchableUnits(principal)).toEqual([]);
+  });
+});
+
+describe('AuthService.register', () => {
+  it('creates a demo_signup person, hashes the password, and issues a session with no active unit', async () => {
+    const { service, people, passwords } = makeService({});
+
+    const { session } = await service.register({
+      email: 'newcomer@example.com',
+      fullName: 'Newcomer Person',
+      password: 'a-strong-password',
+    });
+
+    expect(people.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email: 'newcomer@example.com',
+        fullName: 'Newcomer Person',
+        registrationSource: 'demo_signup',
+      }),
+    );
+    expect(passwords.hash).toHaveBeenCalledWith('a-strong-password');
+    expect(people.setCredentials).toHaveBeenCalledWith('new-person-1', 'hashed-password');
+    expect(session.activeUnitId).toBeNull();
+    expect(session.activeUnit).toBeNull();
   });
 });

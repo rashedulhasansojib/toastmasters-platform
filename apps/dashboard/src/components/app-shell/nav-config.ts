@@ -30,6 +30,8 @@ export type NavItem = {
   label: string;
   icon: LucideIcon;
   action?: NavAction;
+  /** Rendered greyed-out and non-clickable — the sandbox's "rest of the club" items. */
+  disabled?: boolean;
 };
 
 export type NavSection = {
@@ -60,6 +62,9 @@ export function unitLandingPath(unit: ActiveUnit): string | null {
   }
 }
 
+/** Where a zero-org-tree-footprint person lands — see buildNavSections' sandbox branch. */
+export const SANDBOX_LANDING_PATH = '/sandbox/meetings';
+
 /**
  * The sidebar renders from grants once we wire `can()` in — for now every
  * signed-in person sees the sub-tree matching the tier of whichever unit
@@ -68,8 +73,19 @@ export function unitLandingPath(unit: ActiveUnit): string | null {
  * would 403 — which is exactly why branching on the unit's *tier* here is not
  * a permission check. A non-super-admin who somehow reached a region unit
  * still gets a 403 from `platform.console` on the fetch.
+ *
+ * `hasAnyUnits` distinguishes two different reasons `activeUnit` can be
+ * null: an Area/Division/Region role-holder with no default club (who still
+ * has units to switch to — the plain Home+Tickets fallback below), versus a
+ * person with zero org-tree footprint at all — nothing to switch to,
+ * because there is nothing they've ever been assigned. That second case is
+ * the public sandbox-signup outcome, and gets the sandboxed Club nav
+ * instead of a dead end.
  */
-export function buildNavSections(activeUnit: ActiveUnit | null): NavSection[] {
+export function buildNavSections(
+  activeUnit: ActiveUnit | null,
+  hasAnyUnits: boolean,
+): NavSection[] {
   const overview: NavSection = {
     label: 'Overview',
     items: [{ href: '/', label: 'Home', icon: Home }],
@@ -79,6 +95,25 @@ export function buildNavSections(activeUnit: ActiveUnit | null): NavSection[] {
     label: 'Support',
     items: [{ href: '/tickets', label: 'Tickets', icon: Ticket }],
   };
+
+  if (!activeUnit && !hasAnyUnits) {
+    const sandbox: NavSection = {
+      label: 'Club (sandbox)',
+      items: [
+        { href: '/sandbox/meetings', label: 'Meetings', icon: CalendarDays },
+        { href: '/sandbox/planner', label: 'Planner', icon: CalendarRange },
+        { href: '/sandbox/guests', label: 'Guests', icon: UserPlus },
+        { href: '/sandbox/membership', label: 'Membership', icon: HeartPulse },
+        { href: '/sandbox/education', label: 'Education', icon: GraduationCap },
+        { href: '#', label: 'Finance', icon: Wallet, disabled: true },
+        { href: '#', label: 'Library', icon: BookOpen, disabled: true },
+        { href: '#', label: 'Inventory', icon: Package, disabled: true },
+        { href: '#', label: 'Quality', icon: ShieldCheck, disabled: true },
+        { href: '#', label: 'Governance', icon: Gavel, disabled: true },
+      ],
+    };
+    return [overview, sandbox, crossTier];
+  }
 
   if (!activeUnit) return [overview, crossTier];
 

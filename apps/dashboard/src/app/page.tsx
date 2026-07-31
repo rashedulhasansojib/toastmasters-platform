@@ -1,8 +1,8 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { fetchHealth } from '@/lib/api';
-import { getSession } from '@/lib/session';
-import { unitLandingPath } from '@/components/app-shell/nav-config';
+import { getSession, getSwitchableUnits } from '@/lib/session';
+import { SANDBOX_LANDING_PATH, unitLandingPath } from '@/components/app-shell/nav-config';
 import { vpmLandingOverride } from '@/lib/membership-landing';
 
 export default async function Home() {
@@ -15,6 +15,15 @@ export default async function Home() {
     const landing =
       (await vpmLandingOverride(session.activeUnit.id)) ?? unitLandingPath(session.activeUnit);
     if (landing) redirect(landing);
+  }
+
+  // No active unit and nothing to switch to — zero org-tree footprint at
+  // all (the public sandbox-signup outcome), not merely "no default club"
+  // (an Area/Division/Region role-holder still has units to pick from).
+  // Same distinction nav-config's buildNavSections makes for the sidebar.
+  if (session && !session.activeUnit) {
+    const units = await getSwitchableUnits();
+    if (units.length === 0) redirect(SANDBOX_LANDING_PATH);
   }
 
   const health = await fetchHealth().catch(() => null);

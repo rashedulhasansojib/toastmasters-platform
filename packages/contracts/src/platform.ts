@@ -30,6 +30,8 @@ export const platformConsoleSummary = z.object({
   counts: platformUnitCounts,
   activePeopleCount: z.number().int().nonnegative(),
   programYearId: z.string().min(1).nullable(),
+  /** People who signed up through the public sandbox-signup link — never assigned to a unit. */
+  demoSignupCount: z.number().int().nonnegative(),
 });
 export type PlatformConsoleSummary = z.infer<typeof platformConsoleSummary>;
 

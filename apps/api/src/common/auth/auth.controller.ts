@@ -1,8 +1,10 @@
-import { Body, Controller, Get, HttpCode, Post, Res } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Ip, Post, Res } from '@nestjs/common';
 import {
   loginRequestSchema,
+  registerRequestSchema,
   switchUnitRequestSchema,
   type LoginRequest,
+  type RegisterRequest,
   type SwitchUnitRequest,
   type SessionResponse,
   type SwitchableUnit,
@@ -12,6 +14,7 @@ import { CurrentUser } from './current-user.decorator';
 import { Public } from './public.decorator';
 import { AuthService } from './auth.service';
 import { SessionService } from './session.service';
+import { SignupRateLimiter } from './signup-rate-limiter.service';
 import type { Principal } from '../authz/authz.types';
 
 /** Minimal shape for the cookie-setting call — avoids a hard dependency on @types/express (see jwt-auth.guard.ts's RequestLike for the same pattern). */
@@ -24,6 +27,7 @@ export class AuthController {
   constructor(
     private readonly auth: AuthService,
     private readonly session: SessionService,
+    private readonly signupRateLimiter: SignupRateLimiter,
   ) {}
 
   @Public()
@@ -34,6 +38,21 @@ export class AuthController {
     @Res({ passthrough: true }) res: ResponseLike,
   ): Promise<SessionResponse> {
     const { token, session } = await this.auth.login(body.email, body.password);
+    res.cookie('session', token, this.session.cookieOptions());
+    return session;
+  }
+
+  /** The public sandbox-signup link (platform dashboard QR/link) — see AuthService.register. */
+  @Public()
+  @Post('register')
+  @HttpCode(200)
+  async register(
+    @Body(new ZodValidationPipe(registerRequestSchema)) body: RegisterRequest,
+    @Ip() ip: string,
+    @Res({ passthrough: true }) res: ResponseLike,
+  ): Promise<SessionResponse> {
+    this.signupRateLimiter.checkAndIncrement(ip);
+    const { token, session } = await this.auth.register(body);
     res.cookie('session', token, this.session.cookieOptions());
     return session;
   }

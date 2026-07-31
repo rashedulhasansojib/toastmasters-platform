@@ -59,9 +59,10 @@ export class PlatformConsoleService {
     const subtree = await this.orgUnits.findSubtree(region.path);
     const tree = subtree.filter((unit) => unit.id !== region.id);
 
-    const [activePeopleCount, programYearId] = await Promise.all([
+    const [activePeopleCount, programYearId, demoSignupCount] = await Promise.all([
       this.console.countActivePeople(),
       this.console.currentProgramYearId(),
+      this.console.countDemoSignups(),
     ]);
 
     return {
@@ -70,6 +71,7 @@ export class PlatformConsoleService {
       counts: countByTier(tree),
       activePeopleCount,
       programYearId,
+      demoSignupCount,
     };
   }
 

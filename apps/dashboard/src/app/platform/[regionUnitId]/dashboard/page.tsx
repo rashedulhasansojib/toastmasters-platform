@@ -1,4 +1,5 @@
 import { getPlatformConsole } from '@/lib/platform';
+import { SandboxSignupCard } from '@/components/platform/SandboxSignupCard';
 
 /**
  * The super-admin console. Reachable only by holders of
@@ -25,7 +26,7 @@ export default async function PlatformDashboardPage({
     );
   }
 
-  const { region, counts, activePeopleCount, programYearId } = summary;
+  const { region, counts, activePeopleCount, programYearId, demoSignupCount } = summary;
 
   return (
     <main className="page flex flex-col gap-6">
@@ -46,6 +47,11 @@ export default async function PlatformDashboardPage({
           <Stat label="Clubs" value={counts.club} />
           <Stat label="Active people" value={activePeopleCount} />
         </div>
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2>Demo</h2>
+        <SandboxSignupCard demoSignupCount={demoSignupCount} />
       </section>
     </main>
   );

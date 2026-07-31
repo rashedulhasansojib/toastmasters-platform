@@ -109,16 +109,26 @@ enum PersonStatus {
   disabled
 }
 
+/// How a Person entered the system, when it wasn't a normal role invitation.
+/// Null for the ordinary invitation-accept path. `demo_signup` is the public
+/// sandbox-signup link on the platform dashboard — these people hold no
+/// ClubMembership/RoleAssignment and see the sandbox experience, never real
+/// club data.
+enum PersonRegistrationSource {
+  demo_signup
+}
+
 model Person {
-  id                String       @id @default(uuid()) @db.Uuid
-  email             String       @unique
-  passwordHash      String?      @map("password_hash")
-  fullName          String       @map("full_name")
-  phone             String?
-  photoUrl          String?      @map("photo_url")
-  bio               String?
-  tiMemberNumber    String?      @map("ti_member_number")
-  status            PersonStatus @default(invited)
+  id                 String                    @id @default(uuid()) @db.Uuid
+  email              String                    @unique
+  passwordHash       String?                   @map("password_hash")
+  fullName           String                    @map("full_name")
+  phone              String?
+  photoUrl           String?                   @map("photo_url")
+  bio                String?
+  tiMemberNumber     String?                   @map("ti_member_number")
+  status             PersonStatus              @default(invited)
+  registrationSource PersonRegistrationSource? @map("registration_source")
   mfaEnabled        Boolean      @default(false) @map("mfa_enabled")
   permissionVersion Int          @default(1) @map("permission_version")
   createdAt         DateTime     @default(now()) @map("created_at")

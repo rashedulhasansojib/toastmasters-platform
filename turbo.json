@@ -31,7 +31,13 @@
     },
     "test:int": {
       "dependsOn": ["^build"],
-      "cache": false
+      "cache": false,
+      // Turbo runs tasks in a filtered environment, so vars exported by the
+      // caller never reach vitest unless declared here. The integration suite
+      // boots the real Nest app, whose S3StorageAdapter throws at DI time when
+      // these are unset — without them ~20 specs die in beforeAll. Supplied by a
+      // developer's .env locally, and by quality.yml in CI.
+      "passThroughEnv": ["S3_*"]
     },
     "generate": {
       "cache": false

@@ -78,5 +78,16 @@ jobs:
       # test-redis.ts), so it owns container lifecycle and schema state itself.
       # This is the suite that includes the authorisation matrix — every
       # (role x resource x action x scope) row asserted against authorize().
+      #
+      # The S3 values are placeholders and are never dialled: S3StorageAdapter is
+      # constructed eagerly at DI time and throws when they are unset, so without
+      # them every spec that boots the Nest app dies in beforeAll. Locally a
+      # developer's .env supplies them; CI has no .env, so they are set here.
       - name: Integration tests
+        env:
+          S3_ENDPOINT: http://localhost:9000
+          S3_REGION: us-east-1
+          S3_BUCKET: toastmasters-test
+          S3_ACCESS_KEY_ID: test
+          S3_SECRET_ACCESS_KEY: test
         run: pnpm test:int

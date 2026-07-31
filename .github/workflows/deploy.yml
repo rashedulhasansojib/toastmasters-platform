@@ -55,6 +55,26 @@ jobs:
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts
 
+      - name: Write production .env from secret
+        env:
+          ENV_FILE: ${{ secrets.PRODUCTION_ENV_FILE }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+        run: |
+          test -n "$ENV_FILE" || { echo '::error::PRODUCTION_ENV_FILE is not set — see docs/deployment.md'; exit 1; }
+          # GitHub is the source of truth now: this overwrites the server's
+          # .env on every deploy, so a hand-edit on the box only survives
+          # until the next push. Update the secret, not the file.
+          printf '%s' "$ENV_FILE" | ssh -i ~/.ssh/deploy_key \
+              -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+              -o StrictHostKeyChecking=yes \
+              -o BatchMode=yes \
+              -p "$DEPLOY_PORT" \
+              "$DEPLOY_USER@$DEPLOY_HOST" \
+              "umask 077 && cat > '$DEPLOY_PATH/.env'"
+
       - name: Deploy over SSH
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}

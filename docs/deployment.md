@@ -4,18 +4,19 @@ Production is a **single self-hosted server** running the three apps under **pm2
 **Postgres on Neon** and **managed Redis**. Deploys are automated: merge to `main`, CI goes
 green, GitHub Actions SSHes in and rolls the release.
 
-| Piece                   | Where                                                              |
-| ----------------------- | ------------------------------------------------------------------ |
-| Pipeline                | `.github/workflows/ci.yml` (gate) → `.github/workflows/deploy.yml` |
-| What runs on the server | `infra/deploy/deploy.sh`                                           |
-| Process definitions     | `infra/deploy/ecosystem.config.cjs`                                |
-| Production config       | `<repo>/.env` on the server — **never in git**                     |
+| Piece                   | Where                                                                                                   |
+| ----------------------- | ------------------------------------------------------------------------------------------------------- |
+| Pipeline                | `.github/workflows/ci.yml` (gate) → `.github/workflows/deploy.yml`                                      |
+| What runs on the server | `infra/deploy/deploy.sh`                                                                                |
+| Process definitions     | `infra/deploy/ecosystem.config.cjs`                                                                     |
+| Production config       | `PRODUCTION_ENV_FILE` GitHub secret, written to `<repo>/.env` on the server every deploy — never in git |
 
 ```
 push to main ──▶ CI (lint · typecheck · test · build · gitleaks)
                     │ green only
                     ▼
-                 Deploy ──ssh──▶ git reset --hard <sha>
+                 Deploy ──ssh──▶ write .env from PRODUCTION_ENV_FILE
+                                 git reset --hard <sha>
                                  pnpm install --frozen-lockfile
                                  pnpm build
                                  pnpm db:deploy        (prisma migrate deploy)
@@ -80,6 +81,12 @@ git clone git@github.com:rashedulhasansojib/toastmasters-platform.git /srv/toast
 
 `infra/deploy/deploy.sh` **sources** this file, so it must be plain `KEY=value` shell syntax:
 no inline `#` comments after a value, and quote anything containing spaces.
+
+Once Actions is wired up (§2), the `PRODUCTION_ENV_FILE` secret is the source of truth — the
+Deploy workflow overwrites `<repo>/.env` on the server from that secret on **every** run, before
+`deploy.sh` even starts. Hand-editing `.env` on the box only survives until the next deploy;
+change the secret instead. This section is only for getting a first `.env` onto the server so
+§1.5's by-hand deploy has something to source, before Actions has ever run.
 
 ```bash
 cd /srv/toastmasters-platform
@@ -192,9 +199,22 @@ Repo ▸ Settings ▸ Secrets and variables ▸ Actions ▸ **New repository sec
 | `DEPLOY_USER`            | `deploy`                                     | yes      |
 | `DEPLOY_PATH`            | `/srv/toastmasters-platform`                 | yes      |
 | `DEPLOY_PORT`            | SSH port, if not 22                          | no       |
+| `PRODUCTION_ENV_FILE`    | The **entire contents** of production `.env` | yes      |
 
 Host-key checking is **strict** — `DEPLOY_SSH_KNOWN_HOSTS` is not optional, and the workflow
 fails fast with a readable error rather than trusting whatever answers on that IP.
+
+`PRODUCTION_ENV_FILE` is pasted as one blob — copy the whole file, not one line at a time:
+
+```bash
+# on your laptop, with the production .env open
+pbcopy < /path/to/production.env   # or: cat it and paste manually
+```
+
+Paste that into the secret's value box. To change any single variable later, edit your local
+copy and paste the whole thing again — GitHub secrets have no diff view, so there's no partial
+update. This is deliberately the one place production config lives now; don't also hand-maintain
+`.env` on the server (see §1.3).
 
 Optional: create a **`production` environment** (Settings ▸ Environments) to add a required
 reviewer or restrict which branches can deploy. The workflow already targets it, so protection
@@ -263,7 +283,10 @@ up `pm2 install pm2-logrotate` so they don't eat the disk.
 
 ### Restarting without deploying
 
-After hand-editing `.env`, the env has to be re-exported for pm2 to see it:
+If `PRODUCTION_ENV_FILE` is wired up, don't hand-edit `.env` on the server — update the secret
+and dispatch **Deploy** with the current `ref` instead, so the change actually persists. The
+steps below are for a server that isn't on the GitHub-managed `.env` yet, or a quick same-value
+restart:
 
 ```bash
 cd /srv/toastmasters-platform
@@ -277,18 +300,20 @@ A plain `pm2 restart tm-api` keeps the **old** environment. `--update-env` is th
 
 ## 4. Troubleshooting
 
-| Symptom                                                         | Cause / fix                                                                                                                 |
-| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Deploy fails at `Host key verification failed`                  | `DEPLOY_SSH_KNOWN_HOSTS` is stale (server rebuilt / new IP). Re-run `ssh-keyscan` and update the secret.                    |
-| `Permission denied (publickey)`                                 | The Actions **public** key isn't in `deploy@server:~/.ssh/authorized_keys`.                                                 |
-| `.env is missing`                                               | §1.3 wasn't done, or `DEPLOY_PATH` points at the wrong directory.                                                           |
-| `pnpm: not found` over SSH                                      | Non-interactive SSH gets a minimal PATH. `sudo corepack enable pnpm` installs to `/usr/bin`, which is on it.                |
-| `prisma migrate deploy` hangs or errors on a prepared statement | `DIRECT_URL` is pointing at the Neon **pooler**. Use the unpooled endpoint.                                                 |
-| Health check fails after a green build                          | `pm2 logs --lines 60`. Usually a missing/invalid env var — `parseEnv()` fails fast and names it.                            |
-| Dashboard calls `localhost:4000` in the browser                 | `NEXT_PUBLIC_API_URL` was wrong **at build time**. Fix `.env`, redeploy (it's baked into the bundle).                       |
-| Brief 404s on JS chunks during a deploy                         | `next build` rewrites `.next` under the running server; the reload right after clears it. A hard refresh fixes a stuck tab. |
-| Build killed with no error                                      | OOM. Add swap and `NODE_OPTIONS=--max-old-space-size=1536` (§1.1).                                                          |
-| CI green but no deploy ran                                      | Deploy only triggers on CI runs for `main`. Check Actions ▸ Deploy for a skipped run, or dispatch it manually.              |
+| Symptom                                                         | Cause / fix                                                                                                                         |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Deploy fails at `Host key verification failed`                  | `DEPLOY_SSH_KNOWN_HOSTS` is stale (server rebuilt / new IP). Re-run `ssh-keyscan` and update the secret.                            |
+| `Permission denied (publickey)`                                 | The Actions **public** key isn't in `deploy@server:~/.ssh/authorized_keys`.                                                         |
+| `.env is missing`                                               | §1.3 wasn't done, or `DEPLOY_PATH` points at the wrong directory.                                                                   |
+| `pnpm: not found` over SSH                                      | Non-interactive SSH gets a minimal PATH. `sudo corepack enable pnpm` installs to `/usr/bin`, which is on it.                        |
+| `prisma migrate deploy` hangs or errors on a prepared statement | `DIRECT_URL` is pointing at the Neon **pooler**. Use the unpooled endpoint.                                                         |
+| Health check fails after a green build                          | `pm2 logs --lines 60`. Usually a missing/invalid env var — `parseEnv()` fails fast and names it.                                    |
+| Dashboard calls `localhost:4000` in the browser                 | `NEXT_PUBLIC_API_URL` was wrong **at build time**. Fix `.env`, redeploy (it's baked into the bundle).                               |
+| Brief 404s on JS chunks during a deploy                         | `next build` rewrites `.next` under the running server; the reload right after clears it. A hard refresh fixes a stuck tab.         |
+| Build killed with no error                                      | OOM. Add swap and `NODE_OPTIONS=--max-old-space-size=1536` (§1.1).                                                                  |
+| CI green but no deploy ran                                      | Deploy only triggers on CI runs for `main`. Check Actions ▸ Deploy for a skipped run, or dispatch it manually.                      |
+| An env change you made keeps disappearing                       | You edited `.env` on the server by hand. The next deploy overwrites it from `PRODUCTION_ENV_FILE` — edit the secret, then redeploy. |
+| Deploy fails at `Write production .env from secret`             | `PRODUCTION_ENV_FILE` is unset or empty. Add it (§2) — the workflow refuses to run `deploy.sh` against a missing `.env`.            |
 
 ---
 

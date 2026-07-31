@@ -10,37 +10,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.17.0
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      - name: Generate Prisma client
-        run: pnpm db:generate
-
-      - name: Lint
-        run: pnpm lint
-
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Test (with coverage)
-        run: pnpm test:cov
-
-      - name: Build
-        run: pnpm build
+  # The same gate deploy.yml runs — one definition, in quality.yml.
+  quality:
+    uses: ./.github/workflows/quality.yml
 
   commitlint:
     runs-on: ubuntu-latest

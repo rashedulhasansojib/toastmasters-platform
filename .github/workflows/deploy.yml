@@ -1,10 +1,14 @@
 name: Deploy
 
-# Production deploys. Two ways in:
-#   • automatic — every push to main deploys, CI is not gated on. A broken
-#     build reaches the server; the safety net is gone by design.
+# Push to main -> quality gate -> build & push image to GHCR -> blue-green deploy.
+#
+# Two ways in:
+#   • automatic — every push to main, gated on the SAME quality workflow CI runs.
+#     A red build produces no image, and an image is the only deployable thing.
 #   • manual — Actions ▸ Deploy ▸ Run workflow, optionally naming a ref. This is
-#     also the rollback path: deploy the previous good SHA.
+#     also the rollback path: deploy the previous good SHA. Because images are
+#     tagged by SHA, a rollback re-uses the image already in GHCR instead of
+#     rebuilding it.
 on:
   push:
     branches: [main]
@@ -15,7 +19,7 @@ on:
         required: false
         default: main
       seed:
-        description: 'Also run pnpm db:seed (overwrites edited reference data)'
+        description: 'Also run the reference-vocabulary seed (overwrites edited reference data)'
         type: boolean
         required: false
         default: false
@@ -27,21 +31,106 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # ── 1. Resolve what we are deploying ────────────────────────────────────────
+  target:
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.resolve.outputs.ref }}
+      sha: ${{ steps.resolve.outputs.sha }}
+      seed: ${{ steps.resolve.outputs.seed }}
+      image: ${{ steps.resolve.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.sha }}
+
+      - name: Resolve ref, SHA and image name
+        id: resolve
+        run: |
+          set -euo pipefail
+          if [[ '${{ github.event_name }}' == 'workflow_dispatch' ]]; then
+            REF='${{ inputs.ref }}'
+            SEED='${{ inputs.seed }}'
+          else
+            REF='${{ github.sha }}'
+            SEED='false'
+          fi
+          # The image is tagged with the resolved commit SHA, never a moving ref,
+          # so a rollback names an exact artifact.
+          SHA="$(git rev-parse HEAD)"
+          # GHCR requires a lowercase path; the repo name may not be.
+          IMAGE="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          {
+            echo "ref=$REF"
+            echo "sha=$SHA"
+            echo "seed=$SEED"
+            echo "image=$IMAGE"
+          } >> "$GITHUB_OUTPUT"
+
+  # ── 2. The gate — the same workflow ci.yml runs ─────────────────────────────
+  quality:
+    needs: target
+    uses: ./.github/workflows/quality.yml
+    with:
+      ref: ${{ needs.target.outputs.sha }}
+
+  # ── 3. Build the image and push to GHCR (the only deployable artifact) ──────
+  build-and-push:
+    needs: [target, quality]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.target.outputs.sha }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Rollback path: if this SHA was built before, the image already exists and
+      # rebuilding it would only burn minutes to produce the same bytes.
+      - name: Check whether this SHA is already built
+        id: exists
+        run: |
+          if docker manifest inspect '${{ needs.target.outputs.image }}:${{ needs.target.outputs.sha }}' >/dev/null 2>&1; then
+            echo 'found=true' >> "$GITHUB_OUTPUT"
+            echo "::notice::Image for ${{ needs.target.outputs.sha }} already in GHCR — skipping build."
+          else
+            echo 'found=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/build-push-action@v6
+        if: steps.exists.outputs.found == 'false'
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ needs.target.outputs.image }}:latest
+            ${{ needs.target.outputs.image }}:${{ needs.target.outputs.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── 4. Blue-green deploy ────────────────────────────────────────────────────
   deploy:
+    needs: [target, build-and-push]
     runs-on: ubuntu-latest
     environment:
       name: production
+    permissions:
+      contents: read
+      packages: read
     steps:
-      - name: Resolve target ref
-        id: target
-        run: |
-          if [[ '${{ github.event_name }}' == 'workflow_dispatch' ]]; then
-            echo "ref=${{ inputs.ref }}" >> "$GITHUB_OUTPUT"
-            echo "seed=${{ inputs.seed }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "ref=${{ github.sha }}" >> "$GITHUB_OUTPUT"
-            echo "seed=false" >> "$GITHUB_OUTPUT"
-          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.target.outputs.sha }}
 
       - name: Configure SSH
         env:
@@ -55,50 +144,146 @@ jobs:
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts
 
-      - name: Deploy over SSH
+      # Host-key checking stays strict: we fail fast rather than trust whatever
+      # answers on that address.
+      - name: Define ssh/scp helpers
+        run: |
+          {
+            echo "SSH_OPTS=-i $HOME/.ssh/deploy_key -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes -o BatchMode=yes"
+          } >> "$GITHUB_ENV"
+
+      # The server holds no git checkout any more — the image carries the code.
+      # It needs only these four files, flat in DEPLOY_PATH, plus the .env below.
+      - name: Copy deploy files to the server
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
           DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
-          TARGET_REF: ${{ steps.target.outputs.ref }}
-          RUN_SEED: ${{ steps.target.outputs.seed }}
         run: |
-          # The remote side moves the working tree to the target commit, then
-          # hands off to that commit's own infra/deploy/deploy.sh (install,
-          # build, migrate, pm2 reload, health check). Splitting it this way
-          # means the deploy script is never rewritten underneath itself.
-          ssh -i ~/.ssh/deploy_key \
-              -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-              -o StrictHostKeyChecking=yes \
-              -o BatchMode=yes \
-              -p "$DEPLOY_PORT" \
-              "$DEPLOY_USER@$DEPLOY_HOST" \
-              "bash -s -- '$DEPLOY_PATH' '$TARGET_REF' '$RUN_SEED'" <<'REMOTE'
           set -euo pipefail
-          DEPLOY_PATH="$1"; TARGET_REF="$2"; export RUN_SEED="$3"
+          ssh $SSH_OPTS -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH'"
+          scp $SSH_OPTS -P "$DEPLOY_PORT" \
+            infra/docker-compose.prod.yml \
+            infra/Caddyfile \
+            infra/deploy/deploy.sh \
+            "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+
+      # active.conf is deploy STATE (which color is live), not configuration.
+      # Seed it only when absent — copying it every time would reset the live
+      # color and make the very next deploy flip into the container already serving.
+      - name: Seed active.conf on first deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+        run: |
+          set -euo pipefail
+          ssh $SSH_OPTS -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" bash -s -- "$DEPLOY_PATH" <<'REMOTE'
+          set -euo pipefail
+          cd "$1"
+          chmod +x deploy.sh
+          if [ ! -f active.conf ]; then
+            echo 'reverse_proxy dashboard-blue:3000' > active.conf
+            echo 'seeded active.conf -> blue'
+          fi
+          REMOTE
+
+      # Rendered here, piped over stdin, written under umask 077. Secrets never
+      # appear on a command line (visible in the host's process list) and never
+      # touch the runner's disk.
+      #
+      # NOT shell syntax: compose parses this file itself and does not strip
+      # quotes, so nothing here is quoted. Optional vars are OMITTED when empty
+      # rather than written blank — packages/config validates S3_ENDPOINT as a
+      # URL and EMAIL_FROM as an email, and an empty string fails both.
+      - name: Render .env from secrets
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          IMAGE: ${{ needs.target.outputs.image }}
+          DOMAIN: ${{ secrets.DOMAIN }}
+          APP_URL: ${{ secrets.APP_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          SESSION_JWT_SECRET: ${{ secrets.SESSION_JWT_SECRET }}
+          CORS_ORIGINS: ${{ secrets.CORS_ORIGINS }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+          S3_REGION: ${{ secrets.S3_REGION }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          # S3_* are required even though packages/config marks them .optional():
+          # S3StorageAdapter is constructed eagerly at DI time and throws unless
+          # all four are present, so the API cannot boot without them. Verified by
+          # running the stack — omitting them crash-loops the API.
+          for required in DOMAIN APP_URL DATABASE_URL DIRECT_URL SESSION_JWT_SECRET \
+                          S3_ENDPOINT S3_BUCKET S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY; do
+            if [[ -z "${!required}" ]]; then
+              echo "::error::$required is not set — see docs/deployment.md"
+              exit 1
+            fi
+          done
+
+          render() {
+            echo "NODE_ENV=production"
+            echo "LOG_LEVEL=info"
+            echo "API_PORT=4000"
+            echo "DASHBOARD_PORT=3000"
+            # Redis is a compose service on the internal network, not a secret.
+            echo "REDIS_URL=redis://redis:6379"
+            echo "IMAGE_REPO=${IMAGE}"
+            echo "DOMAIN=${DOMAIN}"
+            echo "APP_URL=${APP_URL}"
+            echo "DATABASE_URL=${DATABASE_URL}"
+            echo "DIRECT_URL=${DIRECT_URL}"
+            echo "SESSION_JWT_SECRET=${SESSION_JWT_SECRET}"
+            # Browsers never call the API cross-origin (the dashboard proxies),
+            # so this defaults to the public origin rather than being required.
+            echo "CORS_ORIGINS=${CORS_ORIGINS:-$APP_URL}"
+            echo "S3_ENDPOINT=${S3_ENDPOINT}"
+            echo "S3_BUCKET=${S3_BUCKET}"
+            echo "S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID}"
+            echo "S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY}"
+            echo "S3_REGION=${S3_REGION:-us-east-1}"
+            # Omitted rather than written blank when unset: EMAIL_FROM is
+            # validated as an email and has a schema default, and an empty
+            # string would fail that validation rather than fall back.
+            [[ -n "$EMAIL_FROM" ]] && echo "EMAIL_FROM=${EMAIL_FROM}"
+            return 0
+          }
+
+          render | ssh $SSH_OPTS -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "umask 077 && cd '$DEPLOY_PATH' && cat > .env.tmp && mv .env.tmp .env"
+
+      - name: Blue-green deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          IMAGE_TAG: ${{ needs.target.outputs.sha }}
+          RUN_SEED: ${{ needs.target.outputs.seed }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ssh $SSH_OPTS -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            bash -s -- "$DEPLOY_PATH" "$IMAGE_TAG" "$RUN_SEED" "$GHCR_USER" "$GHCR_TOKEN" <<'REMOTE'
+          set -euo pipefail
+          DEPLOY_PATH="$1"; export IMAGE_TAG="$2"; export RUN_SEED="$3"
+          GHCR_USER="$4"; GHCR_TOKEN="$5"
 
           cd "$DEPLOY_PATH"
-          echo "▸ Syncing $(pwd) to $TARGET_REF"
-          git fetch --prune --tags origin
-          # A bare SHA isn't covered by the refspec above; GitHub allows fetching
-          # one directly, so try that too before resolving.
-          git fetch origin "$TARGET_REF" 2>/dev/null || true
-          TARGET_SHA="$(
-            git rev-parse --verify "origin/$TARGET_REF^{commit}" 2>/dev/null \
-            || git rev-parse --verify "$TARGET_REF^{commit}" 2>/dev/null \
-            || git rev-parse --verify FETCH_HEAD
-          )"
-          echo "▸ Previous commit: $(git rev-parse --short HEAD)"
-          # Detach first so the local branch never diverges from origin.
-          # --force discards local changes to tracked files (e.g. Next.js
-          # rewrites apps/dashboard/next-env.d.ts on every build), which would
-          # otherwise make `git checkout` refuse to switch commits.
-          git checkout --detach --force --quiet "$TARGET_SHA"
-          git reset --hard --quiet "$TARGET_SHA"
-          # No `git clean` on purpose: it would delete .env and node_modules.
-
-          exec bash ./infra/deploy/deploy.sh
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          ./deploy.sh
           REMOTE
 
       - name: Summary
@@ -107,7 +292,8 @@ jobs:
           {
             echo "### Deploy ${{ job.status }}"
             echo
-            echo "- ref: \`${{ steps.target.outputs.ref }}\`"
+            echo "- ref: \`${{ needs.target.outputs.ref }}\`"
+            echo "- image: \`${{ needs.target.outputs.image }}:${{ needs.target.outputs.sha }}\`"
             echo "- trigger: \`${{ github.event_name }}\`"
-            echo "- seed: \`${{ steps.target.outputs.seed }}\`"
+            echo "- seed: \`${{ needs.target.outputs.seed }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

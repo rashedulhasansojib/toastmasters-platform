@@ -1,0 +1,82 @@
+name: Quality
+
+# The gate, defined once and called twice: by ci.yml on pull requests and
+# pushes, and by deploy.yml before an image is built. Keeping it a reusable
+# workflow is what makes "a red build never reaches the server" true by
+# construction rather than by two definitions agreeing.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Commit SHA, tag or branch to check out (defaults to the calling event ref)'
+        type: string
+        required: false
+        default: ''
+
+jobs:
+  build-test:
+    name: lint · typecheck · test · build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.17.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Generated Prisma client types are needed before anything typechecks.
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test (with coverage)
+        run: pnpm test:cov
+
+      - name: Build
+        run: pnpm build
+
+  integration:
+    name: integration (real Postgres + Redis)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.17.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      # No `services:` block on purpose. The suite brings up its own Postgres and
+      # Redis through Testcontainers (apps/api/test/support/test-db.ts and
+      # test-redis.ts), so it owns container lifecycle and schema state itself.
+      # This is the suite that includes the authorisation matrix — every
+      # (role x resource x action x scope) row asserted against authorize().
+      - name: Integration tests
+        run: pnpm test:int

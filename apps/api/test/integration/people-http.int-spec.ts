@@ -154,6 +154,75 @@ describe('Users admin HTTP surface (integration)', () => {
       .expect(201);
     expect(assignResponse.body.warnings).toEqual([]);
 
+    /**
+     * The regression: `role_assignment_singleton` was a blanket unique index
+     * over (org_unit, role, program_year), so `club_member` — seeded
+     * isSingleton: false — was capped at ONE active holder per club per year.
+     * A second member 500'd, and one person could not accumulate roles.
+     */
+    const secondMember = await people.create({
+      email: 'second-member-a@example.com',
+      fullName: 'Second Member In Club A',
+    });
+    await request(app.getHttpServer())
+      .post(`/v1/org-units/${clubA.id}/role-assignments`)
+      .set('Authorization', `Bearer ${await jwtFor(sysAdmin.id)}`)
+      .send({
+        personId: secondMember.id,
+        role: 'club_member',
+        programYearId: year.id,
+        termStart: '2026-07-01',
+        termEnd: '2027-06-30',
+        memberType: 'new',
+      })
+      .expect(201);
+
+    // …and the same person takes a second, additional role at the same club.
+    await request(app.getHttpServer())
+      .post(`/v1/org-units/${clubA.id}/role-assignments`)
+      .set('Authorization', `Bearer ${await jwtFor(sysAdmin.id)}`)
+      .send({
+        personId: memberInClubA.id,
+        role: 'club_vpe',
+        programYearId: year.id,
+        termStart: '2026-07-01',
+        termEnd: '2027-06-30',
+        memberType: 'new',
+      })
+      .expect(201);
+
+    // A genuine singleton role stays singleton: a second VPE is a 409 that
+    // says why, not an opaque 500.
+    const singletonConflict = await request(app.getHttpServer())
+      .post(`/v1/org-units/${clubA.id}/role-assignments`)
+      .set('Authorization', `Bearer ${await jwtFor(sysAdmin.id)}`)
+      .send({
+        personId: secondMember.id,
+        role: 'club_vpe',
+        programYearId: year.id,
+        termStart: '2026-07-01',
+        termEnd: '2027-06-30',
+        memberType: 'new',
+      })
+      .expect(409);
+    expect(String(singletonConflict.body.detail ?? singletonConflict.body.message)).toMatch(
+      /single-holder/i,
+    );
+
+    // And the same person cannot hold the same role twice.
+    await request(app.getHttpServer())
+      .post(`/v1/org-units/${clubA.id}/role-assignments`)
+      .set('Authorization', `Bearer ${await jwtFor(sysAdmin.id)}`)
+      .send({
+        personId: memberInClubA.id,
+        role: 'club_member',
+        programYearId: year.id,
+        termStart: '2026-07-01',
+        termEnd: '2027-06-30',
+        memberType: 'new',
+      })
+      .expect(409);
+
     const clubADetail = await request(app.getHttpServer())
       .get(`/v1/people/${memberInClubA.id}?anchorOrgUnitId=${region.id}`)
       .set('Authorization', `Bearer ${await jwtFor(sysAdmin.id)}`)

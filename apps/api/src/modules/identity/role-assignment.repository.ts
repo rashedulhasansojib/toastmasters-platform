@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { ConflictException, Inject, Injectable } from '@nestjs/common';
 import { getPrisma, type PrismaClient } from '@toastmasters/db';
 import type {
   ClubMemberType,
@@ -8,6 +8,25 @@ import type {
 import { PRISMA_CLIENT } from '../../common/db/prisma-client.token';
 
 type RoleAssignmentRow = Awaited<ReturnType<PrismaClient['roleAssignment']['create']>>;
+
+/**
+ * Turn the partial unique indexes on `role_assignment` into a 409 an admin can
+ * act on. Without this the violation surfaced as a bare 500 with no `detail`,
+ * so the Users page showed only "Could not assign that role" and gave no clue
+ * that someone already held it.
+ */
+function translateAssignConflict(error: unknown, role: string, roleLabel?: string): unknown {
+  const code = (error as { code?: string })?.code;
+  if (code !== 'P2002') return error;
+  const target = String((error as { meta?: { target?: unknown } })?.meta?.target ?? '');
+  const label = roleLabel ?? role;
+  if (target.includes('no_duplicate')) {
+    return new ConflictException(`That person already holds ${label} here for this program year.`);
+  }
+  return new ConflictException(
+    `${label} is a single-holder role and is already filled for this program year. End the current holder's term first.`,
+  );
+}
 
 function toRoleAssignment(row: RoleAssignmentRow): RoleAssignment {
   return {
@@ -48,6 +67,28 @@ export class RoleAssignmentRepository {
     termEnd: Date;
     appointedBy: string;
     memberType?: ClubMemberType;
+    /** From the role template. Defaults false so the legacy club-scoped caller keeps working. */
+    isSingleton?: boolean;
+    /** Only for the conflict message; the repository never branches on it. */
+    roleLabel?: string;
+  }): Promise<RoleAssignment> {
+    try {
+      return await this.assignInTransaction(input);
+    } catch (error) {
+      throw translateAssignConflict(error, input.role, input.roleLabel);
+    }
+  }
+
+  private async assignInTransaction(input: {
+    personId: string;
+    orgUnitId: string;
+    role: string;
+    programYearId: string;
+    termStart: Date;
+    termEnd: Date;
+    appointedBy: string;
+    memberType?: ClubMemberType;
+    isSingleton?: boolean;
   }): Promise<RoleAssignment> {
     const row = await this.db.$transaction(async (tx) => {
       const created = await tx.roleAssignment.create({
@@ -61,6 +102,7 @@ export class RoleAssignmentRepository {
           status: 'active',
           appointedBy: input.appointedBy,
           trainedAt: [],
+          isSingleton: input.isSingleton ?? false,
         },
       });
 

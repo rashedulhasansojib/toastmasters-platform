@@ -663,13 +663,15 @@ function RoleRow({
   onChanged: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  // A picker rather than the old `window.prompt`, which required typing one of
+  // four enum values exactly and silently did nothing on a typo.
+  const [ending, setEnding] = useState(false);
+  const [reason, setReason] = useState<RoleAssignmentEndedReason>('term_end');
 
   async function end(): Promise<void> {
-    const reason = prompt(`End this role? Type one of: ${END_REASONS.join(', ')}`, 'term_end');
-    if (!reason || !END_REASONS.includes(reason as RoleAssignmentEndedReason)) return;
     setBusy(true);
     try {
-      await submitAction(
+      const result = await submitAction(
         () =>
           fetch(`/api/role-assignments/${roleAssignmentId}/end`, {
             method: 'POST',
@@ -682,6 +684,8 @@ function RoleRow({
           error: 'Could not end that role.',
         },
       );
+      if (!result) return;
+      setEnding(false);
       onChanged();
     } finally {
       setBusy(false);
@@ -689,19 +693,49 @@ function RoleRow({
   }
 
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm">
-      <span>
-        <span className="font-medium">{role}</span>
-        <span className="text-muted-foreground"> · {orgUnitName}</span>
-      </span>
-      <div className="flex items-center gap-2">
-        <Badge variant={status === 'active' ? 'default' : 'outline'}>{status}</Badge>
-        {status === 'active' && (
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => void end()}>
-            End
-          </Button>
-        )}
+    <div className="flex flex-col gap-2 rounded-md border border-border px-3 py-2 text-sm">
+      <div className="flex items-center justify-between gap-3">
+        <span>
+          <span className="font-medium">{role}</span>
+          <span className="text-muted-foreground"> · {orgUnitName}</span>
+        </span>
+        <div className="flex items-center gap-2">
+          <Badge variant={status === 'active' ? 'default' : 'outline'}>{status}</Badge>
+          {status === 'active' && !ending && (
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => setEnding(true)}>
+              End
+            </Button>
+          )}
+        </div>
       </div>
+
+      {ending && (
+        <div className="flex flex-col gap-2 border-t border-border pt-2 sm:flex-row sm:items-end">
+          <div className="flex flex-1 flex-col gap-1.5">
+            <Label htmlFor={`end-reason-${roleAssignmentId}`}>Reason</Label>
+            <Select value={reason} onValueChange={(v) => setReason(v as RoleAssignmentEndedReason)}>
+              <SelectTrigger className="w-full" id={`end-reason-${roleAssignmentId}`}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {END_REASONS.map((r) => (
+                  <SelectItem key={r} value={r}>
+                    {r.replace(/_/g, ' ')}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={() => setEnding(false)} disabled={busy}>
+              Cancel
+            </Button>
+            <Button size="sm" disabled={busy} onClick={() => void end()}>
+              {busy ? 'Ending…' : 'Confirm'}
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -784,7 +818,9 @@ function AssignRoleForm({
   onCancel: () => void;
 }) {
   const [selectedUnit, setSelectedUnit] = useState<OrgUnit | null>(null);
-  const [role, setRole] = useState('');
+  // A person routinely holds several roles at one unit (Member + VPE, say), so
+  // the picker is multi-select and each pick becomes its own assignment.
+  const [roles, setRoles] = useState<string[]>([]);
   const [memberType, setMemberType] = useState<ClubMemberType | ''>('');
   const [termStart, setTermStart] = useState(programYear?.startsOn ?? '');
   const [termEnd, setTermEnd] = useState(programYear?.endsOn ?? '');
@@ -794,11 +830,17 @@ function AssignRoleForm({
     ? roleTemplates.filter((t) => t.unitTypes.length > 0 && t.unitTypes.includes(selectedUnit.type))
     : [];
 
+  function toggleRole(role: string) {
+    setRoles((prev) => (prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]));
+  }
+
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
 
-    if (!selectedUnit || !role || !defaultProgramYearId) {
-      toast.error('Choose an org unit, a role, and make sure a current program year exists.');
+    if (!selectedUnit || roles.length === 0 || !defaultProgramYearId) {
+      toast.error(
+        'Choose an org unit, at least one role, and make sure a current program year exists.',
+      );
       return;
     }
     if (selectedUnit.type === 'club' && !memberType) {
@@ -808,28 +850,39 @@ function AssignRoleForm({
 
     setSubmitting(true);
     try {
-      const result = await submitAction(
-        () =>
-          fetch(`/api/org-units/${selectedUnit.id}/role-assignments`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              personId,
-              role,
-              programYearId: defaultProgramYearId,
-              termStart,
-              termEnd,
-              memberType: memberType || undefined,
-            }),
+      // One request per role. Reported individually so a role that collides
+      // with an existing single-holder term names itself, and the others
+      // still land rather than the whole batch failing.
+      const failures: string[] = [];
+      let assigned = 0;
+      for (const role of roles) {
+        const label = eligibleRoles.find((t) => t.role === role)?.label ?? role;
+        const response = await fetch(`/api/org-units/${selectedUnit.id}/role-assignments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            personId,
+            role,
+            programYearId: defaultProgramYearId,
+            termStart,
+            termEnd,
+            memberType: memberType || undefined,
           }),
-        {
-          loading: 'Assigning role…',
-          success: 'Role assigned',
-          error: 'Could not assign that role.',
-        },
-      );
-      if (!result) return;
-      onDone();
+        });
+        if (response.ok) {
+          assigned += 1;
+        } else {
+          const body = (await response.json().catch(() => ({}))) as {
+            detail?: string;
+            message?: string;
+          };
+          failures.push(`${label}: ${body.detail ?? body.message ?? 'could not be assigned'}`);
+        }
+      }
+
+      if (assigned > 0) toast.success(`${assigned} role${assigned === 1 ? '' : 's'} assigned`);
+      for (const failure of failures) toast.error(failure);
+      if (assigned > 0) onDone();
     } finally {
       setSubmitting(false);
     }
@@ -840,30 +893,39 @@ function AssignRoleForm({
       <OrgUnitFieldsPicker regionUnitId={regionUnitId} onChange={setSelectedUnit} />
 
       {selectedUnit && (
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="assign-role">Role</Label>
-          <Select
-            items={Object.fromEntries(eligibleRoles.map((t) => [t.role, t.label]))}
-            value={role || undefined}
-            onValueChange={(v) => setRole(v ?? '')}
-          >
-            <SelectTrigger className="w-full" id="assign-role">
-              <SelectValue placeholder="Select a role" />
-            </SelectTrigger>
-            <SelectContent>
-              {eligibleRoles.map((t) => (
-                <SelectItem key={t.role} value={t.role}>
-                  {t.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {eligibleRoles.length === 0 && (
+        <fieldset className="flex flex-col gap-1.5">
+          <legend className="text-sm font-medium">Roles</legend>
+          {eligibleRoles.length === 0 ? (
             <p className="text-xs text-muted-foreground">
               No seeded role applies to a {selectedUnit.type}.
             </p>
+          ) : (
+            <>
+              <div className="grid gap-1 rounded-md border border-border p-2 sm:grid-cols-2">
+                {eligibleRoles.map((t) => (
+                  <label
+                    key={t.role}
+                    className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted"
+                  >
+                    <input
+                      type="checkbox"
+                      className="size-4"
+                      checked={roles.includes(t.role)}
+                      onChange={() => toggleRole(t.role)}
+                    />
+                    <span className="flex-1">{t.label}</span>
+                    {t.isSingleton && (
+                      <span className="text-[11px] text-muted-foreground">one holder</span>
+                    )}
+                  </label>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Pick as many as apply — each becomes its own assignment for the same term.
+              </p>
+            </>
           )}
-        </div>
+        </fieldset>
       )}
 
       {selectedUnit?.type === 'club' && (
@@ -923,7 +985,11 @@ function AssignRoleForm({
           Cancel
         </Button>
         <Button type="submit" size="lg" className="h-11 lg:h-9" disabled={submitting}>
-          {submitting ? 'Assigning…' : 'Assign role'}
+          {submitting
+            ? 'Assigning…'
+            : roles.length > 1
+              ? `Assign ${roles.length} roles`
+              : 'Assign role'}
         </Button>
       </div>
     </form>

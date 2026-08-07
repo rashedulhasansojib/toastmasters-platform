@@ -70,6 +70,10 @@ export class RoleAssignmentService {
       termEnd: input.termEnd,
       appointedBy: input.actorId,
       memberType: input.memberType,
+      // Stamped from the template so the DB's partial unique index only binds
+      // roles that really are one-per-unit-per-year.
+      isSingleton: template.isSingleton,
+      roleLabel: template.label,
     });
 
     // system-design.md §6.3 INVARIANT DirectorRequiresClubMembership: a

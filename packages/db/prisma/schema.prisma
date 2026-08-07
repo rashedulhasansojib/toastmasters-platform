@@ -299,6 +299,21 @@ model RoleAssignment {
   trainedAt         Json                       @default("[]") @map("trained_at")
   endedReason       RoleAssignmentEndedReason? @map("ended_reason")
 
+  /**
+   * Stamped from `RoleTemplate.isSingleton` when the assignment is created,
+   * so the "one active holder per unit per year" rule can be a partial unique
+   * index (CLAUDE.md §6 — an invariant a race can't beat) *without* applying
+   * to roles that are legitimately held by many people, `club_member` above
+   * all. M1 shipped that index across every role as a stopgap and the
+   * promised relaxation never landed, which capped a club at one active
+   * member per program year.
+   *
+   * Denormalised on purpose: it records the rule as it stood when the role
+   * was granted. Flipping `isSingleton` on a template does not retro-apply to
+   * assignments already made — re-grant to move an existing one.
+   */
+  isSingleton       Boolean                    @default(false) @map("is_singleton")
+
   @@map("role_assignment")
 }
 

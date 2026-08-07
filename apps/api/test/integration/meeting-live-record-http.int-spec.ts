@@ -4,7 +4,7 @@ import { INestApplication, VersioningType } from '@nestjs/common';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import { SignJWT } from 'jose';
-import { seedAccessVocabulary } from '@toastmasters/db';
+import { getPrisma, seedAccessVocabulary } from '@toastmasters/db';
 import { startTestDb } from '../support/test-db';
 import { startTestRedis } from '../support/test-redis';
 import { AppModule } from '../../src/app.module';
@@ -141,6 +141,7 @@ describe('M3 Slice 7: meeting live records (integration)', () => {
     const body = {
       kind: 'timer' as const,
       clientKey: 'timer-speech-1-final',
+      targetKey: 'slot-speech-1',
       targetLabel: 'Speaker: Jane',
       payload: { category: 'speech', elapsedMs: 305_000, signal: 'green' as const },
     };
@@ -167,6 +168,83 @@ describe('M3 Slice 7: meeting live records (integration)', () => {
     expect(list.body[0].payload).toEqual(body.payload);
   });
 
+  /**
+   * The regression this suite previously missed. `clientKey` was doing double
+   * duty as both the retry key and the identity of the report, so the second
+   * save of a corrected report collided with the first, was swallowed by the
+   * idempotent upsert, and returned 201 with the *stale* payload — the tally
+   * the Grammarian had just fixed silently never reached the record.
+   */
+  it('re-saving a corrected report supersedes the earlier one instead of being swallowed', async () => {
+    const token = await jwtFor(memberId);
+    const base = `/v1/clubs/${clubId}/meetings/${meetingId}/live-records`;
+    const targetKey = 'grammarian';
+
+    const first = await request(app.getHttpServer())
+      .post(base)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        kind: 'grammarian',
+        targetKey,
+        clientKey: `${targetKey}:attempt-1`,
+        payload: { wordOfDayUses: 2, corrections: [] },
+      })
+      .expect(201);
+
+    const corrected = await request(app.getHttpServer())
+      .post(base)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        kind: 'grammarian',
+        targetKey,
+        clientKey: `${targetKey}:attempt-2`,
+        payload: {
+          wordOfDayUses: 7,
+          corrections: [{ said: 'could of', shouldHaveBeen: 'could have' }],
+        },
+      })
+      .expect(201);
+
+    // A new row, not a mutation of the old one — the table is append-only.
+    expect(corrected.body.id).not.toBe(first.body.id);
+    expect(corrected.body.payload.wordOfDayUses).toBe(7);
+
+    // The read model shows only the correction, not both revisions.
+    const list = await request(app.getHttpServer())
+      .get(base)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const grammarian = (list.body as { kind: string; payload: { wordOfDayUses: number } }[]).filter(
+      (r) => r.kind === 'grammarian',
+    );
+    expect(grammarian).toHaveLength(1);
+    expect(grammarian[0]?.payload.wordOfDayUses).toBe(7);
+
+    // …and the superseded revision is still there as history.
+    const history = await request(app.getHttpServer())
+      .get(`${base}?targetKey=${targetKey}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(history.body).toHaveLength(2);
+    expect((history.body as { id: string }[])[0]?.id).toBe(corrected.body.id);
+  });
+
+  /**
+   * Guards the append-only REVOKE itself. This only means anything because the
+   * test container now runs as a non-superuser role (see test/support/test-db.ts)
+   * — a superuser bypasses the privilege check and the assertion would pass
+   * vacuously.
+   */
+  it('the live-record table rejects UPDATE and DELETE at the database', async () => {
+    const db = getPrisma();
+    await expect(
+      db.$executeRawUnsafe(`UPDATE "meeting_live_record" SET "target_label" = 'tampered'`),
+    ).rejects.toThrow(/permission denied/i);
+    await expect(db.$executeRawUnsafe(`DELETE FROM "meeting_live_record"`)).rejects.toThrow(
+      /permission denied/i,
+    );
+  });
+
   it('a member of a different club is denied — sibling-club isolation', async () => {
     const token = await jwtFor(outsiderId);
     await request(app.getHttpServer())
@@ -175,6 +253,7 @@ describe('M3 Slice 7: meeting live records (integration)', () => {
       .send({
         kind: 'ah_counter',
         clientKey: 'intrusion',
+        targetKey: 'role-intrusion',
         payload: { counts: [{ word: 'um', count: 1 }] },
       })
       .expect(403);

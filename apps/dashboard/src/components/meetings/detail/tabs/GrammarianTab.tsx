@@ -8,13 +8,31 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { submitAction } from '@/lib/toast';
 import { EmptyState, Field, TabSectionHeading } from '../primitives';
+import { latestFor, newAttemptKey } from '../liveRecords';
 
 type Correction = { said: string; shouldHaveBeen: string };
 
+/** One grammarian report per meeting, so the target is a constant. */
+const TARGET_KEY = 'grammarian';
+
+type SavedReport = { wordOfDayUses: number; corrections: Correction[] };
+
+/** Saved payloads are `Record<string, unknown>` on the wire — narrow defensively. */
+function readSaved(record: MeetingLiveRecord | undefined): SavedReport {
+  const payload = (record?.payload ?? {}) as Partial<SavedReport>;
+  return {
+    wordOfDayUses: typeof payload.wordOfDayUses === 'number' ? payload.wordOfDayUses : 0,
+    corrections: Array.isArray(payload.corrections) ? payload.corrections : [],
+  };
+}
+
 /**
  * Grammarian report: how often the word of the day was used, plus the
- * language corrections to read out. Saved as one `MeetingLiveRecord` with a
- * stable `clientKey`, so re-saving updates rather than duplicating.
+ * language corrections to read out.
+ *
+ * Saved as a `MeetingLiveRecord` under a stable `targetKey`. Re-saving writes
+ * a new row that supersedes the previous one on read (the table is
+ * append-only, NFR-4), and the tab opens on whatever was last saved.
  */
 export function GrammarianTab({
   clubUnitId,
@@ -28,8 +46,12 @@ export function GrammarianTab({
   liveRecords: MeetingLiveRecord[];
 }) {
   const router = useRouter();
-  const [uses, setUses] = useState(0);
-  const [corrections, setCorrections] = useState<Correction[]>([]);
+  const saved = readSaved(latestFor(liveRecords, 'grammarian', TARGET_KEY));
+  // Lazy initialisers, not an effect: the tab remounts when it is selected, so
+  // it picks up the saved report without a props-into-state copy that would
+  // clobber a report being typed.
+  const [uses, setUses] = useState(saved.wordOfDayUses);
+  const [corrections, setCorrections] = useState<Correction[]>(saved.corrections);
   const [said, setSaid] = useState('');
   const [shouldHaveBeen, setShouldHaveBeen] = useState('');
   const [saving, setSaving] = useState(false);
@@ -56,8 +78,10 @@ export function GrammarianTab({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               kind: 'grammarian',
-              // One grammarian report per meeting, so the key is the meeting.
-              clientKey: `grammarian-${meetingId}`,
+              targetKey: TARGET_KEY,
+              // Fresh per press, so a retry of this attempt dedupes but a
+              // corrected report is not mistaken for one.
+              clientKey: newAttemptKey(TARGET_KEY),
               payload: { wordOfDayUses: uses, corrections },
             }),
           }),

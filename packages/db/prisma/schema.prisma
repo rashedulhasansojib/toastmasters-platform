@@ -480,8 +480,17 @@ enum MeetingLiveToolKind {
  * and a `payload` Json column (see the Slice 7 plan note) instead of three
  * separate tables — the three shapes never share a query, only a write
  * path, so one idempotent-write table is enough.
- * FR-MTG-6/NFR-3: `clientKey` is client-minted so a venue-wifi drop can
- * safely retry the same write without creating a duplicate.
+ *
+ * Two distinct keys, which must not be collapsed into one (they were, and a
+ * re-save was silently discarded):
+ *   `clientKey` — one *save attempt*. Client-minted and fresh per attempt, so
+ *     a venue-wifi drop can safely replay the same write without creating a
+ *     duplicate (FR-MTG-6/NFR-3).
+ *   `targetKey` — the *thing being reported on*, stable across attempts
+ *     ("grammarian", "role-<assignmentId>", "slot-<speechSlotId>"). A timer
+ *     re-run or a corrected tally is a NEW row with the same `targetKey`;
+ *     the table is append-only (NFR-4), so nothing is ever overwritten and
+ *     the read model takes the newest row per (kind, targetKey).
  */
 model MeetingLiveRecord {
   id                     String              @id @default(uuid()) @db.Uuid
@@ -489,6 +498,7 @@ model MeetingLiveRecord {
   meeting                Meeting             @relation(fields: [meetingId], references: [id])
   kind                   MeetingLiveToolKind
   clientKey              String              @map("client_key")
+  targetKey              String              @map("target_key")
   targetRoleAssignmentId String?             @map("target_role_assignment_id") @db.Uuid
   targetRoleAssignment   MeetingRoleAssignment? @relation(fields: [targetRoleAssignmentId], references: [id])
   targetLabel            String?             @map("target_label")
@@ -498,6 +508,7 @@ model MeetingLiveRecord {
   createdAt              DateTime            @default(now()) @map("created_at")
 
   @@unique([meetingId, clientKey])
+  @@index([meetingId, kind, targetKey, createdAt])
   @@map("meeting_live_record")
 }
 

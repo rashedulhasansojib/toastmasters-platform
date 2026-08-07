@@ -514,12 +514,21 @@ export type CapabilityTokenVerification = z.infer<typeof capabilityTokenVerifica
 /**
  * M3 Slice 7: system-design.md §9.1's timerRecord/ahCounterRecord/
  * grammarianRecord, one write path with a `kind` discriminator (see the
- * Slice 7 plan note). `clientKey` is client-minted so a venue-wifi drop can
- * safely retry the same write (FR-MTG-6/NFR-3) — the server returns the
- * originally-stored record unchanged on a repeat key, never a duplicate.
+ * Slice 7 plan note).
+ *
+ * Two keys, deliberately separate:
+ *   `clientKey` — one save *attempt*, minted fresh by the client each time
+ *     Save is pressed. A venue-wifi drop can replay that same attempt and the
+ *     server returns the stored record unchanged, never a duplicate
+ *     (FR-MTG-6/NFR-3).
+ *   `targetKey` — what is being reported on, stable across attempts. Saving a
+ *     corrected tally writes a NEW row with the same `targetKey`; the table is
+ *     append-only (NFR-4) and reads take the newest row per (kind, targetKey).
+ * Collapsing the two makes every re-save a silent no-op — do not.
  */
 const liveRecordTargetFields = {
   clientKey: z.string().min(1),
+  targetKey: z.string().min(1),
   targetRoleAssignmentId: z.uuid().optional(),
   targetLabel: z.string().min(1).optional(),
 };
@@ -567,6 +576,7 @@ export const meetingLiveRecord = z.object({
   meetingId: z.uuid(),
   kind: z.enum(['timer', 'ah_counter', 'grammarian']),
   clientKey: z.string(),
+  targetKey: z.string(),
   targetRoleAssignmentId: z.uuid().nullable(),
   targetLabel: z.string().nullable(),
   payload: z.record(z.string(), z.unknown()),

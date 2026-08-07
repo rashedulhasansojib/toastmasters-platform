@@ -1,4 +1,4 @@
-import { Body, Controller, Get, NotFoundException, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, NotFoundException, Param, Post, Query } from '@nestjs/common';
 import { z } from 'zod';
 import {
   createMeetingLiveRecordRequestSchema,
@@ -43,6 +43,7 @@ export class MeetingLiveRecordController {
       meetingId,
       kind: body.kind,
       clientKey: body.clientKey,
+      targetKey: body.targetKey,
       targetRoleAssignmentId: body.targetRoleAssignmentId,
       targetLabel: body.targetLabel,
       payload: body.payload,
@@ -50,13 +51,22 @@ export class MeetingLiveRecordController {
     });
   }
 
+  /**
+   * The current report, not the raw log: the newest row per (kind, targetKey).
+   * Superseded revisions stay in the table as append-only history — pass
+   * `?targetKey=` to read one target's full revision list.
+   */
   @Get()
   @ResourceScope('meeting.live_record', 'read', { source: 'param', key: 'clubUnitId' })
   async list(
     @Param('clubUnitId', uuidPipe) clubUnitId: string,
     @Param('meetingId', uuidPipe) meetingId: string,
+    @Query('targetKey', new ZodValidationPipe(z.string().min(1).optional()))
+    targetKey?: string,
   ): Promise<MeetingLiveRecord[]> {
     await this.assertMeetingInClub(clubUnitId, meetingId);
-    return this.liveRecords.findByMeeting(meetingId);
+    return targetKey
+      ? this.liveRecords.findHistory(meetingId, targetKey)
+      : this.liveRecords.findLatestByMeeting(meetingId);
   }
 }

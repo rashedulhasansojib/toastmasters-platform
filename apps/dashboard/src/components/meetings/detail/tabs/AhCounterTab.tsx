@@ -11,23 +11,41 @@ import { submitAction } from '@/lib/toast';
 import { MemberCombobox } from '../MemberCombobox';
 import { useMemberName } from '../MembersContext';
 import { EmptyState, TabSectionHeading } from '../primitives';
+import { latestByTarget, newAttemptKey } from '../liveRecords';
 
 const DEFAULT_FILLER_WORDS = ['Ah', 'Um', 'So', 'Like'];
 const MAX_WORDS = 20;
 
 type CountedSpeaker = {
+  /** Stable identity of the speaker being counted; also the record's `targetKey`. */
   id: string;
-  clientKey: string;
   name: string;
   counts: Record<string, number>;
 };
 
+type SavedCount = { word: string; count: number };
+
+/** Saved payloads are `Record<string, unknown>` on the wire — narrow defensively. */
+function readCounts(payload: MeetingLiveRecord['payload']): SavedCount[] {
+  const counts = (payload as { counts?: unknown }).counts;
+  if (!Array.isArray(counts)) return [];
+  return counts.filter(
+    (c): c is SavedCount =>
+      typeof c === 'object' &&
+      c !== null &&
+      typeof (c as SavedCount).word === 'string' &&
+      typeof (c as SavedCount).count === 'number',
+  );
+}
+
 /**
  * Ah-Counter tally.
  *
- * Counting happens locally so a tap is instant even on venue wifi; the
- * whole tally is then written as one `MeetingLiveRecord` per speaker with a
- * stable `clientKey`, so pressing Save twice updates rather than duplicates.
+ * Counting happens locally so a tap is instant even on venue wifi; the whole
+ * tally is then written as one `MeetingLiveRecord` per speaker under a stable
+ * `targetKey`. Saving again writes a new row that supersedes the previous one
+ * on read — the table is append-only (NFR-4) — and the tab opens on the last
+ * saved tally rather than on zeroes.
  */
 export function AhCounterTab({
   clubUnitId,
@@ -43,7 +61,20 @@ export function AhCounterTab({
   const router = useRouter();
   const memberName = useMemberName();
 
-  const [fillerWords, setFillerWords] = useState<string[]>(DEFAULT_FILLER_WORDS);
+  /** The current saved tally per speaker, newest revision only. */
+  const savedByTarget = useMemo(() => latestByTarget(liveRecords, 'ah_counter'), [liveRecords]);
+
+  // A word that was counted last time has to stay on the pad, or its saved
+  // count would be invisible and dropped by the next save.
+  const [fillerWords, setFillerWords] = useState<string[]>(() => {
+    const words = [...DEFAULT_FILLER_WORDS];
+    for (const record of savedByTarget.values()) {
+      for (const { word } of readCounts(record.payload)) {
+        if (!words.some((w) => w.toLowerCase() === word.toLowerCase())) words.push(word);
+      }
+    }
+    return words.slice(0, MAX_WORDS);
+  });
   const [addingWord, setAddingWord] = useState(false);
   const [newWord, setNewWord] = useState('');
   const [adding, setAdding] = useState(false);
@@ -64,7 +95,6 @@ export function AhCounterTab({
         )
         .map((a) => ({
           id: `role-${a.id}`,
-          clientKey: `ah-role-${a.id}`,
           name: memberName(
             a.assignee.kind === 'member' || a.assignee.kind === 'cross_club'
               ? a.assignee.personId
@@ -79,10 +109,29 @@ export function AhCounterTab({
    * Counts are held as an id-keyed overlay on top of the derived `seeded`
    * list, so a change to the agenda re-derives the roster during render
    * without an effect copying props into state — and without a tally that
-   * is already part-way entered being reset.
+   * is already part-way entered being reset. Seeded from the last saved
+   * tally so a reopened tab shows what is on the record.
    */
-  const [counts, setCounts] = useState<Record<string, Record<string, number>>>({});
-  const [manual, setManual] = useState<CountedSpeaker[]>([]);
+  const [counts, setCounts] = useState<Record<string, Record<string, number>>>(() => {
+    const out: Record<string, Record<string, number>> = {};
+    for (const [targetKey, record] of savedByTarget) {
+      out[targetKey] = Object.fromEntries(readCounts(record.payload).map((c) => [c.word, c.count]));
+    }
+    return out;
+  });
+
+  // Manually-added speakers only exist in the saved records, so rebuild them
+  // from there — their ids are minted client-side and would not survive a
+  // reload otherwise.
+  const [manual, setManual] = useState<CountedSpeaker[]>(() =>
+    [...savedByTarget.entries()]
+      .filter(([targetKey]) => targetKey.startsWith('manual-'))
+      .map(([targetKey, record]) => ({
+        id: targetKey,
+        name: record.targetLabel ?? '',
+        counts: {},
+      })),
+  );
 
   const speakers = useMemo<CountedSpeaker[]>(
     () =>
@@ -131,7 +180,7 @@ export function AhCounterTab({
     const name = newPersonId ? memberName(newPersonId) : newName.trim();
     if (!name) return;
     const id = `manual-${crypto.randomUUID()}`;
-    setManual((prev) => [...prev, { id, clientKey: `ah-${id}`, name, counts: {} }]);
+    setManual((prev) => [...prev, { id, name, counts: {} }]);
     setOpenIds((prev) =>
       prev.size === 0 ? new Set(speakers.map((s) => s.id)).add(id) : new Set(prev).add(id),
     );
@@ -157,7 +206,11 @@ export function AhCounterTab({
   const totalFor = (speaker: CountedSpeaker) =>
     Object.values(speaker.counts).reduce((sum, n) => sum + n, 0);
 
-  /** One record per speaker; a stable clientKey makes the retry idempotent. */
+  /**
+   * One record per speaker, keyed by the speaker (`targetKey`) and stamped
+   * with a fresh attempt key, so re-saving a corrected tally supersedes the
+   * earlier one instead of being swallowed as a duplicate.
+   */
   async function saveReport() {
     setSaving(true);
     try {
@@ -173,8 +226,9 @@ export function AhCounterTab({
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 kind: 'ah_counter',
-                clientKey: speaker.clientKey,
-                targetLabel: speaker.name,
+                targetKey: speaker.id,
+                clientKey: newAttemptKey(speaker.id),
+                targetLabel: speaker.name.trim() || undefined,
                 payload: { counts },
               }),
             });

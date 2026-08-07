@@ -11,6 +11,7 @@ import { submitAction } from '@/lib/toast';
 import { MemberCombobox } from '../MemberCombobox';
 import { useMemberName } from '../MembersContext';
 import { EmptyState, TabSectionHeading } from '../primitives';
+import { latestByTarget, newAttemptKey } from '../liveRecords';
 
 /**
  * Official Toastmasters timer-sheet flag times, per speech category.
@@ -53,10 +54,25 @@ function short(seconds: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
+/** Saved payloads are `Record<string, unknown>` on the wire — narrow defensively. */
+function savedSeconds(payload: MeetingLiveRecord['payload']): number {
+  const elapsedMs = (payload as { elapsedMs?: unknown }).elapsedMs;
+  return typeof elapsedMs === 'number' ? Math.round(elapsedMs / 1000) : 0;
+}
+
+function savedCategory(payload: MeetingLiveRecord['payload']): CategoryKey {
+  const label = (payload as { category?: unknown }).category;
+  return CATEGORIES.find((c) => c.label === label)?.key ?? CATEGORIES[0].key;
+}
+
 type Entry = {
+  /**
+   * Stable identity of what is being timed; also the record's `targetKey`, so
+   * re-timing a speech supersedes the earlier timing rather than being
+   * swallowed as a duplicate. The per-attempt retry key is minted at save
+   * time (FR-MTG-6/NFR-3).
+   */
   id: string;
-  /** Client-minted and stable, so a retry after a venue-wifi drop is idempotent (FR-MTG-6/NFR-3). */
-  clientKey: string;
   label: string;
   personId: string | null;
   category: CategoryKey;
@@ -106,7 +122,6 @@ export function TimerReportTab({
       .forEach((slot) => {
         out.push({
           id: `slot-${slot.id}`,
-          clientKey: `timer-slot-${slot.id}`,
           label: slot.title || memberName(slot.requestedBy),
           personId: slot.requestedBy,
           category: slot.level === 1 ? 'iceBreaker' : 'preparedSpeaker',
@@ -133,7 +148,6 @@ export function TimerReportTab({
             : null;
         out.push({
           id: `role-${assignment.id}`,
-          clientKey: `timer-role-${assignment.id}`,
           label: memberName(personId),
           personId,
           category,
@@ -152,8 +166,36 @@ export function TimerReportTab({
    * and no risk of a running timer being clobbered by a re-seed.
    */
   type Override = { elapsed: number; status: Entry['status']; recorded: boolean };
-  const [overrides, setOverrides] = useState<Record<string, Override>>({});
-  const [manual, setManual] = useState<Entry[]>([]);
+
+  /** The timings already on the record, newest revision per target. */
+  const savedByTarget = useMemo(() => latestByTarget(liveRecords, 'timer'), [liveRecords]);
+
+  // Reopening the tab shows the timings already recorded rather than a row of
+  // zeroes — otherwise a saved timing looks lost.
+  const [overrides, setOverrides] = useState<Record<string, Override>>(() =>
+    Object.fromEntries(
+      [...savedByTarget].map(([targetKey, record]) => [
+        targetKey,
+        { elapsed: savedSeconds(record.payload), status: 'stopped' as const, recorded: true },
+      ]),
+    ),
+  );
+
+  // Manually-added rows live only in the saved records — their ids are minted
+  // client-side and would not survive a reload otherwise.
+  const [manual, setManual] = useState<Entry[]>(() =>
+    [...savedByTarget.entries()]
+      .filter(([targetKey]) => targetKey.startsWith('manual-'))
+      .map(([targetKey, record]) => ({
+        id: targetKey,
+        label: record.targetLabel ?? '',
+        personId: null,
+        category: savedCategory(record.payload),
+        elapsed: savedSeconds(record.payload),
+        status: 'stopped' as const,
+        recorded: true,
+      })),
+  );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState<number | null>(null);
@@ -254,7 +296,6 @@ export function TimerReportTab({
       ...prev,
       {
         id,
-        clientKey: `timer-${id}`,
         label,
         personId,
         category,
@@ -268,9 +309,10 @@ export function TimerReportTab({
   }
 
   /**
-   * Persist a finished timing as a `MeetingLiveRecord`. `clientKey` is
-   * stable per entry, so a retry after a dropped connection replays to the
-   * same row rather than creating a duplicate.
+   * Persist a finished timing as a `MeetingLiveRecord`, keyed by the entry
+   * (`targetKey`) and stamped with a fresh attempt key. A retry of the same
+   * attempt after a dropped connection replays to the same row; re-timing the
+   * same speech writes a new row that supersedes the old one on read.
    */
   async function recordEntry(entry: Entry) {
     const result = await submitAction(
@@ -280,8 +322,9 @@ export function TimerReportTab({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             kind: 'timer',
-            clientKey: entry.clientKey,
-            targetLabel: entry.label,
+            targetKey: entry.id,
+            clientKey: newAttemptKey(entry.id),
+            targetLabel: entry.label.trim() || undefined,
             payload: {
               category: flagsFor(entry.category).label,
               elapsedMs: entry.elapsed * 1000,

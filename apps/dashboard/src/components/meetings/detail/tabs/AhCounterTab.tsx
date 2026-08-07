@@ -122,10 +122,11 @@ export function AhCounterTab({
 
   // Manually-added speakers only exist in the saved records, so rebuild them
   // from there — their ids are minted client-side and would not survive a
-  // reload otherwise.
+  // reload otherwise. `ah-manual-` matches rows written before targetKey
+  // existed, whose key was backfilled from the old clientKey.
   const [manual, setManual] = useState<CountedSpeaker[]>(() =>
     [...savedByTarget.entries()]
-      .filter(([targetKey]) => targetKey.startsWith('manual-'))
+      .filter(([targetKey]) => /^(ah-)?manual-/.test(targetKey))
       .map(([targetKey, record]) => ({
         id: targetKey,
         name: record.targetLabel ?? '',
@@ -207,6 +208,22 @@ export function AhCounterTab({
     Object.values(speaker.counts).reduce((sum, n) => sum + n, 0);
 
   /**
+   * What actually gets written for a speaker: every word with a count above
+   * zero, read straight off the tally.
+   *
+   * Deliberately NOT `fillerWords.map(...)`. That version only saved words
+   * still on the pad, so removing a word after counting it — or a tally
+   * rehydrated under a word the pad no longer showed — silently produced an
+   * empty list. `saveReport` then skipped that speaker while `anyCounted`,
+   * which reads the tally directly, still showed the Save button. Every
+   * speaker got skipped, the loop reported success, and nothing was stored.
+   */
+  const countsToSave = (speaker: CountedSpeaker) =>
+    Object.entries(speaker.counts)
+      .filter(([word, count]) => word.trim().length > 0 && count > 0)
+      .map(([word, count]) => ({ word, count }));
+
+  /**
    * One record per speaker, keyed by the speaker (`targetKey`) and stamped
    * with a fresh attempt key, so re-saving a corrected tally supersedes the
    * earlier one instead of being swallowed as a duplicate.
@@ -216,10 +233,9 @@ export function AhCounterTab({
     try {
       const result = await submitAction(
         async () => {
+          let written = 0;
           for (const speaker of speakers) {
-            const counts = fillerWords
-              .map((word) => ({ word, count: speaker.counts[word] ?? 0 }))
-              .filter((c) => c.count > 0);
+            const counts = countsToSave(speaker);
             if (counts.length === 0) continue;
             const res = await fetch(`/api/clubs/${clubUnitId}/meetings/${meetingId}/live-records`, {
               method: 'POST',
@@ -233,9 +249,19 @@ export function AhCounterTab({
               }),
             });
             if (!res.ok) {
-              throw new Error('Could not save the report — press Save again to retry.');
+              const body = (await res.json().catch(() => ({}))) as {
+                detail?: string;
+                message?: string;
+              };
+              throw new Error(
+                body.detail ?? body.message ?? 'Could not save the report — press Save to retry.',
+              );
             }
+            written += 1;
           }
+          // Never report success for a no-op: that is what hid this bug.
+          if (written === 0)
+            throw new Error('Nothing to save yet — count at least one word first.');
           return true;
         },
         {

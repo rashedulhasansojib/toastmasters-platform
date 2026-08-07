@@ -8,6 +8,20 @@ import { createPrismaClient, type PrismaClient } from '@toastmasters/db';
 // instead, which is apps/api (the vitest root) whenever this runs as a test.
 const DB_PACKAGE_DIR = resolve(process.cwd(), '../../packages/db');
 
+/**
+ * The role the app and the migrations run as.
+ *
+ * Deliberately NOT the image's `POSTGRES_USER`, which the postgres entrypoint
+ * creates as a **superuser** — and a superuser bypasses every privilege check,
+ * including the `REVOKE UPDATE, DELETE` that makes the ledger, audit, vote,
+ * attendance, inventory and live-record tables append-only (NFR-4). Running
+ * the suite as a superuser meant those REVOKEs were untested: a repository
+ * that tried to update an append-only row passed here and failed in
+ * production, where Neon's `neondb_owner` is not a superuser. This role
+ * matches production, so the append-only invariant is actually exercised.
+ */
+const APP_ROLE = 'app';
+
 async function start(): Promise<{ container: StartedTestContainer; url: string }> {
   const container = await new GenericContainer('postgres:16')
     .withEnvironment({
@@ -19,6 +33,24 @@ async function start(): Promise<{ container: StartedTestContainer; url: string }
     .withWaitStrategy(Wait.forListeningPorts())
     .start();
 
+  // Create the non-superuser owner and hand it the database, so `prisma
+  // migrate deploy` runs as the same role the app will use — which is what
+  // makes `REVOKE ... FROM CURRENT_USER` in a migration bind to that role.
+  const psql = (sql: string) =>
+    container.exec(['psql', '-U', 'test', '-d', 'test', '-v', 'ON_ERROR_STOP=1', '-c', sql]);
+  for (const sql of [
+    `CREATE ROLE "${APP_ROLE}" LOGIN PASSWORD '${APP_ROLE}' NOSUPERUSER NOCREATEDB NOCREATEROLE`,
+    `GRANT ALL ON DATABASE "test" TO "${APP_ROLE}"`,
+    `GRANT ALL ON SCHEMA public TO "${APP_ROLE}"`,
+    `ALTER SCHEMA public OWNER TO "${APP_ROLE}"`,
+    // Neon provisions extensions for us; create them as the superuser here so
+    // the app role never needs a privilege it does not have in production.
+    'CREATE EXTENSION IF NOT EXISTS ltree',
+  ]) {
+    const { exitCode, output } = await psql(sql);
+    if (exitCode !== 0) throw new Error(`test-db setup failed: ${sql}\n${output}`);
+  }
+
   // container.getHost() returns 'localhost', which Node's pg driver can resolve
   // to the IPv6 loopback (::1) first. On Windows + Docker Desktop that races
   // against the port-forwarding proxy and the connection is closed immediately
@@ -26,7 +58,7 @@ async function start(): Promise<{ container: StartedTestContainer; url: string }
   // `prisma migrate deploy` (a separate connection path) succeeds. Forcing the
   // literal IPv4 loopback sidesteps the resolution race.
   const host = container.getHost() === 'localhost' ? '127.0.0.1' : container.getHost();
-  const url = `postgresql://test:test@${host}:${container.getMappedPort(5432)}/test?schema=public`;
+  const url = `postgresql://${APP_ROLE}:${APP_ROLE}@${host}:${container.getMappedPort(5432)}/test?schema=public`;
 
   // Apply the committed migrations against the fresh container. prisma.config.ts
   // reads DIRECT_URL for migrations; set both so the pooled/direct split is moot here.
